@@ -1,4 +1,4 @@
-# Eye Refs
+# Eye Refs (beta)
 
 Reference boards for EyeStudio, in the spirit of PureRef, with video and shared projects through Google Drive.
 By Matte Black.

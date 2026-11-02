@@ -19,7 +19,7 @@
     const s = $('#screen');
     s.innerHTML = '';
     const card = el('div', { class: 'card' }, el('span', { class: 'logo', html: ICONS.logo.replace('width="14" height="14"', 'width="26" height="26"') }), build());
-    s.append(card, el('div', { class: 'credit', text: 'Eye Refs by Matte Black' }));
+    s.append(card, el('div', { class: 'credit', text: 'Eye Refs Beta by Matte Black' }));
     s.hidden = false;
     const f = s.querySelector('input'); if (f) f.focus();
   }
@@ -27,7 +27,7 @@
   function screenFor(r) {
     if (r.screen === 'no-drive') {
       screen(() => el('div', { style: 'display:contents' },
-        el('h1', { text: 'Eye Refs' }),
+        el('h1', { text: 'Eye Refs' }), el('span', { class: 'beta', text: 'Beta' }),
         el('p', { text: 'Eye Refs saves everything in Google Drive. Install Google Drive for desktop and sign in with your eyestudio.ae account.' }),
         el('div', { class: 'btns' },
           el('button', { class: 'btn', text: 'Get Google Drive for desktop', onclick: () => api.downloadDrive() }),

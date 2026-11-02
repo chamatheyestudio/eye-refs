@@ -329,7 +329,7 @@ function createWindow() {
     frame: false,
     backgroundColor: '#1C1B1A',
     show: false,
-    title: 'Eye Refs',
+    title: 'Eye Refs Beta',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
