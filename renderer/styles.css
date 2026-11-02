@@ -46,6 +46,7 @@ svg { display: block; }
 #canvas { position: fixed; inset: 0; overflow: hidden; background-color: var(--bg); cursor: default; outline: none; }
 #canvas.grid { background-image: radial-gradient(var(--dot) 1px, transparent 1.2px); }
 #canvas.panning, #canvas.tool-hand { cursor: grab; }
+#canvas.tool-pen { cursor: crosshair; }
 #canvas.panning:active { cursor: grabbing; }
 #canvas.crop-mode { cursor: crosshair; }
 #world { position: absolute; left: 0; top: 0; transform-origin: 0 0; will-change: transform; }
@@ -155,6 +156,23 @@ body.no-sidebar #title { left: 16px; padding-left: 4px; }
 /* Toolbar */
 #toolbar { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 2px; padding: 4px; z-index: 15; }
 body.has-sidebar #toolbar { left: calc(50% + 144px); }
+#penBar { position: fixed; bottom: 72px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 4px; padding: 4px 6px; height: 36px; z-index: 15; }
+body.has-sidebar #penBar { left: calc(50% + 144px); }
+#penBar .swatches, #penBar .sizes { display: flex; align-items: center; gap: 2px; }
+#penBar button { width: 28px; height: 28px; border-radius: 50%; border: 0; background: transparent; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
+#penBar button:hover { background: var(--hover); }
+#penBar .dot { display: block; border-radius: 50%; }
+#penBar .swatches .dot { width: 16px; height: 16px; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.18); }
+#penBar .swatches button.on .dot { box-shadow: 0 0 0 2px var(--bg-solid, #1c1b19), 0 0 0 3.5px var(--text); }
+#penBar .sizes .dot { background: var(--soft); }
+#penBar .sizes button.on { background: var(--hover); }
+#penBar .sizes button.on .dot { background: var(--text); }
+#penBar .sep { width: 1px; height: 18px; background: var(--line-strong); margin: 0 4px; }
+.item.draw { pointer-events: none; }
+.item.draw path { pointer-events: visibleStroke; }
+.item.draw .clip { overflow: visible; }
+.item.draw svg.media { position: absolute; left: 0; top: 0; overflow: visible; }
+#world svg.live { position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: visible; pointer-events: none; z-index: 100000; }
 #zoom { position: fixed; right: 16px; bottom: 16px; height: 48px; display: flex; align-items: center; gap: 2px; padding: 0 4px; z-index: 15; }
 #zoom .z-val { min-width: 48px; text-align: center; font: 500 12px var(--mono); color: var(--text); background: transparent; border: 0; cursor: pointer; height: 40px; border-radius: 999px; }
 #zoom .z-val:hover { background: var(--hover); }

@@ -301,10 +301,33 @@
   // ---------- toolbar ----------
   function syncToolbar() {
     $$('#toolbar [data-tool]').forEach((b) => b.classList.toggle('on', b.dataset.tool === B.tool));
+    $('#penBar').hidden = B.tool !== 'pen' || !S.current;
     $('#tTop').classList.toggle('on', S.alwaysOnTop);
     $('#tThrough').classList.toggle('on', S.clickThrough);
   }
   $$('#toolbar [data-tool]').forEach((b) => b.addEventListener('click', () => B.setTool(b.dataset.tool)));
+
+  // Pen: a few colours and three sizes, remembered on this computer
+  const PEN_COLORS = ['#D7F04A', '#F4F3EE', '#FF5A4E', '#4EA8FF', '#111111'];
+  const PEN_SIZES = [2, 4, 10];
+  try { Object.assign(B.pen, JSON.parse(localStorage.getItem('pen') || '{}')); } catch (_) {}
+  function drawPenBar() {
+    const colors = $('#penColors'), sizes = $('#penSizes');
+    colors.innerHTML = ''; sizes.innerHTML = '';
+    for (const c of PEN_COLORS) {
+      const b = el('button', { class: B.pen.color === c ? 'on' : '', 'aria-label': 'Colour', title: 'Colour' }, el('span', { class: 'dot', style: `background:${c}` }));
+      b.onclick = () => { B.pen.color = c; savePen(); };
+      colors.append(b);
+    }
+    PEN_SIZES.forEach((z, i) => {
+      const d = [4, 7, 11][i];
+      const b = el('button', { class: B.pen.size === z ? 'on' : '', 'aria-label': 'Size', title: ['Thin', 'Medium', 'Thick'][i] }, el('span', { class: 'dot', style: `width:${d}px;height:${d}px` }));
+      b.onclick = () => { B.pen.size = z; savePen(); };
+      sizes.append(b);
+    });
+  }
+  function savePen() { try { localStorage.setItem('pen', JSON.stringify(B.pen)); } catch (_) {} drawPenBar(); }
+  drawPenBar();
   const addDialog = async () => B.addPaths(await api.openImagesDialog());
   $('#tAddImage').addEventListener('click', addDialog);
   $('#tAddVideo').addEventListener('click', addDialog);
@@ -606,7 +629,7 @@
   }
 
   const SHORTCUTS = [
-    ['Board', [['Pan', 'Alt + drag, or middle mouse'], ['Zoom', 'Scroll, or hold Z and drag'], ['Move window', 'Right mouse drag'], ['Menu', 'Right click'], ['Focus image', 'Space'], ['Fit everything', 'Mod+Space'], ['Reset zoom', 'Mod+0'], ['Next or previous image', '→  ←'], ['Lock canvas', 'Mod+R'], ['Grid', 'G']]],
+    ['Board', [['Pan', 'Alt + drag, or middle mouse'], ['Zoom', 'Scroll, or hold Z and drag'], ['Move window', 'Right mouse drag'], ['Menu', 'Right click'], ['Focus image', 'Space'], ['Fit everything', 'Mod+Space'], ['Reset zoom', 'Mod+0'], ['Next or previous image', '→  ←'], ['Lock canvas', 'Mod+R'], ['Grid', 'G'], ['Draw', 'P']]],
     ['Items', [['Crop', 'Hold C and drag an edge'], ['Move inside crop', 'Hold V and drag'], ['Reset cropping', 'Mod+Shift+C'], ['Rotate', 'Mod + drag'], ['Scale', 'Mod+Alt + drag'], ['Flip', 'Alt+Shift+H  /  Alt+Shift+V'], ['Grayscale', 'Alt+G'], ['Reset transform', 'Mod+Shift+T'], ['Arrange optimal', 'Mod+P'], ['Align', 'Mod + arrows'], ['Normalize size', 'Mod+Alt + arrows'], ['Bring to front or back', '↑  ↓'], ['Lock item', 'Alt+L'], ['Duplicate', 'Mod+D'], ['Note', 'Mod+N'], ['Undo / Redo', 'Mod+Z  /  Mod+Shift+Z']]],
     ['Video', [['Play or pause', 'K'], ['Set start / end', 'I  /  O'], ['Step a frame', ',  .'], ['Grab frame', 'F'], ['Sound', 'M']]],
     ['Window', [['Always on top', 'Mod+Shift+A'], ['Click through', 'Mod+T'], ['See through', 'Mod+Shift+-  /  Mod+Shift+='], ['Lock window', 'Mod+W'], ['New board', 'Mod+K'], ['Save', 'Mod+S'], ['Search projects', 'Mod+Shift+P'], ['Add images', 'Mod+I']]],
@@ -689,6 +712,7 @@
     'Mod+Alt+Up': () => B.normalize('size'),
     'Mod+Alt+Down': () => B.normalize('scale'),
     'G': () => B.setGrid(!B.grid),
+    'P': () => B.setTool(B.tool === 'pen' ? 'select' : 'pen'),
     'Enter': () => { const ids = B.selIds(); if (ids.length === 1 && B.items.get(ids[0]).type === 'note') B.editNote(ids[0]); },
     'K': () => B.togglePlay(),
     'I': () => B.setInOut('in'),
@@ -727,7 +751,7 @@
     }
     const helpCombo = IS_MAC ? (e.ctrlKey && !e.metaKey && e.code === 'KeyH') : c === 'Mod+H';
     if (helpCombo) { e.preventDefault(); return shortcutsModal(); }
-    if (c === 'Escape') { if (S.clickThrough) return setThrough(false); B.clearSel(); return; }
+    if (c === 'Escape') { if (S.clickThrough) return setThrough(false); if (B.tool === 'pen') return B.setTool('select'); B.clearSel(); return; }
     const fn = actions[c];
     if (fn) { e.preventDefault(); fn(); }
   });

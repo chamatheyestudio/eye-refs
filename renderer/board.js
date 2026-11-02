@@ -3,6 +3,7 @@
   const { $, el, toast, openMenu, IS_MAC, fmtTime } = window.UI;
   const api = window.eyerefs;
   const ZC = { l: 0, t: 0, r: 0, b: 0 };
+  const SVGNS = 'http://www.w3.org/2000/svg';
   const MAX_PLACE = 1000; // longest side of a newly placed image, in board units
   const MIN_SIZE = 12;
 
@@ -36,6 +37,7 @@
     clip: null,
     clipMarker: null,
     onChange: () => {},
+    pen: { color: '#D7F04A', size: 4 },
   };
 
   // ---------- geometry ----------
@@ -136,6 +138,19 @@
     if (it.type === 'note') {
       node.classList.add('note');
       node.append(el('div', { class: 'note-text' }));
+    } else if (it.type === 'draw') {
+      node.classList.add('draw');
+      const clip = el('div', { class: 'clip' });
+      const svg = document.createElementNS(SVGNS, 'svg');
+      svg.setAttribute('class', 'media');
+      svg.setAttribute('preserveAspectRatio', 'none');
+      const path = document.createElementNS(SVGNS, 'path');
+      path.setAttribute('fill', 'none');
+      path.setAttribute('stroke-linecap', 'round');
+      path.setAttribute('stroke-linejoin', 'round');
+      svg.append(path);
+      clip.append(svg);
+      node.append(clip);
     } else {
       const clip = el('div', { class: 'clip' });
       if (it.type === 'video') {
@@ -190,6 +205,14 @@
       m.style.height = it.nh * d.k + 'px';
       m.style.left = -c.l * it.nw * d.k + 'px';
       m.style.top = -c.t * it.nh * d.k + 'px';
+      if (it.type === 'draw') {
+        m.setAttribute('viewBox', `0 0 ${it.nw} ${it.nh}`);
+        const path = m.firstChild;
+        if (path.dataset.pts !== it.pts) { path.dataset.pts = it.pts; path.setAttribute('d', strokePath(parsePts(it.pts))); }
+        path.setAttribute('stroke', it.color || '#D7F04A');
+        path.setAttribute('stroke-width', it.sw || 4);
+        return;
+      }
       const url = mediaUrl(it.src);
       if (m.dataset.src !== url && !node.classList.contains('missing')) { m.dataset.src = url; m.src = url; }
       if (it.type === 'video') m.playbackRate = it.speed || 1;
@@ -389,11 +412,24 @@
     if (B.tool === 'hand' || B.lockedCanvas || (e.altKey && !mod && !e.shiftKey) || (B.held.has(' ') && !hit)) {
       startGesture({ type: 'pan', v0: { ...B.view } }, e); canvas.classList.add('panning'); return;
     }
+    if (B.tool === 'pen' && !B.held.has('z')) {
+      if (!canEdit()) return;
+      const live = document.createElementNS(SVGNS, 'svg');
+      live.setAttribute('class', 'live');
+      const path = document.createElementNS(SVGNS, 'path');
+      const sw = B.pen.size / B.view.s;
+      path.setAttribute('fill', 'none'); path.setAttribute('stroke', B.pen.color); path.setAttribute('stroke-width', sw);
+      path.setAttribute('stroke-linecap', 'round'); path.setAttribute('stroke-linejoin', 'round');
+      live.append(path); world.append(live);
+      startGesture({ type: 'draw', live, path, sw, pts: [] }, e);
+      B.gesture.pts.push(B.gesture.w0);
+      return;
+    }
     if (B.held.has('z')) { startGesture({ type: 'zoomdrag', s0: B.view.s, anchor: { x: e.clientX, y: e.clientY }, v0: { ...B.view } }, e); return; }
 
     if (hit) {
       const hitItem = B.items.get(hit);
-      if ((B.held.has('c') || B.held.has('v')) && hitItem.type !== 'note' && canEdit()) {
+      if ((B.held.has('c') || B.held.has('v')) && hitItem.type !== 'note' && hitItem.type !== 'draw' && canEdit()) {
         B.sel = new Set([hit]);
         startGesture({ type: 'crop', id: hit, pan: B.held.has('v'), start: clone(hitItem), before: snapshot([hit], ['x', 'y', 'w', 'crop']) }, e);
         renderOverlay(); return;
@@ -422,6 +458,15 @@
       return;
     }
     const dxS = e.clientX - g.sx0, dyS = e.clientY - g.sy0;
+    if (g.type === 'draw') {
+      const p = toWorld(e.clientX, e.clientY);
+      const last = g.pts[g.pts.length - 1];
+      if (Math.hypot(p.x - last.x, p.y - last.y) * B.view.s < 1.5) return;
+      g.moved = true;
+      g.pts.push(p);
+      g.path.setAttribute('d', strokePath(g.pts));
+      return;
+    }
     if (!g.moved && Math.hypot(dxS, dyS) < 3) return;
     g.moved = true;
     const p = toWorld(e.clientX, e.clientY);
@@ -588,6 +633,10 @@
       case 'rotate':
         if (g.moved) commit(g.ids.map((id) => ({ id, fields: { rot: B.items.get(id).rot } })), g.before);
         break;
+      case 'draw':
+        g.live.remove();
+        if (g.pts.length > 1) finishStroke(g);
+        break;
       case 'crop':
         if (g.moved) { const it = B.items.get(g.id); commit([{ id: g.id, fields: { x: it.x, y: it.y, w: it.w, crop: it.crop } }], g.before); }
         break;
@@ -657,6 +706,37 @@
     const it = B.items.get(id);
     if (it && text !== (it.text || '')) commit([{ id, fields: { text } }]);
     renderOverlay();
+  }
+
+  // ---------- drawing ----------
+  // A stroke is an ordinary item: it moves, scales, rotates, syncs and undoes like an image.
+  function parsePts(s) {
+    const n = String(s || '').split(' ').map(Number);
+    const out = [];
+    for (let i = 0; i + 1 < n.length; i += 2) out.push({ x: n[i], y: n[i + 1] });
+    return out;
+  }
+  function strokePath(pts) {
+    if (!pts.length) return '';
+    if (pts.length < 3) return `M${pts[0].x} ${pts[0].y}` + pts.slice(1).map((p) => ` L${p.x} ${p.y}`).join('');
+    let d = `M${pts[0].x} ${pts[0].y}`;
+    for (let i = 1; i < pts.length - 1; i++) {
+      const mx = (pts[i].x + pts[i + 1].x) / 2, my = (pts[i].y + pts[i + 1].y) / 2;
+      d += ` Q${pts[i].x} ${pts[i].y} ${mx} ${my}`;
+    }
+    const l = pts[pts.length - 1];
+    return d + ` L${l.x} ${l.y}`;
+  }
+  function finishStroke(g) {
+    const pad = g.sw / 2 + 1;
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const p of g.pts) { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); }
+    x0 -= pad; y0 -= pad; x1 += pad; y1 += pad;
+    const r = (v) => Math.round(v * 10) / 10;
+    const pts = g.pts.map((p) => `${r(p.x - x0)} ${r(p.y - y0)}`).join(' ');
+    const nw = r(x1 - x0), nh = r(y1 - y0);
+    const id = uid();
+    commit([{ id, fields: { type: 'draw', pts, nw, nh, w: nw, x: x0, y: y0, sw: r(g.sw), color: B.pen.color, z: maxZ() + 1, rot: 0, deleted: false, created: Date.now(), addedBy: B.me.name } }]);
   }
 
   function addNote(at, text) {
@@ -1205,6 +1285,8 @@
   function setTool(t) {
     B.tool = t;
     canvas.classList.toggle('tool-hand', t === 'hand');
+    canvas.classList.toggle('tool-pen', t === 'pen');
+    if (t === 'pen') clearSel();
     B.onChange('tool');
   }
   function setGrid(on) { B.grid = on; canvas.classList.toggle('grid', on); }

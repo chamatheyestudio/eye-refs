@@ -52,6 +52,27 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await sleep(400);
   await win.screenshot({ path: `${OUT}/03a-video.png` });
   await win.evaluate(() => Board.clearSel());
+  // Draw: circle a detail, then an arrow in another colour
+  await win.keyboard.press('p');
+  await win.waitForSelector('#penBar:not([hidden])');
+  const circle = async (cx, cy, rx, ry) => {
+    await win.mouse.move(cx + rx, cy);
+    await win.mouse.down();
+    for (let a = 0; a <= Math.PI * 2.1; a += 0.12) await win.mouse.move(cx + Math.cos(a) * rx, cy + Math.sin(a) * ry * (1 + a * 0.02));
+    await win.mouse.up();
+  };
+  await circle(1110, 300, 95, 70);
+  await win.click('#penColors button:nth-child(2)');
+  await win.click('#penSizes button:nth-child(2)');
+  await win.mouse.move(980, 470); await win.mouse.down();
+  for (let i = 0; i <= 20; i++) await win.mouse.move(980 + i * 4.5, 470 - i * 6 + Math.sin(i / 3) * 4);
+  await win.mouse.up();
+  await win.mouse.move(1070, 350); await win.mouse.down(); await win.mouse.move(1072, 372); await win.mouse.move(1050, 368); await win.mouse.up();
+  await sleep(300);
+  await win.screenshot({ path: `${OUT}/03d-draw.png` });
+  const strokes = await win.evaluate(() => Board.live().filter((it) => it.type === 'draw').length);
+  console.log('strokes', strokes);
+  await win.keyboard.press('Escape');
 
   await win.screenshot({ path: `${OUT}/03b-untitled.png` });
   // Share asks for a name first, then saves into Documents/Eye Refs
