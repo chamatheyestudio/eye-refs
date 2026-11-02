@@ -1,9 +1,14 @@
 name: Build installers
 
+# Every push to main builds both installers and publishes them to the
+# GitHub release for the version in package.json (v1.0.0, v1.0.1, ...).
 on:
   workflow_dispatch:
   push:
-    tags: ['v*']
+    branches: [main]
+
+permissions:
+  contents: write
 
 jobs:
   mac:
@@ -14,7 +19,7 @@ jobs:
         with: { node-version: 22 }
       - run: npm ci
       - name: Apple Silicon build
-        run: npx electron-builder --mac dmg --arm64 --publish ${{ startsWith(github.ref, 'refs/tags/') && 'always' || 'never' }}
+        run: npx electron-builder --mac dmg --arm64 --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
@@ -22,7 +27,7 @@ jobs:
         run: |
           rm -f node_modules/ffmpeg-static/ffmpeg
           npm_config_arch=x64 node node_modules/ffmpeg-static/install.js
-          npx electron-builder --mac dmg --x64 --publish ${{ startsWith(github.ref, 'refs/tags/') && 'always' || 'never' }}
+          npx electron-builder --mac dmg --x64 --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
@@ -37,7 +42,7 @@ jobs:
         with: { node-version: 22 }
       - run: npm ci
       - run: npm test
-      - run: npx electron-builder --win nsis --x64 --publish ${{ startsWith(github.ref, 'refs/tags/') && 'always' || 'never' }}
+      - run: npx electron-builder --win nsis --x64 --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: actions/upload-artifact@v4

@@ -45,4 +45,4 @@ npm run dist:win  # Windows installer (on Windows, or Linux with Wine)
 npm run dist:mac  # Mac disk image (on a Mac)
 ```
 
-Pushing a tag like `v1.0.1` to GitHub builds both installers with the workflow in `.github/workflows/build.yml` and attaches them to a release.
+Every push to `main` builds both installers with `.github/workflows/build.yml` and publishes them to the GitHub release for the version in `package.json`. Bump the version for each new release so the app can update.
