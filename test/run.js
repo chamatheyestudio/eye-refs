@@ -101,55 +101,148 @@ async function test(name, fn) {
     assert.equal(cleanFolderName(nfd), 'Café'.normalize('NFC'));
   });
 
-  await test('session saves, merges two devices and survives a restart', async () => {
+  await test('local projects in Documents: create, merge two devices, survive a restart', async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'eyerefs-test-'));
     const lib = require('../main/library');
     const { Session } = require('../main/session');
-    const md = path.join(tmp, 'My Drive');
-    fs.mkdirSync(md, { recursive: true });
+    const root = path.join(tmp, 'Documents', 'Eye Refs');
     const chamath = { email: 'chamath@eyestudio.ae', name: 'Chamath', initials: 'CH', deviceKey: 'chamath-aaa111' };
-    const nousaiba = { email: 'nousaiba@eyestudio.ae', name: 'Nousaiba', initials: 'NO', deviceKey: 'nousaiba-bbb222' };
-    await lib.createTeam(md, chamath);
-    await lib.saveClients(md, chamath, ['Hutong', 'Jou Jou']);
-    await lib.ensureClientFolders(md, ['Hutong', 'Jou Jou']);
-    const rec = await lib.createProject(md, chamath, 'Spring Campaign', 'Hutong');
-    const rec2 = await lib.createProject(md, chamath, 'Spring Campaign', 'Hutong');
+    const mac2 = { ...chamath, deviceKey: 'chamath-bbb222' };
+    await lib.ensureClientFolders(root, ['Hutong', 'Jou Jou']);
+    const rec = await lib.createProject(root, chamath, 'Spring Campaign', 'Hutong');
+    const rec2 = await lib.createProject(root, chamath, 'Spring Campaign', 'Hutong');
     assert.notEqual(rec.dir, rec2.dir, 'second project with the same name gets its own folder');
-    assert.ok(fs.existsSync(rec.file) && rec.file.endsWith('.eyerefs'));
+    assert.ok(rec.file.endsWith(path.join('Hutong', 'Spring Campaign', 'Spring Campaign.eyerefs')));
 
     const noop = { state() {}, status() {}, presence() {} };
-    const s1 = new Session(rec, chamath, path.join(tmp, 'bk1'), noop);
-    const s2 = new Session({ ...rec, mine: false }, nousaiba, path.join(tmp, 'bk2'), noop);
+    let saved = 0;
+    const s1 = new Session(rec, chamath, path.join(tmp, 'bk1'), noop, { onSaved: () => saved++ });
+    const s2 = new Session(rec, mac2, path.join(tmp, 'bk2'), noop);
     await s1.open(); await s2.open();
     s1.write([{ id: 'a', fields: { src: 'a.jpg', x: 1 } }]);
     await s1.flush();
+    assert.equal(saved, 1, 'sync is told after each save');
     await s2.poll(true);
     s2.write([{ id: 'a', fields: { x: 42 } }, { id: 'b', fields: { src: 'b.jpg' } }]);
     await s2.flush();
     await s1.poll(true);
     const m = s1.merged();
     assert.equal(m.a.x, 42);
-    assert.equal(m.a.src, 'a.jpg');
     assert.equal(m.b.src, 'b.jpg');
-    const changes = fs.readdirSync(path.join(rec.dir, 'changes')).filter((f) => !f.startsWith('.'));
-    assert.deepEqual(changes.sort(), ['chamath-aaa111.json', 'nousaiba-bbb222.json']);
-    const here = await lib.presenceIn(rec.dir, chamath);
-    assert.equal(here.length, 1);
-    assert.equal(here[0].name, 'Nousaiba');
     await s1.close(); await s2.close();
-    assert.equal(fs.readdirSync(path.join(rec.dir, 'here')).filter((f) => !f.startsWith('.')).length, 0, 'presence notes removed on close');
 
-    // Lose the Drive copy: the local backup restores it
     fs.unlinkSync(path.join(rec.dir, 'changes', 'chamath-aaa111.json'));
     const s3 = new Session(rec, chamath, path.join(tmp, 'bk1'), noop);
     await s3.open();
-    assert.equal(s3.merged().a.src, 'a.jpg');
+    assert.equal(s3.merged().a.src, 'a.jpg', 'local backup restores a lost file');
     await s3.close();
-    assert.ok(fs.existsSync(path.join(rec.dir, 'changes', 'chamath-aaa111.json')), 'restored file written back to Drive');
+    assert.equal((await lib.scanProjects(root, chamath)).length, 2);
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
 
-    const scanned = await lib.scanProjects(md, nousaiba);
-    assert.equal(scanned.length, 2);
-    assert.ok(scanned.every((p) => p.client === 'Hutong' && p.owner.email === 'chamath@eyestudio.ae' && !p.mine));
+  await test('shared board: two people sync edits and media through the EyeStudio Drive', async () => {
+    const { createGas } = require('./gas-shim');
+    const { Cloud } = require('../main/cloud');
+    const { Sync } = require('../main/sync');
+    const lib = require('../main/library');
+    const { Session } = require('../main/session');
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'eyerefs-sync-'));
+    const gas = createGas(path.join(tmp, 'drive'), 'contact@eyestudio.ae');
+    const srv = await gas.listen();
+    const cleanup = [];
+    try {
+    const tokenFor = (email) => {
+      gas.call({ action: 'auth.request', email });
+      const m = [...gas.mail].reverse().find((x) => x.to === email);
+      return gas.call({ action: 'auth.verify', email, code: /code is (\d{6})/.exec(m.body)[1] }).data.token;
+    };
+    const tA = tokenFor('chamath@eyestudio.ae'), tB = tokenFor('nousaiba@eyestudio.ae');
+    const cloudA = new Cloud(() => srv.url, () => tA, fetch), cloudB = new Cloud(() => srv.url, () => tB, fetch);
+    const A = { email: 'chamath@eyestudio.ae', name: 'Chamath', initials: 'CH', deviceKey: 'chamath-aaa111' };
+    const Bm = { email: 'nousaiba@eyestudio.ae', name: 'Nousaiba', initials: 'NO', deviceKey: 'nousaiba-bbb222' };
+    const rootA = path.join(tmp, 'A', 'Eye Refs'), rootB = path.join(tmp, 'B', 'Eye Refs');
+
+    // Chamath makes a local board with a 13MB "video", then shares it
+    const recA = await lib.createProject(rootA, A, 'Spring Campaign', 'Hutong');
+    const big = Buffer.alloc(13 * 1024 * 1024 + 12345, 3); big.write('VIDEO', 0);
+    fs.writeFileSync(path.join(recA.dir, 'media', '2026-11-02_CH_aaaaaaaa_reel.mp4'), big);
+    const noop = { state() {}, status() {}, presence() {} };
+    const sA = new Session(recA, A, path.join(tmp, 'bkA'), noop);
+    await sA.open();
+    sA.write([{ id: 'i1', fields: { type: 'video', src: '2026-11-02_CH_aaaaaaaa_reel.mp4', x: 10 } }]);
+    await sA.flush();
+    await cloudA.call('projects.create', { id: recA.id, name: recA.name, client: recA.client });
+    await lib.updateProject(recA, { shared: { id: recA.id } });
+    recA.shared = { id: recA.id };
+    await cloudA.call('projects.invite', { id: recA.id, emails: ['nousaiba@eyestudio.ae'] });
+    const syncA = new Sync(cloudA, recA, A, { presence() {}, status() {} });
+    cleanup.push(() => syncA.stop(), () => sA.close());
+    await syncA.tick();
+    await syncA.settle();
+    const driveMedia = path.join(tmp, 'drive', 'Eye Refs', 'Hutong', 'Spring Campaign', 'media', '2026-11-02_CH_aaaaaaaa_reel.mp4');
+    assert.equal(fs.statSync(driveMedia).size, big.length, 'video uploaded in pieces to the same path in Drive');
+
+    // Nousaiba sees it, gets a local copy in her Documents and the video comes down
+    const list = await cloudB.call('projects.list');
+    assert.equal(list.length, 1);
+    const recB = await lib.createProject(rootB, Bm, list[0].name, list[0].client, { id: list[0].id, owner: { email: list[0].owner }, shared: { id: list[0].id } });
+    assert.ok(recB.dir.endsWith(path.join('Hutong', 'Spring Campaign')));
+    let hereB = [];
+    const syncB = new Sync(cloudB, recB, Bm, { presence: (l) => { hereB = l; }, status() {} });
+    cleanup.push(() => syncB.stop());
+    await syncB.tick();
+    await syncB.settle();
+    const gotB = fs.readFileSync(path.join(recB.dir, 'media', '2026-11-02_CH_aaaaaaaa_reel.mp4'));
+    assert.ok(gotB.equals(big), 'video arrives byte for byte');
+    const sB = new Session(recB, Bm, path.join(tmp, 'bkB'), noop, { onSaved: () => syncB.kick(0) });
+    await sB.open();
+    assert.equal(sB.merged().i1.x, 10, 'board arrives');
+    assert.equal(hereB.length, 1, 'Nousaiba sees Chamath is here');
+
+    // She moves it; Chamath gets the move
+    sB.write([{ id: 'i1', fields: { x: 99 } }]);
+    await sB.flush();
+    await syncB.tick();
+    await syncA.tick();
+    await sA.poll(true);
+    assert.equal(sA.merged().i1.x, 99);
+    assert.ok(!fs.readdirSync(path.join(recB.dir, 'media')).some((f) => f.includes('.part')), 'no half files left');
+
+    cleanup.push(() => syncA.stop(), () => syncB.stop(), () => sA.close(), () => sB.close());
+    } finally {
+      for (const c of cleanup) { try { await c(); } catch (_) {} }
+      srv.close();
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  await test('save as one file, then open it as a new copy', async () => {
+    const lib = require('../main/library');
+    const { pack, unpack, isPacked } = require('../main/pack');
+    const { Session } = require('../main/session');
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'eyerefs-pack-'));
+    const me = { email: 'chamath@eyestudio.ae', name: 'Chamath', initials: 'CH', deviceKey: 'chamath-aaa111' };
+    const rec = await lib.createProject(path.join(tmp, 'A'), me, 'Lunar New Year', 'Hutong');
+    fs.writeFileSync(path.join(rec.dir, 'media', '2026-11-02_CH_bbbbbbbb_lantern.jpg'), Buffer.alloc(50000, 9));
+    const s = new Session(rec, me, path.join(tmp, 'bk'), { state() {}, status() {}, presence() {} });
+    await s.open();
+    s.write([{ id: 'x', fields: { type: 'image', src: '2026-11-02_CH_bbbbbbbb_lantern.jpg', x: 5 } }]);
+    await s.close();
+    const out = path.join(tmp, 'Lunar New Year.eyerefs');
+    const r = await pack(rec, out);
+    assert.equal(r.files, 2);
+    assert.ok(await isPacked(out));
+    assert.ok(!(await isPacked(rec.file)), 'a live project file is not mistaken for a packed one');
+    const friend = { email: 'rami@freelancer.com', name: 'Rami', initials: 'RA', deviceKey: 'rami-ccc333' };
+    const projectFile = await unpack(out, path.join(tmp, 'B'), friend);
+    const rec2 = await lib.openProjectFile(projectFile, friend);
+    assert.notEqual(rec2.id, rec.id, 'opened as a new copy');
+    assert.equal(rec2.mine, true);
+    assert.ok(fs.existsSync(path.join(rec2.dir, 'media', '2026-11-02_CH_bbbbbbbb_lantern.jpg')));
+    const s2 = new Session(rec2, friend, path.join(tmp, 'bk2'), { state() {}, status() {}, presence() {} });
+    await s2.open();
+    assert.equal(s2.merged().x.x, 5, 'the board comes with it');
+    await s2.close();
     fs.rmSync(tmp, { recursive: true, force: true });
   });
 
@@ -184,5 +277,6 @@ async function test(name, fn) {
     fs.rmSync(tmp, { recursive: true, force: true });
   });
 
+  await require('./server.test.js')(test);
   console.log(`\n${passed} passed`);
 })();

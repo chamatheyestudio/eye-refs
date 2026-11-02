@@ -1,27 +1,25 @@
-// One open board. Keeps this device's change file, reads everyone else's,
-// writes the "I'm here" note and saves automatically.
+// One open board. Keeps this device's change file, reads everyone else's and saves
+// automatically. For shared boards, main/sync.js moves the change files to and from
+// the EyeStudio Drive and reports who else is here.
 const path = require('path');
 const fsp = require('fs').promises;
 const { writeJson, readJson, listDir, mtime, isWritable } = require('./fsutil');
 const { emptyDeviceFile, maxClock, mergeFiles, applyWrites } = require('../shared/merge');
-const { presenceIn } = require('./library');
 
 const SAVE_DELAY_MS = 700;
 const POLL_MS = 4000;
-const PRESENCE_MS = 60 * 1000;
 
 class Session {
-  constructor(record, me, backupDir, events) {
+  constructor(record, me, backupDir, events, opts = {}) {
+    this.opts = opts; // { onSaved() }
     this.rec = record;
     this.me = me;
     this.events = events; // { state(items), status(s), presence(list) }
     this.changesDir = path.join(record.dir, 'changes');
-    this.hereDir = path.join(record.dir, 'here');
     this.mediaDir = path.join(record.dir, 'media');
     this.ownName = `${me.deviceKey}.json`;
     this.ownPath = path.join(this.changesDir, this.ownName);
     this.backupPath = path.join(backupDir, `${record.id}.json`);
-    this.herePath = path.join(this.hereDir, `${me.deviceKey}.json`);
     this.others = new Map(); // filename -> { mtime, data }
     this.own = null;
     this.saveTimer = null;
@@ -37,7 +35,7 @@ class Session {
   }
 
   async open() {
-    for (const d of [this.changesDir, this.hereDir, this.mediaDir]) {
+    for (const d of [this.changesDir, this.mediaDir]) {
       try { await fsp.mkdir(d, { recursive: true }); } catch (_) {}
     }
     this.readOnly = !(await isWritable(this.changesDir));
@@ -58,8 +56,6 @@ class Session {
     if (this.needsRestoreSave && !this.readOnly) this.scheduleSave();
     this.setStatus(this.readOnly ? 'readonly' : 'saved');
     this.pollTimer = setInterval(() => this.poll(false).catch(() => {}), POLL_MS);
-    await this.heartbeat();
-    this.hereTimer = setInterval(() => this.heartbeat().catch(() => {}), PRESENCE_MS);
     return this.merged();
   }
 
@@ -98,17 +94,6 @@ class Session {
     }
     for (const k of [...this.others.keys()]) if (!seen.has(k)) this.others.delete(k);
     this.emitIfChanged(force);
-    await this.checkPresence(force);
-  }
-
-  // Who else has this board open. Read on every sync, sent on when it changes.
-  async checkPresence(force) {
-    const list = await presenceIn(this.rec.dir, this.me);
-    const key = list.map((h) => h.device).sort().join(',');
-    if (force || key !== this.lastHereKey) {
-      this.lastHereKey = key;
-      this.events.presence(list);
-    }
   }
 
   write(writes) {
@@ -135,6 +120,7 @@ class Session {
       try {
         await writeJson(this.ownPath, snapshot);
         if (!this.saveTimer) this.setStatus('saved');
+        if (this.opts.onSaved) this.opts.onSaved();
       } catch (e) {
         this.readOnly = !(await isWritable(this.changesDir));
         this.setStatus(this.readOnly ? 'readonly' : 'local');
@@ -154,22 +140,10 @@ class Session {
     this.events.status(s);
   }
 
-  async heartbeat() {
-    if (this.closed) return;
-    if (!this.readOnly) {
-      try {
-        await writeJson(this.herePath, { name: this.me.name, email: this.me.email, device: this.me.deviceKey, at: Date.now() });
-      } catch (_) {}
-    }
-    await this.checkPresence(false);
-  }
-
   async close() {
     this.closed = true;
     clearInterval(this.pollTimer);
-    clearInterval(this.hereTimer);
     await this.flush();
-    try { await fsp.unlink(this.herePath); } catch (_) {}
   }
 }
 

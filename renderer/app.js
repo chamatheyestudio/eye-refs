@@ -6,7 +6,8 @@
   fillIcons();
 
   const S = {
-    me: null, team: null, projects: [], current: null, status: 'saved', readOnly: false,
+    me: null, admin: false, teamMember: false, clients: [], online: true, cloud: null,
+    projects: [], current: null, status: 'saved', readOnly: false,
     here: [], filter: 'all', search: '', expanded: new Set(), sidebar: true,
     alwaysOnTop: false, clickThrough: false, lockedWindow: false,
   };
@@ -25,38 +26,18 @@
   }
 
   function screenFor(r) {
-    if (r.screen === 'no-drive') {
-      screen(() => el('div', { style: 'display:contents' },
-        el('h1', { text: 'Eye Refs' }), el('span', { class: 'beta', text: 'Beta' }),
-        el('p', { text: 'Eye Refs saves everything in Google Drive. Install Google Drive for desktop and sign in with your eyestudio.ae account.' }),
-        el('div', { class: 'btns' },
-          el('button', { class: 'btn', text: 'Get Google Drive for desktop', onclick: () => api.downloadDrive() }),
-          el('button', { class: 'btn ghost', text: 'Try again', onclick: start })),
-        el('button', { class: 'linkish', text: 'Choose my Drive folder myself', onclick: async () => route(await api.chooseDrive()) })));
-    } else if (r.screen === 'wrong-account') {
-      screen(() => el('div', { style: 'display:contents' },
-        el('h1', { text: 'Use your studio account' }),
-        el('p', { text: `Google Drive is signed in as ${(r.emails || []).join(', ') || 'another account'}. Add your eyestudio.ae account in Google Drive for desktop, then try again.` }),
-        el('div', { class: 'btns' }, el('button', { class: 'btn', text: 'Try again', onclick: start }))));
-    } else if (r.screen === 'who') {
-      const input = el('input', { class: 'input', type: 'email', placeholder: 'name@eyestudio.ae', id: 'whoEmail', 'aria-label': 'Your eyestudio.ae email' });
+    if (r.screen === 'connect') {
+      const input = el('input', { class: 'input', id: 'cLink', placeholder: 'https://script.google.com/macros/s/.../exec', 'aria-label': 'EyeStudio connection link', spellcheck: 'false' });
       const err = el('div', { class: 'err' });
-      const go = async () => { const res = await api.setIdentity(input.value.trim()); if (res && res.error) err.textContent = res.error; else route(res); };
+      const go = async () => { err.textContent = ''; const res = await api.connect(input.value); if (res && res.error) err.textContent = res.error; else route(res); };
       input.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
       screen(() => el('div', { style: 'display:contents' },
-        el('h1', { text: 'Eye Refs' }),
-        el('p', { text: 'Enter the eyestudio.ae email you use in Google Drive.' }),
+        el('h1', { text: 'Eye Refs' }), el('span', { class: 'beta', text: 'Beta' }),
+        el('p', { text: 'Paste the EyeStudio connection link. You only do this once.' }),
         input, err,
-        el('div', { class: 'btns' }, el('button', { class: 'btn', text: 'Continue', onclick: go }))));
-    } else if (r.screen === 'no-team') {
-      screen(() => el('div', { style: 'display:contents' },
-        el('h1', { text: 'Add the team folder' }),
-        el('ol', null,
-          el('li', { text: 'Open the email sharing "Eye Refs Team" with you.' }),
-          el('li', { text: 'Choose Add shortcut to Drive, then My Drive.' }),
-          el('li', { text: 'Come back and press Try again.' })),
-        el('div', { class: 'btns' }, el('button', { class: 'btn', text: 'Try again', onclick: start })),
-        el('button', { class: 'linkish', text: 'Set up a new team as admin', onclick: async () => route(await api.createTeam()) })));
+        el('div', { class: 'btns' }, el('button', { class: 'btn', text: 'Connect', onclick: go }))));
+    } else if (r.screen === 'signin') {
+      signInScreen(r.email || '');
     } else {
       screen(() => el('div', { style: 'display:contents' },
         el('h1', { text: 'Something went wrong' }),
@@ -65,12 +46,55 @@
     }
   }
 
+  function signInScreen(email) {
+    const input = el('input', { class: 'input', id: 'siEmail', type: 'email', value: email, placeholder: 'you@eyestudio.ae', 'aria-label': 'Email' });
+    const err = el('div', { class: 'err' });
+    const btn = el('button', { class: 'btn', text: 'Send me a code' });
+    const go = async () => {
+      err.textContent = '';
+      btn.disabled = true; btn.textContent = 'Sending';
+      const res = await api.requestCode(input.value);
+      btn.disabled = false; btn.textContent = 'Send me a code';
+      if (res && res.error) err.textContent = res.error; else codeScreen(input.value.trim().toLowerCase());
+    };
+    btn.onclick = go;
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
+    screen(() => el('div', { style: 'display:contents' },
+      el('h1', { text: 'Eye Refs' }), el('span', { class: 'beta', text: 'Beta' }),
+      el('p', { text: 'Sign in with your email. We send you a 6 digit code, no password.' }),
+      input, err, el('div', { class: 'btns' }, btn)));
+  }
+
+  function codeScreen(email) {
+    const code = el('input', { class: 'input', id: 'siCode', inputmode: 'numeric', maxlength: '6', placeholder: '6 digit code', 'aria-label': 'Code', style: 'text-align:center;letter-spacing:0.3em;font-size:18px' });
+    const guess = email.split('@')[0].split(/[._-]+/)[0];
+    const name = el('input', { class: 'input', id: 'siName', value: guess ? guess[0].toUpperCase() + guess.slice(1) : '', placeholder: 'Your name', 'aria-label': 'Your name', maxlength: '40' });
+    const err = el('div', { class: 'err' });
+    const btn = el('button', { class: 'btn', text: 'Sign in' });
+    const go = async () => {
+      err.textContent = '';
+      btn.disabled = true;
+      const res = await api.verifyCode(code.value, name.value.trim());
+      btn.disabled = false;
+      if (res && res.error) err.textContent = res.error; else route(res);
+    };
+    btn.onclick = go;
+    for (const i of [code, name]) i.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
+    screen(() => el('div', { style: 'display:contents' },
+      el('h1', { text: 'Check your email' }),
+      el('p', { text: `We sent a code to ${email}.` }),
+      code, name, err,
+      el('div', { class: 'btns' }, btn),
+      el('button', { class: 'linkish', text: 'Use a different email', onclick: () => signInScreen(email) })));
+  }
+
   async function start() { route(await api.boot()); }
 
   async function route(r) {
     if (!r || r.error || r.screen !== 'app') return screenFor(r || { error: 'No response' });
     $('#screen').hidden = true;
-    S.me = r.me; S.team = r.team; S.projects = r.projects;
+    S.me = r.me; S.projects = r.projects;
+    S.admin = !!r.admin; S.teamMember = !!r.team; S.clients = r.clients || []; S.online = r.online !== false;
     S.version = r.version || '';
     $$('.beta').forEach((b) => { b.title = versionLabel(); });
     B.me = r.me;
@@ -81,6 +105,7 @@
     setSidebar(r.prefs.sidebar, true);
     syncToolbar();
     renderSidebar();
+    if (!S.online) toast("Working offline. Shared boards will catch up when you're back online.");
     if (r.openFile) return openResult(await api.openProjectFile(r.openFile));
     if (S.current) return;
     const last = r.lastProject && S.projects.find((p) => p.id === r.lastProject);
@@ -95,7 +120,9 @@
     S.current = res.record;
     S.status = res.status;
     S.readOnly = res.readOnly;
-    S.here = res.record.here || [];
+    S.here = [];
+    S.cloud = null;
+    if (res.unpacked) toast(`Opened as your own copy in ${res.record.client}.`);
     if (!S.projects.find((p) => p.id === res.record.id)) S.projects.push(res.record);
     S.expanded.add(res.record.client);
     saveExpanded();
@@ -107,7 +134,7 @@
   async function rescan() {
     const r = await api.scan();
     if (!r || r.error) return;
-    S.team = r.team || S.team;
+    S.clients = r.clients || S.clients;
     S.projects = r.projects;
     if (S.current) {
       const cur = S.projects.find((p) => p.id === S.current.id);
@@ -131,11 +158,11 @@
     const q = S.search.trim().toLowerCase();
     const shown = S.projects.filter((p) => {
       if (S.filter === 'mine' && !p.mine) return false;
-      if (S.filter === 'shared' && p.mine) return false;
+      if (S.filter === 'shared' && !p.shared) return false;
       if (q && !(`${p.name} ${p.client} ${p.owner ? p.owner.name : ''}`.toLowerCase().includes(q))) return false;
       return true;
     });
-    const clients = [...new Set([...(S.team ? S.team.clients : []), ...S.projects.map((p) => p.client)])].sort((a, b) => a.localeCompare(b));
+    const clients = [...new Set([...(S.clients || []), ...S.projects.map((p) => p.client)])].sort((a, b) => a.localeCompare(b));
     for (const c of clients) {
       const list = shown.filter((p) => p.client === c).sort((a, b) => a.name.localeCompare(b.name));
       if ((q || S.filter !== 'all') && !list.length) continue;
@@ -151,10 +178,14 @@
       tree.append(row);
       if (!open) continue;
       for (const p of list) {
-        const n = others(p.here).length;
-        const meta = n
-          ? el('span', { class: 'meta here', html: ICONS.people + `<span>${n} here</span>` })
-          : !p.mine && p.owner ? el('span', { class: 'meta', text: `${p.owner.name}'s` }) : null;
+        const isCurrent = S.current && S.current.id === p.id;
+        const n = isCurrent ? others(S.here).length : 0;
+        let meta = null;
+        if (n) meta = el('span', { class: 'meta here', html: ICONS.people + `<span>${n} here</span>` });
+        else if (p.requests) meta = el('span', { class: 'meta here', text: p.requests === 1 ? '1 request' : `${p.requests} requests` });
+        else if (p.cloudOnly) meta = el('span', { class: 'meta', html: ICONS.cloud + '<span>Shared</span>' });
+        else if (!p.mine && p.owner) meta = el('span', { class: 'meta', text: `${p.owner.name}'s` });
+        else if (p.shared) meta = el('span', { class: 'meta', html: ICONS.people });
         const pr = el('button', { class: 'row project' + (S.current && S.current.id === p.id ? ' current' : ''), role: 'treeitem', title: p.mine ? p.name : `${p.name}, owned by ${p.owner ? p.owner.name : 'someone else'}` },
           el('span', { class: 'name', text: p.name }), meta);
         pr.addEventListener('click', async () => { if (!S.current || S.current.id !== p.id) openResult(await api.openProject(p.id)); });
@@ -171,20 +202,23 @@
     renderSidebar();
   }));
   $('#newProject').addEventListener('click', () => newProjectModal());
+  $('#joinBoard').addEventListener('click', () => joinModal());
   $('#hideSidebar').addEventListener('click', () => setSidebar(false));
   $('#showSidebar').addEventListener('click', () => setSidebar(true));
   $('#account').addEventListener('click', (e) => {
     const r = e.currentTarget.getBoundingClientRect();
-    const isAdmin = S.team && S.team.admin && S.team.admin.email === S.me.email;
     openMenu([
-      { label: 'Manage clients', onClick: manageClients, disabled: !isAdmin },
+      { label: 'Join a board', onClick: joinModal },
+      { label: 'Open a file', onClick: openFile },
+      { label: 'Save as one file', onClick: packCurrent, disabled: !S.current },
+      { label: 'Show in folder', onClick: () => api.reveal() },
+      '-',
+      { label: 'Manage clients', onClick: manageClients, disabled: !S.admin },
       { label: 'Keyboard shortcuts', key: IS_MAC ? 'Ctrl+H' : 'Mod+H', onClick: shortcutsModal },
       '-',
-      { label: 'Show project in folder', onClick: () => api.reveal(), disabled: !S.current },
-      { label: 'Choose Drive folder', onClick: async () => route(await api.chooseDrive()) },
-      '-',
+      { label: `Sign out ${S.me.email}`, onClick: async () => { S.current = null; B.unload(); route(await api.signOut()); } },
       { label: `Eye Refs ${versionLabel()}`, disabled: true },
-    ], r.left, r.top - 190);
+    ], r.left, r.top - 330);
   });
 
   // "1.0.0-beta.2" reads as "Version 1.0.0 beta 2"
@@ -218,8 +252,16 @@
     st.classList.remove('warn');
     if (S.readOnly || S.status === 'readonly') { st.innerHTML = ''; st.append(el('span', { html: ICONS.lock }), 'View only'); }
     else if (S.status === 'saving') { st.textContent = 'Saving'; }
-    else if (S.status === 'local') { st.textContent = 'Saved on this computer'; st.classList.add('warn'); st.title = "Couldn't reach your Drive folder. Your work is safe on this computer and will sync once Drive is back."; }
-    else { st.innerHTML = ICONS.check; st.append('Saved'); }
+    else if (S.status === 'local') { st.textContent = 'Saved on this computer'; st.classList.add('warn'); }
+    else if (p.shared && S.cloud && S.cloud.state === 'offline') { st.textContent = 'Saved here, will sync'; st.classList.add('warn'); st.title = S.cloud.message || ''; }
+    else if (p.shared && S.cloud && S.cloud.state === 'error') { st.textContent = 'Sync paused'; st.classList.add('warn'); st.title = S.cloud.message || ''; }
+    else if (p.shared && S.cloud && (S.cloud.up || S.cloud.down)) {
+      const parts = [];
+      if (S.cloud.down) parts.push(`${S.cloud.down} coming in`);
+      if (S.cloud.up) parts.push(`${S.cloud.up} going up`);
+      st.textContent = 'Syncing, ' + parts.join(', ');
+    }
+    else { st.innerHTML = ICONS.check; st.append(p.shared ? 'Synced' : 'Saved'); }
     renderPresence();
     for (const b of [$('#tAddImage'), $('#tAddVideo'), $('#tNote')]) b.disabled = S.readOnly;
   }
@@ -248,11 +290,7 @@
   }
 
   $('#tName').addEventListener('dblclick', () => { if (S.current && S.current.mine) renameModal(); });
-  $('#share').addEventListener('click', async () => {
-    const r = await api.share();
-    if (r && r.opened === 'folder') toast('Right click the project folder and choose Share with Google Drive.');
-    else if (r && r.opened === 'drive') toast('Opened in Google Drive. Add your teammates there with edit access.');
-  });
+  $('#share').addEventListener('click', () => shareModal());
   $('#wMin').addEventListener('click', () => api.minimize());
   $('#wMax').addEventListener('click', () => api.maximize());
   $('#wClose').addEventListener('click', () => api.close());
@@ -299,7 +337,8 @@
     { label: 'More see through', key: 'Mod+Shift+-', onClick: () => opacity(-0.1) },
     { label: 'Less see through', key: 'Mod+Shift+=', onClick: () => opacity(0.1) },
     '-',
-    { label: 'Share', onClick: () => $('#share').click(), disabled: S.readOnly },
+    { label: 'Share', onClick: () => shareModal(), disabled: S.readOnly },
+    { label: 'Save as one file', onClick: packCurrent },
     { label: 'Rename project', onClick: renameModal, disabled: !S.current || !S.current.mine },
     { label: 'Show in folder', onClick: () => api.reveal() },
     '-',
@@ -328,6 +367,17 @@
     renderPresence(); renderSidebar();
   });
   api.onOpenFile(async (file) => openResult(await api.openProjectFile(file)));
+  api.onCloud((st) => {
+    if (!S.current || st.projectId !== S.current.id) return;
+    S.cloud = st;
+    syncChrome();
+  });
+  api.onPackProgress((p) => {
+    const box = $('#jobs');
+    if (p.fraction >= 1) { box.hidden = true; return; }
+    $('#jobText').textContent = `Saving as one file ${Math.round(p.fraction * 100)}%`;
+    box.hidden = false;
+  });
   api.onClickThrough((on) => { S.clickThrough = on; document.body.classList.toggle('clickthrough', on); syncToolbar(); });
   api.onImportProgress((p) => {
     const box = $('#jobs');
@@ -341,17 +391,16 @@
 
   // ---------- dialogs ----------
   function newProjectModal(presetClient) {
-    const clients = S.team ? S.team.clients : [];
-    const isAdmin = S.team && S.team.admin && S.team.admin.email === S.me.email;
-    if (!clients.length) {
+    if (!S.clients.length && S.admin) {
       return openModal((close) => [
         el('h2', { text: 'No clients yet' }),
-        el('p', { text: isAdmin ? 'Add your clients first. Everyone in the studio picks from this list.' : `Ask ${S.team && S.team.admin ? S.team.admin.name : 'the admin'} to add clients to Eye Refs.` }),
+        el('p', { text: 'Add your clients first. Everyone in the studio picks from this list, so folders match on every computer.' }),
         el('div', { class: 'actions' },
           el('button', { class: 'btn ghost', text: 'Close', onclick: close }),
-          isAdmin ? el('button', { class: 'btn', text: 'Add clients', onclick: () => { close(); manageClients(); } }) : null),
+          el('button', { class: 'btn', text: 'Add clients', onclick: () => { close(); manageClients(); } })),
       ]);
     }
+    const clients = S.clients.length ? [...S.clients, ...(S.clients.includes('Other') ? [] : ['Other'])] : ['Other'];
     openModal((close) => {
       const name = el('input', { class: 'input', id: 'npName', placeholder: 'Spring Campaign', maxlength: '60' });
       const client = el('select', { class: 'input', id: 'npClient' }, clients.map((c) => el('option', { value: c, text: c, selected: c === (presetClient || (S.current && S.current.client)) })));
@@ -375,8 +424,113 @@
     });
   }
 
+  // Share: upload to the EyeStudio Drive, invite people, approve requests
+  async function shareModal() {
+    if (!S.current) return;
+    const p = S.current;
+    if (!S.online) return toast("You're offline. Sharing needs a connection.", true);
+    if (!p.shared && !S.teamMember) return toast('Only EyeStudio accounts can share boards.', true);
+    let data = p.shared ? await api.members(p.id) : null;
+    if (data && data.error) return toast(data.error, true);
+    openModal((close) => {
+      const box = el('div', { style: 'display:flex;flex-direction:column;gap:14px' });
+      const emails = el('input', { class: 'input', id: 'shEmails', placeholder: 'name@eyestudio.ae, another@email.com', spellcheck: 'false' });
+      const err = el('p', { style: 'color:#F2C9B8;font-size:12px' });
+      const parse = () => emails.value.split(/[\s,;]+/).map((x) => x.trim()).filter(Boolean);
+      const draw = () => {
+        box.innerHTML = '';
+        if (!p.shared) {
+          box.append(el('p', { text: `This uploads "${p.name}" to the EyeStudio Google Drive at Eye Refs / ${p.client} / ${p.name}. Everyone you invite gets a synced copy in their Documents folder.` }));
+          return;
+        }
+        const canManage = data.role !== 'member';
+        if (data.code && canManage) {
+          const copy = el('button', { class: 'btn ghost', style: 'height:32px;padding:0 12px', text: 'Copy' });
+          copy.onclick = async () => { try { await navigator.clipboard.writeText(data.code); toast('Join code copied'); } catch (_) { toast(`Join code: ${data.code}`); } };
+          box.append(el('div', { class: 'li', style: 'display:flex;align-items:center;gap:10px;padding:6px 6px 6px 14px;border-radius:14px;background:rgba(255,255,255,0.04)' },
+            el('span', { class: 'grow', style: 'flex:1', html: `Join code <b style="font-family:var(--mono);letter-spacing:0.12em;margin-left:6px">${data.code}</b>` }), copy));
+        }
+        if (data.requests && data.requests.length) {
+          box.append(el('div', { style: 'font-size:12px;color:var(--muted);font-weight:500', text: 'Asking to join' }));
+          const list = el('div', { class: 'list' });
+          for (const r of data.requests) {
+            list.append(el('div', { class: 'li' }, el('span', { class: 'grow', text: `${r.name}  ·  ${r.email}` }),
+              el('button', { class: 'btn ghost', style: 'height:32px;padding:0 12px', text: 'Decline', onclick: () => decide(r.email, false) }),
+              el('button', { class: 'btn lime', style: 'height:32px;padding:0 12px', text: 'Approve', onclick: () => decide(r.email, true) })));
+          }
+          box.append(list);
+        }
+        box.append(el('div', { style: 'font-size:12px;color:var(--muted);font-weight:500', text: 'People on this board' }));
+        const list = el('div', { class: 'list' });
+        for (const m of data.members) {
+          const remove = canManage && !m.owner ? el('button', { class: 'btn ghost', style: 'height:32px;padding:0 12px', text: 'Remove', onclick: () => removeMember(m.email) }) : null;
+          list.append(el('div', { class: 'li' }, el('span', { class: 'grow', text: `${m.name}  ·  ${m.email}` }), m.owner ? el('span', { class: 'kbd', style: 'padding-right:10px', text: 'Owner' }) : remove));
+        }
+        box.append(list);
+      };
+      const refresh = async () => { const d = await api.members(p.id); if (d && !d.error) { data = d; draw(); } };
+      const decide = async (email, allow) => { const r = await api.decide(p.id, email, allow); if (r && r.error) toast(r.error, true); await refresh(); rescan(); };
+      const removeMember = async (email) => { const r = await api.removeMember(p.id, email); if (r && r.error) toast(r.error, true); await refresh(); };
+      const btn = el('button', { class: 'btn', text: p.shared ? 'Invite' : 'Share board' });
+      btn.onclick = async () => {
+        err.textContent = '';
+        const list = parse();
+        if (p.shared && !list.length) { err.textContent = 'Add an email address.'; return; }
+        btn.disabled = true; btn.textContent = p.shared ? 'Inviting' : 'Uploading';
+        const r = p.shared ? await api.invite(p.id, list) : await api.share(p.id, list);
+        btn.disabled = false; btn.textContent = 'Invite';
+        if (r && r.error) { err.textContent = r.error; return; }
+        if (!p.shared) { p.shared = r.shared; data = r.members; toast(list.length ? 'Shared. Invites sent, and the board is uploading.' : 'Shared. The board is uploading to the EyeStudio Drive.'); }
+        else toast(list.length === 1 ? 'Invite sent' : `${list.length} invites sent`);
+        emails.value = '';
+        await refresh(); rescan(); syncChrome();
+      };
+      emails.addEventListener('keydown', (e) => { if (e.key === 'Enter') btn.click(); });
+      draw();
+      const canInvite = !data || data.role !== 'member';
+      return [
+        el('h2', { text: p.shared ? 'Share' : `Share "${p.name}"` }),
+        box,
+        canInvite ? el('div', { class: 'field' }, el('label', { for: 'shEmails', text: 'Invite by email' }), emails) : null,
+        err,
+        el('div', { class: 'actions' }, el('button', { class: 'btn ghost', text: 'Done', onclick: close }), canInvite ? btn : null),
+      ];
+    });
+  }
+
+  function joinModal() {
+    openModal((close) => {
+      const code = el('input', { class: 'input', id: 'jnCode', placeholder: 'ABC123', maxlength: '6', style: 'text-transform:uppercase;letter-spacing:0.2em;font-family:var(--mono)' });
+      const err = el('p', { style: 'color:#F2C9B8;font-size:12px' });
+      const go = async () => {
+        err.textContent = '';
+        const r = await api.join(code.value.trim());
+        if (r && r.error) { err.textContent = r.error; return; }
+        close();
+        toast(r.already ? `You're already on "${r.name}".` : `Request sent to ${r.owner}. "${r.name}" appears here once they approve.`);
+        rescan();
+      };
+      code.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
+      return [el('h2', { text: 'Join a board' }), el('p', { text: 'Enter the join code from whoever shared the board. They approve your request, then it appears in your sidebar.' }), code, err,
+        el('div', { class: 'actions' }, el('button', { class: 'btn ghost', text: 'Cancel', onclick: close }), el('button', { class: 'btn', text: 'Send request', onclick: go }))];
+    });
+  }
+
+  async function openFile() {
+    const f = await api.openFileDialog();
+    if (f) openResult(await api.openProjectFile(f));
+  }
+
+  async function packCurrent() {
+    if (!S.current) return;
+    const r = await api.packProject(S.current.id);
+    $('#jobs').hidden = true;
+    if (r && r.error) return toast(r.error, true);
+    if (r && r.file) toast(`Saved as one file with ${r.files} items. Send it anywhere.`);
+  }
+
   function manageClients() {
-    let list = [...(S.team ? S.team.clients : [])];
+    let list = [...(S.clients || [])];
     openModal((close) => {
       const box = el('div', { class: 'list' });
       const draw = () => {
@@ -391,7 +545,7 @@
       const save = async () => {
         const r = await api.saveClients(list);
         if (r && r.error) return toast(r.error, true);
-        S.team = r; close(); renderSidebar(); toast('Client list saved');
+        S.clients = r.clients; close(); renderSidebar(); toast('Client list saved');
       };
       return [
         el('h2', { text: 'Clients' }),

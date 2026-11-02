@@ -208,14 +208,15 @@
     const it = B.items.get(id);
     const node = B.els.get(id);
     if (!it || !node || node.classList.contains('missing')) return;
-    const there = await api.mediaExists(B.project.id, it.src);
+    const state = await api.mediaState(B.project.id, it.src);
     node.classList.add('missing');
     const clip = node.querySelector('.clip');
     const m = clip.querySelector('.media');
     if (m) m.style.display = 'none';
     let label = clip.querySelector('.missing-label');
     if (!label) { label = el('div', { class: 'missing-label' }); clip.append(label); }
-    label.textContent = there ? `Can't show this file yet\n${it.original || it.src}` : `Missing\n${it.original || it.src}`;
+    const name = it.original || it.src;
+    label.textContent = state === 'downloading' ? `Downloading\n${name}` : state === 'here' ? `Can't show this file\n${name}` : `Missing\n${name}`;
     label.style.whiteSpace = 'pre-line';
   }
 
@@ -224,7 +225,7 @@
     for (const [id, node] of B.els) {
       if (!node.classList.contains('missing')) continue;
       const it = B.items.get(id);
-      if (!it || !B.project || !(await api.mediaExists(B.project.id, it.src))) continue;
+      if (!it || !B.project || (await api.mediaState(B.project.id, it.src)) !== 'here') { if (it && B.project) { node.classList.remove('missing'); markMissing(id); } continue; }
       node.classList.remove('missing');
       const m = node.querySelector('.media');
       const lab = node.querySelector('.missing-label');
@@ -232,7 +233,7 @@
       if (m) { m.style.display = ''; m.dataset.src = ''; }
       updateEl(node, it);
     }
-  }, 10000);
+  }, 4000);
 
   function render() {
     const seen = new Set();

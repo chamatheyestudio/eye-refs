@@ -5,31 +5,17 @@ By Matte Black.
 
 ## How it saves
 
-Everything lives in Google Drive for desktop. Nothing goes to any other server.
+* **Your projects stay on your computer** in `Documents/Eye Refs/<Client>/<Project>/`. Nothing leaves your machine unless you share it.
+* **Save as one file** packs a board with all its images and videos into one `.eyerefs` file to send anywhere, like a PureRef file. Opening it makes your own copy.
+* **Sharing** uploads the board to the EyeStudio Google Drive at the same path, `Eye Refs/<Client>/<Project>/`, through the Apps Script in `server/`. Everyone on the board gets a synced copy in their own Documents folder.
+* Sign in is by email with a 6 digit code. Anyone can be invited or ask to join with the board's join code; the owner approves.
+* Each computer only writes its own change file, and the app merges everyone's, so nothing is ever overwritten.
+* Media names look like `2026-11-02_CH_k7f3xa9p_lantern-reel.jpg`, and originals are never edited.
+* Videos over 500MB, or in formats the board can't play, get one high quality H.264 copy.
 
-```
-My Drive/
-  Eye Refs Team/clients.json     the client list, kept in the admin's Drive and shared with the studio
-  Eye Refs/
-    Hutong/
-      Spring Campaign/
-        Spring Campaign.eyerefs  double click to open
-        media/                   every image and video, with a unique name
-        changes/                 one file per person per computer
-        here/                    "I'm here" notes, refreshed every minute
-```
+## Server
 
-* Each computer only ever writes its own change file, and the app merges everyone's. Drive never has two people saving one file.
-* Saves go to a temporary file first and are then swapped in, so Drive never uploads half a file. A backup copy also stays on the computer.
-* Media names look like `2026-11-02_CH_k7f3xa9p_lantern-reel.jpg`, so files never overwrite each other. Originals are never edited.
-* Videos over 500MB, or in formats the board can't play, get one high quality H.264 copy (resolution kept up to 4K).
-
-## First run
-
-1. Install Google Drive for desktop and sign in with an eyestudio.ae account.
-2. Admin: open Eye Refs, choose "Set up a new team as admin", add the clients, then share the `Eye Refs Team` folder in Drive with the studio (view access).
-3. Everyone else: open the share email, choose Add shortcut to Drive, put it in My Drive, then open Eye Refs.
-4. To share a project, press Share and give teammates edit access. They add a shortcut to it once, in the matching client folder.
+`server/Code.gs` runs as an Apps Script web app in the EyeStudio Google account (Execute as: Me, Access: Anyone). It keeps every shared board in that account's Drive and sends sign in codes from its Gmail. `chamath@eyestudio.ae` is the admin.
 
 ## Shortcuts
 
