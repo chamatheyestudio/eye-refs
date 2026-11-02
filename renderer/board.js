@@ -37,7 +37,7 @@
     clip: null,
     clipMarker: null,
     onChange: () => {},
-    pen: { color: '#D7F04A', size: 4 },
+    pen: { color: '#D7F04A', size: 4, style: 'solid' },
   };
 
   // ---------- geometry ----------
@@ -104,9 +104,16 @@
     }
   }
 
+  // Writes the main process hasn't confirmed yet. A board update that left before
+  // them must not wipe them, so they are laid back on top until confirmed.
+  const unconfirmed = new Set();
   function send(changes) {
     const writes = changes.map((c) => ({ id: c.id, fields: { ...c.fields, by: B.me.name } }));
-    api.write(B.project.id, writes).then((r) => { if (r && r.readOnly) { B.readOnly = true; B.onChange('readonly'); } });
+    unconfirmed.add(writes);
+    api.write(B.project.id, writes).then((r) => {
+      unconfirmed.delete(writes);
+      if (r && r.readOnly) { B.readOnly = true; B.onChange('readonly'); }
+    });
   }
 
   // changes: [{ id, fields }]; before: optional snapshot taken at gesture start
@@ -208,9 +215,11 @@
       if (it.type === 'draw') {
         m.setAttribute('viewBox', `0 0 ${it.nw} ${it.nh}`);
         const path = m.firstChild;
-        if (path.dataset.pts !== it.pts) { path.dataset.pts = it.pts; path.setAttribute('d', strokePath(parsePts(it.pts))); }
+        const key = it.pts + (it.style || '');
+        if (path.dataset.key !== key) { path.dataset.key = key; path.setAttribute('d', strokePath(parsePts(it.pts), it.style === 'arrow' ? (it.sw || 4) : 0)); }
         path.setAttribute('stroke', it.color || '#D7F04A');
         path.setAttribute('stroke-width', it.sw || 4);
+        if (it.style === 'dotted') path.setAttribute('stroke-dasharray', `0 ${(it.sw || 4) * 2}`); else path.removeAttribute('stroke-dasharray');
         return;
       }
       const url = mediaUrl(it.src);
@@ -412,6 +421,12 @@
     if (B.tool === 'hand' || B.lockedCanvas || (e.altKey && !mod && !e.shiftKey) || (B.held.has(' ') && !hit)) {
       startGesture({ type: 'pan', v0: { ...B.view } }, e); canvas.classList.add('panning'); return;
     }
+    if (B.tool === 'eraser' && !B.held.has('z')) {
+      if (!canEdit()) return;
+      startGesture({ type: 'erase', ids: new Set(), before: [] }, e);
+      eraseAt(B.gesture, e.clientX, e.clientY);
+      return;
+    }
     if (B.tool === 'pen' && !B.held.has('z')) {
       if (!canEdit()) return;
       const live = document.createElementNS(SVGNS, 'svg');
@@ -420,6 +435,7 @@
       const sw = B.pen.size / B.view.s;
       path.setAttribute('fill', 'none'); path.setAttribute('stroke', B.pen.color); path.setAttribute('stroke-width', sw);
       path.setAttribute('stroke-linecap', 'round'); path.setAttribute('stroke-linejoin', 'round');
+      if (B.pen.style === 'dotted') path.setAttribute('stroke-dasharray', `0 ${sw * 2}`);
       live.append(path); world.append(live);
       startGesture({ type: 'draw', live, path, sw, pts: [] }, e);
       B.gesture.pts.push(B.gesture.w0);
@@ -464,9 +480,10 @@
       if (Math.hypot(p.x - last.x, p.y - last.y) * B.view.s < 1.5) return;
       g.moved = true;
       g.pts.push(p);
-      g.path.setAttribute('d', strokePath(g.pts));
+      g.path.setAttribute('d', strokePath(g.pts, B.pen.style === 'arrow' ? g.sw : 0));
       return;
     }
+    if (g.type === 'erase') { eraseAt(g, e.clientX, e.clientY); return; }
     if (!g.moved && Math.hypot(dxS, dyS) < 3) return;
     g.moved = true;
     const p = toWorld(e.clientX, e.clientY);
@@ -633,6 +650,9 @@
       case 'rotate':
         if (g.moved) commit(g.ids.map((id) => ({ id, fields: { rot: B.items.get(id).rot } })), g.before);
         break;
+      case 'erase':
+        if (g.ids.size) commit([...g.ids].map((id) => ({ id, fields: { deleted: true } })), [...g.ids].map((id) => ({ id, fields: { deleted: false } })));
+        break;
       case 'draw':
         g.live.remove();
         if (g.pts.length > 1) finishStroke(g);
@@ -716,8 +736,18 @@
     for (let i = 0; i + 1 < n.length; i += 2) out.push({ x: n[i], y: n[i + 1] });
     return out;
   }
-  function strokePath(pts) {
+  function strokePath(pts, arrow) {
     if (!pts.length) return '';
+    if (arrow && pts.length > 1) {
+      // Head points back along the last stretch of the line
+      const tip = pts[pts.length - 1];
+      let back = pts[0];
+      for (let i = pts.length - 2; i >= 0; i--) { if (Math.hypot(tip.x - pts[i].x, tip.y - pts[i].y) > arrow * 4) { back = pts[i]; break; } }
+      const a = Math.atan2(tip.y - back.y, tip.x - back.x), L = arrow * 4.5;
+      const h1 = { x: tip.x - L * Math.cos(a - 0.5), y: tip.y - L * Math.sin(a - 0.5) };
+      const h2 = { x: tip.x - L * Math.cos(a + 0.5), y: tip.y - L * Math.sin(a + 0.5) };
+      return strokePath(pts) + ` M${h1.x} ${h1.y} L${tip.x} ${tip.y} L${h2.x} ${h2.y}`;
+    }
     if (pts.length < 3) return `M${pts[0].x} ${pts[0].y}` + pts.slice(1).map((p) => ` L${p.x} ${p.y}`).join('');
     let d = `M${pts[0].x} ${pts[0].y}`;
     for (let i = 1; i < pts.length - 1; i++) {
@@ -728,7 +758,7 @@
     return d + ` L${l.x} ${l.y}`;
   }
   function finishStroke(g) {
-    const pad = g.sw / 2 + 1;
+    const pad = g.sw / 2 + 1 + (B.pen.style === 'arrow' ? g.sw * 4.5 : 0);
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
     for (const p of g.pts) { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); }
     x0 -= pad; y0 -= pad; x1 += pad; y1 += pad;
@@ -736,7 +766,49 @@
     const pts = g.pts.map((p) => `${r(p.x - x0)} ${r(p.y - y0)}`).join(' ');
     const nw = r(x1 - x0), nh = r(y1 - y0);
     const id = uid();
-    commit([{ id, fields: { type: 'draw', pts, nw, nh, w: nw, x: x0, y: y0, sw: r(g.sw), color: B.pen.color, z: maxZ() + 1, rot: 0, deleted: false, created: Date.now(), addedBy: B.me.name } }]);
+    commit([{ id, fields: { type: 'draw', pts, nw, nh, w: nw, x: x0, y: y0, sw: r(g.sw), color: B.pen.color, style: B.pen.style, z: maxZ() + 1, rot: 0, deleted: false, created: Date.now(), addedBy: B.me.name } }]);
+  }
+
+  // Eraser: anything drawn that the pointer passes over goes, as one undo step
+  // Checked along the whole pointer path, so a fast swipe still catches thin lines.
+  function eraseAt(g, cx, cy) {
+    const from = g.last || { x: cx, y: cy };
+    g.last = { x: cx, y: cy };
+    const steps = Math.max(1, Math.ceil(Math.hypot(cx - from.x, cy - from.y) / 3));
+    const strokes = live().filter((it) => it.type === 'draw' && !g.ids.has(it.id));
+    for (let s = 0; s <= steps && strokes.length; s++) {
+      const p = toWorld(from.x + (cx - from.x) * (s / steps), from.y + (cy - from.y) * (s / steps));
+      for (let i = strokes.length - 1; i >= 0; i--) {
+        const it = strokes[i];
+        if (!strokeHit(it, p, 6 / B.view.s)) continue;
+        g.ids.add(it.id);
+        const node = B.els.get(it.id);
+        if (node) node.style.opacity = '0.25';
+        strokes.splice(i, 1);
+      }
+    }
+  }
+  function strokeHit(it, p, tol) {
+    const k = it.w / it.nw;
+    const h = it.nh * k;
+    // Into the stroke's own space: undo rotation about its centre, then scale and flips
+    const cx = it.x + it.w / 2, cy = it.y + h / 2;
+    const a = -(it.rot || 0) * Math.PI / 180;
+    const dx = p.x - cx, dy = p.y - cy;
+    let lx = (dx * Math.cos(a) - dy * Math.sin(a) + it.w / 2) / k;
+    let ly = (dx * Math.sin(a) + dy * Math.cos(a) + h / 2) / k;
+    if (it.flipX) lx = it.nw - lx;
+    if (it.flipY) ly = it.nh - ly;
+    const r = (it.sw || 4) / 2 + tol / k;
+    if (lx < -r || ly < -r || lx > it.nw + r || ly > it.nh + r) return false;
+    const pts = parsePts(it.pts);
+    for (let i = 0; i < pts.length - 1; i++) {
+      const A = pts[i], Bp = pts[i + 1];
+      const vx = Bp.x - A.x, vy = Bp.y - A.y;
+      const t = Math.max(0, Math.min(1, ((lx - A.x) * vx + (ly - A.y) * vy) / (vx * vx + vy * vy || 1)));
+      if (Math.hypot(lx - (A.x + t * vx), ly - (A.y + t * vy)) <= r) return true;
+    }
+    return false;
   }
 
   function addNote(at, text) {
@@ -1188,6 +1260,9 @@
       }
       if (B.editingId === id) n.text = old ? old.text : n.text;
     }
+    for (const writes of unconfirmed) {
+      for (const w of writes) merged[w.id] = { ...(merged[w.id] || { id: w.id }), ...w.fields };
+    }
     B.items = new Map(Object.entries(merged));
     render();
   }
@@ -1239,7 +1314,7 @@
         '-',
         { label: 'Bring to front', key: '↑', onClick: front, disabled: !ed },
         { label: 'Send to back', key: '↓', onClick: back, disabled: !ed },
-        { label: 'Duplicate', key: 'Mod+D', onClick: duplicate, disabled: !ed },
+        { label: 'Duplicate', onClick: duplicate, disabled: !ed },
         { label: 'Copy', key: 'Mod+C', onClick: () => copySelection(false) },
         { label: 'Delete', key: 'Del', onClick: deleteSelection, disabled: !ed },
         '-');
@@ -1261,6 +1336,7 @@
 
   // ---------- load / unload ----------
   function load(p) {
+    unconfirmed.clear();
     unload();
     B.project = p.record;
     B.mediaBase = p.mediaBase;
@@ -1286,7 +1362,8 @@
     B.tool = t;
     canvas.classList.toggle('tool-hand', t === 'hand');
     canvas.classList.toggle('tool-pen', t === 'pen');
-    if (t === 'pen') clearSel();
+    canvas.classList.toggle('tool-eraser', t === 'eraser');
+    if (t === 'pen' || t === 'eraser') clearSel();
     B.onChange('tool');
   }
   function setGrid(on) { B.grid = on; canvas.classList.toggle('grid', on); }

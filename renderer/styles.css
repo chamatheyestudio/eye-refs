@@ -158,7 +158,11 @@ body.no-sidebar #title { left: 16px; padding-left: 4px; }
 body.has-sidebar #toolbar { left: calc(50% + 144px); }
 #penBar { position: fixed; bottom: 72px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 4px; padding: 4px 6px; height: 36px; z-index: 15; }
 body.has-sidebar #penBar { left: calc(50% + 144px); }
-#penBar .swatches, #penBar .sizes { display: flex; align-items: center; gap: 2px; }
+#penBar .swatches, #penBar .sizes, #penBar .styles { display: flex; align-items: center; gap: 2px; }
+#penBar .styles button, #penBar .tool { color: var(--soft); }
+#penBar .styles button svg, #penBar .tool svg { width: 15px; height: 15px; }
+#penBar .styles button.on, #penBar .tool.on { background: var(--hover); color: var(--text); }
+#canvas.tool-eraser { cursor: cell; }
 #penBar button { width: 28px; height: 28px; border-radius: 50%; border: 0; background: transparent; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
 #penBar button:hover { background: var(--hover); }
 #penBar .dot { display: block; border-radius: 50%; }

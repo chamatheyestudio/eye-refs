@@ -301,7 +301,10 @@
   // ---------- toolbar ----------
   function syncToolbar() {
     $$('#toolbar [data-tool]').forEach((b) => b.classList.toggle('on', b.dataset.tool === B.tool));
-    $('#penBar').hidden = B.tool !== 'pen' || !S.current;
+    $('#penBar').hidden = !['pen', 'eraser'].includes(B.tool) || !S.current;
+    $$('#toolbar [data-tool="pen"]').forEach((b) => b.classList.toggle('on', B.tool === 'pen' || B.tool === 'eraser'));
+    $('#penEraser').classList.toggle('on', B.tool === 'eraser');
+    drawPenBar();
     $('#tTop').classList.toggle('on', S.alwaysOnTop);
     $('#tThrough').classList.toggle('on', S.clickThrough);
   }
@@ -311,18 +314,29 @@
   const PEN_COLORS = ['#D7F04A', '#F4F3EE', '#FF5A4E', '#4EA8FF', '#111111'];
   const PEN_SIZES = [2, 4, 10];
   try { Object.assign(B.pen, JSON.parse(localStorage.getItem('pen') || '{}')); } catch (_) {}
+  const PEN_STYLES = [['solid', 'Solid (1)'], ['dotted', 'Dotted (2)'], ['arrow', 'Arrow (3)']];
+  const drawing = () => B.tool === 'pen' || B.tool === 'eraser';
+  const toggleDraw = () => B.setTool(drawing() ? 'select' : 'pen');
+  const penStyle = (st) => { B.pen.style = st; B.setTool('pen'); savePen(); };
+  const nextColor = () => { B.pen.color = PEN_COLORS[(PEN_COLORS.indexOf(B.pen.color) + 1) % PEN_COLORS.length]; savePen(); toast('Pen colour changed'); };
+  $('#penEraser').addEventListener('click', () => B.setTool(B.tool === 'eraser' ? 'pen' : 'eraser'));
   function drawPenBar() {
-    const colors = $('#penColors'), sizes = $('#penSizes');
-    colors.innerHTML = ''; sizes.innerHTML = '';
+    const colors = $('#penColors'), sizes = $('#penSizes'), styles = $('#penStyles');
+    colors.innerHTML = ''; sizes.innerHTML = ''; styles.innerHTML = '';
+    for (const [st, label] of PEN_STYLES) {
+      const b = el('button', { class: B.pen.style === st && B.tool === 'pen' ? 'on' : '', 'aria-label': label, title: label, html: ICONS[st] });
+      b.onclick = () => penStyle(st);
+      styles.append(b);
+    }
     for (const c of PEN_COLORS) {
       const b = el('button', { class: B.pen.color === c ? 'on' : '', 'aria-label': 'Colour', title: 'Colour' }, el('span', { class: 'dot', style: `background:${c}` }));
-      b.onclick = () => { B.pen.color = c; savePen(); };
+      b.onclick = () => { B.pen.color = c; if (B.tool === 'eraser') B.setTool('pen'); savePen(); };
       colors.append(b);
     }
     PEN_SIZES.forEach((z, i) => {
       const d = [4, 7, 11][i];
       const b = el('button', { class: B.pen.size === z ? 'on' : '', 'aria-label': 'Size', title: ['Thin', 'Medium', 'Thick'][i] }, el('span', { class: 'dot', style: `width:${d}px;height:${d}px` }));
-      b.onclick = () => { B.pen.size = z; savePen(); };
+      b.onclick = () => { B.pen.size = z; if (B.tool === 'eraser') B.setTool('pen'); savePen(); };
       sizes.append(b);
     });
   }
@@ -629,10 +643,12 @@
   }
 
   const SHORTCUTS = [
-    ['Board', [['Pan', 'Alt + drag, or middle mouse'], ['Zoom', 'Scroll, or hold Z and drag'], ['Move window', 'Right mouse drag'], ['Menu', 'Right click'], ['Focus image', 'Space'], ['Fit everything', 'Mod+Space'], ['Reset zoom', 'Mod+0'], ['Next or previous image', '→  ←'], ['Lock canvas', 'Mod+R'], ['Grid', 'G'], ['Draw', 'P']]],
-    ['Items', [['Crop', 'Hold C and drag an edge'], ['Move inside crop', 'Hold V and drag'], ['Reset cropping', 'Mod+Shift+C'], ['Rotate', 'Mod + drag'], ['Scale', 'Mod+Alt + drag'], ['Flip', 'Alt+Shift+H  /  Alt+Shift+V'], ['Grayscale', 'Alt+G'], ['Reset transform', 'Mod+Shift+T'], ['Arrange optimal', 'Mod+P'], ['Align', 'Mod + arrows'], ['Normalize size', 'Mod+Alt + arrows'], ['Bring to front or back', '↑  ↓'], ['Lock item', 'Alt+L'], ['Duplicate', 'Mod+D'], ['Note', 'Mod+N'], ['Undo / Redo', 'Mod+Z  /  Mod+Shift+Z']]],
+    ['Board', [['Pan', 'Alt + drag, or middle mouse'], ['Zoom', 'Scroll, or hold Z and drag'], ['Move window', 'Right mouse drag'], ['Menu', 'Right click'], ['Focus image', 'Space'], ['Focus canvas', 'Mod+Space'], ['Reset zoom', 'Mod+0'], ['Zoom in / out', 'Mod+=  /  Mod+-'], ['Next or previous image', '→  ←'], ['Lock canvas', 'Mod+R'], ['Grayscale canvas', 'Mod+Alt+G'], ['Select all', 'Mod+A']]],
+    ['Items', [['Crop', 'Hold C and drag'], ['Pan cropping', 'Hold V and drag'], ['Reset cropping', 'Mod+Shift+C'], ['Rotate', 'Mod + drag'], ['Scale', 'Mod+Alt + drag'], ['Flip', 'Alt+Shift+H  /  Alt+Shift+V'], ['Grayscale', 'Alt+G'], ['Toggle locked', 'Alt+L'], ['Reset transform', 'Mod+Shift+T'], ['Arrange optimal', 'Mod+P'], ['Align', 'Mod + arrows'], ['Normalize', 'Mod+Alt + arrows'], ['Send to front / back', '↑  ↓'], ['Note', 'Mod+N'], ['Copy / Cut / Paste', 'Mod+C  /  Mod+X  /  Mod+V'], ['Delete', 'Del'], ['Undo / Redo', 'Mod+Z  /  Mod+Shift+Z']]],
+    ['Draw', [['Draw', 'Mod+D'], ['Pen / Eraser', 'D  /  E'], ['Solid / Dotted / Arrow', '1  /  2  /  3'], ['Pen colour', 'Mod+T'], ['Stop drawing', 'Esc']]],
     ['Video', [['Play or pause', 'K'], ['Set start / end', 'I  /  O'], ['Step a frame', ',  .'], ['Grab frame', 'F'], ['Sound', 'M']]],
-    ['Window', [['Always on top', 'Mod+Shift+A'], ['Click through', 'Mod+T'], ['See through', 'Mod+Shift+-  /  Mod+Shift+='], ['Lock window', 'Mod+W'], ['New board', 'Mod+K'], ['Save', 'Mod+S'], ['Search projects', 'Mod+Shift+P'], ['Add images', 'Mod+I']]],
+    ['Window', [['Always on top', 'Mod+Shift+A'], ['Transparent to mouse', 'Mod+T'], ['Opacity', 'Mod+Shift+-  /  Mod+Shift+='], ['Lock window', 'Mod+W'], ['Minimize / Maximize', 'Mod+M  /  Mod+F'], ['Close', 'Mod+Q']]],
+    ['Files', [['New board', 'Mod+K'], ['Open', 'Mod+L'], ['Open most recent', 'Mod+Shift+L'], ['Open images', 'Mod+I'], ['Save', 'Mod+S'], ['Save as one file', 'Mod+Shift+S'], ['Search boards', 'Mod+Shift+P']]],
   ];
   function shortcutsModal() {
     openModal((close) => {
@@ -667,13 +683,14 @@
     'Mod+Shift+A': toggleTop,
     'Mod+Shift+Minus': () => opacity(-0.1),
     'Mod+Shift+Equal': () => opacity(0.1),
-    'Mod+T': () => setThrough(!S.clickThrough),
+    'Mod+T': () => (drawing() ? nextColor() : setThrough(!S.clickThrough)),
     'Mod+P': () => B.arrange(),
     'Mod+Z': () => B.undo(),
     'Mod+Shift+Z': () => B.redo(),
     'Mod+C': () => doCopy(false),
     'Mod+X': () => doCopy(true),
-    'Mod+D': () => B.duplicate(),
+    'Mod+D': toggleDraw,
+    'Mod+Shift+D': toggleDraw,
     'Delete': () => B.deleteSelection(),
     'Backspace': () => B.deleteSelection(),
     'Mod+A': () => B.selectAll(),
@@ -689,7 +706,9 @@
     'Mod+N': () => B.addNote(),
     'Mod+I': addDialog,
     'Mod+K': () => newBoard(),
-    'Mod+L': () => { setSidebar(true); $('#search').focus(); },
+    'Mod+L': () => openFile(),
+    'Mod+Shift+L': async () => { const last = S.projects.find((p) => !p.scratch && (!S.current || p.id !== S.current.id)); if (last) openResult(await api.openProject(last.id)); },
+    'Mod+Shift+S': () => packCurrent(),
     'Mod+Shift+P': () => { setSidebar(true); $('#search').focus(); },
     'Mod+S': async () => { if (S.current && S.current.scratch) return saveModal(); await api.flush(); toast('Saved'); },
     'Mod+Q': () => api.close(),
@@ -711,8 +730,12 @@
     'Mod+Alt+Right': () => B.normalize('width'),
     'Mod+Alt+Up': () => B.normalize('size'),
     'Mod+Alt+Down': () => B.normalize('scale'),
-    'G': () => B.setGrid(!B.grid),
-    'P': () => B.setTool(B.tool === 'pen' ? 'select' : 'pen'),
+    // Draw mode (PureRef): D pen, E eraser, 1 solid, 2 dotted, 3 arrow
+    'D': () => { if (drawing()) B.setTool('pen'); },
+    'E': () => { if (drawing()) B.setTool('eraser'); },
+    '1': () => { if (drawing()) penStyle('solid'); },
+    '2': () => { if (drawing()) penStyle('dotted'); },
+    '3': () => { if (drawing()) penStyle('arrow'); },
     'Enter': () => { const ids = B.selIds(); if (ids.length === 1 && B.items.get(ids[0]).type === 'note') B.editNote(ids[0]); },
     'K': () => B.togglePlay(),
     'I': () => B.setInOut('in'),
@@ -740,7 +763,7 @@
     if (B.editingId) { if (e.key === 'Escape') { B.stopEditing(); e.preventDefault(); } return; }
     const inField = e.target.closest && e.target.closest('input, textarea, select, [contenteditable]');
     if (inField) return;
-    if (!S.current && !['Mod+K', 'Mod+Q', 'Mod+M', 'Mod+F', 'Mod+L', 'Mod+Shift+P'].includes(c)) return;
+    if (!S.current && !['Mod+K', 'Mod+Q', 'Mod+M', 'Mod+F', 'Mod+L', 'Mod+Shift+L', 'Mod+Shift+P'].includes(c)) return;
 
     // Held keys for drag tools (PureRef: C crop, V pan crop, Z zoom, Space)
     if (!e.metaKey && !e.ctrlKey && !e.altKey && ['KeyC', 'KeyV', 'KeyZ', 'Space'].includes(e.code)) {
@@ -751,7 +774,7 @@
     }
     const helpCombo = IS_MAC ? (e.ctrlKey && !e.metaKey && e.code === 'KeyH') : c === 'Mod+H';
     if (helpCombo) { e.preventDefault(); return shortcutsModal(); }
-    if (c === 'Escape') { if (S.clickThrough) return setThrough(false); if (B.tool === 'pen') return B.setTool('select'); B.clearSel(); return; }
+    if (c === 'Escape') { if (S.clickThrough) return setThrough(false); if (drawing()) return B.setTool('select'); B.clearSel(); return; }
     const fn = actions[c];
     if (fn) { e.preventDefault(); fn(); }
   });

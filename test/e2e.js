@@ -53,7 +53,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await win.screenshot({ path: `${OUT}/03a-video.png` });
   await win.evaluate(() => Board.clearSel());
   // Draw: circle a detail, then an arrow in another colour
-  await win.keyboard.press('p');
+  await win.keyboard.press('Control+D');
   await win.waitForSelector('#penBar:not([hidden])');
   const circle = async (cx, cy, rx, ry) => {
     await win.mouse.move(cx + rx, cy);
@@ -64,10 +64,24 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await circle(1110, 300, 95, 70);
   await win.click('#penColors button:nth-child(2)');
   await win.click('#penSizes button:nth-child(2)');
+  await win.keyboard.press('3');
   await win.mouse.move(980, 470); await win.mouse.down();
   for (let i = 0; i <= 20; i++) await win.mouse.move(980 + i * 4.5, 470 - i * 6 + Math.sin(i / 3) * 4);
   await win.mouse.up();
-  await win.mouse.move(1070, 350); await win.mouse.down(); await win.mouse.move(1072, 372); await win.mouse.move(1050, 368); await win.mouse.up();
+  await win.keyboard.press('2');
+  await win.click('#penColors button:nth-child(3)');
+  await win.mouse.move(470, 560); await win.mouse.down();
+  for (let i = 0; i <= 30; i++) await win.mouse.move(470 + i * 10, 560 + Math.sin(i / 4) * 20);
+  await win.mouse.up();
+  // Eraser takes out a scribble
+  await win.keyboard.press('1');
+  await win.mouse.move(700, 700); await win.mouse.down(); await win.mouse.move(760, 720); await win.mouse.move(800, 690); await win.mouse.up();
+  const before = await win.evaluate(() => Board.live().filter((it) => it.type === 'draw').length);
+  await win.keyboard.press('e');
+  await win.mouse.move(760, 740); await win.mouse.down(); await win.mouse.move(760, 700, { steps: 10 }); await win.mouse.up();
+  const after = await win.evaluate(() => Board.live().filter((it) => it.type === 'draw').length);
+  console.log('erased', before - after);
+  await win.keyboard.press('d');
   await sleep(300);
   await win.screenshot({ path: `${OUT}/03d-draw.png` });
   const strokes = await win.evaluate(() => Board.live().filter((it) => it.type === 'draw').length);
