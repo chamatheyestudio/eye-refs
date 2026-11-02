@@ -74,7 +74,7 @@ async function boot() {
   const projects = await lib.scanProjects(myDrive, me);
   const open = pendingOpenFile;
   pendingOpenFile = null;
-  return { screen: 'app', me, team, projects, lastProject: settings.lastProject || null, openFile: open, prefs: prefs() };
+  return { screen: 'app', me, team, projects, lastProject: settings.lastProject || null, openFile: open, prefs: prefs(), version: app.getVersion() };
 }
 
 function prefs() {

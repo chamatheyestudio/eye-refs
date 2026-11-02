@@ -1,7 +1,8 @@
 name: Build installers
 
-# Every push to main builds both installers and publishes them to the
-# GitHub release for the version in package.json (v1.0.0, v1.0.1, ...).
+# Every push to main builds both installers.
+# They are published only when package.json has a version that has no release yet
+# (1.0.0-beta.2, 1.0.0-beta.3, ...). While in beta, releases are always pre-releases.
 on:
   workflow_dispatch:
   push:
@@ -15,39 +16,71 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      publish: ${{ steps.v.outputs.publish }}
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Remove the accidental v1.0.0 release (published before the app was marked beta)
+        run: |
+          if gh release view v1.0.0 -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release delete v1.0.0 -R "$GITHUB_REPOSITORY" --cleanup-tag --yes
+            echo "Deleted release v1.0.0"
+          fi
+          git push origin :refs/tags/v1.0.0 2>/dev/null || true
+      - name: Decide whether this version is new
+        id: v
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if gh release view "v$VERSION" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "publish=never" >> "$GITHUB_OUTPUT"
+            echo "v$VERSION is already released. Building only, not publishing."
+          else
+            echo "publish=always" >> "$GITHUB_OUTPUT"
+            echo "Publishing v$VERSION"
+          fi
+          case "$VERSION" in
+            *-*) ;;
+            *) echo "::error::Eye Refs is in beta. Use a version like 1.0.0-beta.2 in package.json."; exit 1 ;;
+          esac
+
   mac:
+    needs: prepare
     runs-on: macos-14
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
       - run: npm ci
       - name: Apple Silicon build
-        run: npx electron-builder --mac dmg --arm64 --publish always
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: npx electron-builder --mac dmg --arm64 --publish ${{ needs.prepare.outputs.publish }}
       - name: Intel build (with the Intel copy of ffmpeg)
         run: |
           rm -f node_modules/ffmpeg-static/ffmpeg
           npm_config_arch=x64 node node_modules/ffmpeg-static/install.js
-          npx electron-builder --mac dmg --x64 --publish always
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          npx electron-builder --mac dmg --x64 --publish ${{ needs.prepare.outputs.publish }}
       - uses: actions/upload-artifact@v4
         with: { name: eye-refs-mac, path: 'dist/*.dmg' }
 
   windows:
+    needs: prepare
     runs-on: windows-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
       - run: npm ci
       - run: npm test
-      - run: npx electron-builder --win nsis --x64 --publish always
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - run: npx electron-builder --win nsis --x64 --publish ${{ needs.prepare.outputs.publish }}
       - uses: actions/upload-artifact@v4
         with: { name: eye-refs-windows, path: 'dist/*.exe' }

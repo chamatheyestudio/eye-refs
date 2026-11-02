@@ -71,6 +71,8 @@
     if (!r || r.error || r.screen !== 'app') return screenFor(r || { error: 'No response' });
     $('#screen').hidden = true;
     S.me = r.me; S.team = r.team; S.projects = r.projects;
+    S.version = r.version || '';
+    $$('.beta').forEach((b) => { b.title = versionLabel(); });
     B.me = r.me;
     $('#meName').textContent = r.me.name;
     $('#meAvatar').textContent = r.me.initials;
@@ -180,8 +182,17 @@
       '-',
       { label: 'Show project in folder', onClick: () => api.reveal(), disabled: !S.current },
       { label: 'Choose Drive folder', onClick: async () => route(await api.chooseDrive()) },
-    ], r.left, r.top - 150);
+      '-',
+      { label: `Eye Refs ${versionLabel()}`, disabled: true },
+    ], r.left, r.top - 190);
   });
+
+  // "1.0.0-beta.2" reads as "Version 1.0.0 beta 2"
+  function versionLabel() {
+    const m = /^(\d+\.\d+\.\d+)(?:-([a-z]+)\.?(\d+)?)?/.exec(S.version || '');
+    if (!m) return 'Version ' + (S.version || '');
+    return `Version ${m[1]}${m[2] ? ` ${m[2]}${m[3] ? ' ' + m[3] : ''}` : ''}`;
+  }
 
   function setSidebar(on, quiet) {
     S.sidebar = on;

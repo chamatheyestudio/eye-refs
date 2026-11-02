@@ -45,4 +45,4 @@ npm run dist:win  # Windows installer (on Windows, or Linux with Wine)
 npm run dist:mac  # Mac disk image (on a Mac)
 ```
 
-Every push to `main` builds both installers with `.github/workflows/build.yml` and publishes them to the GitHub release for the version in `package.json`. Bump the version for each new release so the app can update.
+Every push to `main` builds both installers with `.github/workflows/build.yml`. They are published only when `package.json` has a new version, always as a pre-release while in beta. To ship a new beta, bump `1.0.0-beta.1` to `1.0.0-beta.2` and push.
