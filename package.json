@@ -1,7 +1,7 @@
 {
   "name": "eye-refs",
   "productName": "Eye Refs",
-  "version": "1.0.0-beta.2",
+  "version": "1.0.0-beta.3",
   "description": "Reference boards for EyeStudio, with video and Google Drive collaboration.",
   "author": "Matte Black",
   "main": "main/main.js",
@@ -84,7 +84,8 @@
         "repo": "eye-refs",
         "releaseType": "prerelease"
       }
-    ]
+    ],
+    "afterPack": "build/afterPack.js"
   },
   "repository": {
     "type": "git",
