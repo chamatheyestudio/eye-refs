@@ -253,3 +253,15 @@ body.clickthrough #canvas { outline: 2px solid rgba(215, 240, 74, 0.5); outline-
 .email-field .input.free { text-align: center; padding-right: 16px; }
 .email-field .suffix { position: absolute; right: 18px; color: var(--faint); font-size: 14px; pointer-events: none; }
 .invite-preview { font-size: 12px; color: var(--faint); padding: 6px 16px 0; min-height: 18px; overflow-wrap: anywhere; }
+
+/* Clean view, like PureRef: only the board. Controls come back when the pointer
+   reaches the edge they live on, and stay away while you drag, draw or crop. */
+body.clean:not(.board-empty) :is(#sidebar, #title, #topRight, #toolbar, #zoom) { opacity: 0; pointer-events: none; transition: opacity 160ms ease; }
+body.clean:not(.board-empty) #sidebar { transform: translateX(-12px); transition: opacity 160ms ease, transform 160ms ease; }
+body.clean:not(.board-empty).show-top :is(#title, #topRight),
+body.clean:not(.board-empty).show-bottom :is(#toolbar, #zoom),
+body.clean:not(.board-empty).show-left #sidebar { opacity: 1; pointer-events: auto; transform: none; }
+body.clean:not(.board-empty) #toolbar, body.clean:not(.board-empty) #penBar { left: 50%; }
+body.clean:not(.board-empty) #penBar { bottom: 16px; }
+body.clean:not(.board-empty).show-bottom #penBar { bottom: 72px; }
+body.clean:not(.board-empty):not(.show-left) #title { left: 16px; padding-left: 18px; }

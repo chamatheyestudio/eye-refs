@@ -268,6 +268,7 @@
   }, 4000);
 
   function render() {
+    document.body.classList.toggle('board-empty', !live().length);
     const seen = new Set();
     for (const it of B.items.values()) {
       if (it.deleted || !it.type) continue;
@@ -357,7 +358,9 @@
 
   // The part of the window not covered by the sidebar and floating bars
   function viewport() {
-    const side = document.body.classList.contains('has-sidebar') ? 304 : 16;
+    const b = document.body.classList;
+    if (b.contains('clean') && !b.contains('board-empty')) return { left: 16, top: 16, right: window.innerWidth - 16, bottom: window.innerHeight - 16 };
+    const side = b.contains('has-sidebar') ? 304 : 16;
     return { left: side, top: 76, right: window.innerWidth - 16, bottom: window.innerHeight - 76 };
   }
 

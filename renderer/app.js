@@ -298,6 +298,35 @@
   $('#wMax').addEventListener('click', () => api.maximize());
   $('#wClose').addEventListener('click', () => api.close());
 
+  // ---------- clean view (PureRef style: just the board) ----------
+  // Controls hide while you work and come back when the pointer reaches their edge.
+  // Tab turns this on or off. An empty board always shows its controls.
+  let clean = true;
+  try { clean = localStorage.getItem('clean') !== '0'; } catch (_) {}
+  const body = document.body;
+  function setClean(on, quiet) {
+    clean = on;
+    body.classList.toggle('clean', on);
+    try { localStorage.setItem('clean', on ? '1' : '0'); } catch (_) {}
+    if (!quiet) toast(on ? `Controls hidden. Move to an edge to see them, or press Tab.` : 'Controls shown');
+    try { B.applyView(); } catch (_) {}
+  }
+  setClean(clean, true);
+  const chrome = (sel) => (t) => t && t.closest && t.closest(sel);
+  const inTop = chrome('#title, #topRight'), inBottom = chrome('#toolbar, #zoom, #penBar'), inLeft = chrome('#sidebar');
+  let busy = false;
+  window.addEventListener('pointermove', (e) => {
+    if (!clean || busy || modalOpen()) return;
+    const W = window.innerWidth, H = window.innerHeight;
+    body.classList.toggle('show-top', e.clientY < 64 || !!inTop(e.target));
+    body.classList.toggle('show-bottom', e.clientY > H - 72 || !!inBottom(e.target));
+    body.classList.toggle('show-left', S.sidebar && (e.clientX < 20 || !!inLeft(e.target) || (body.classList.contains('show-left') && e.clientX < 300)));
+  }, { passive: true });
+  const hideAll = () => body.classList.remove('show-top', 'show-bottom', 'show-left');
+  $('#canvas').addEventListener('pointerdown', () => { if (clean) { busy = true; hideAll(); } });
+  window.addEventListener('pointerup', () => { busy = false; });
+  document.addEventListener('mouseleave', () => { if (clean) hideAll(); });
+
   // ---------- toolbar ----------
   function syncToolbar() {
     $$('#toolbar [data-tool]').forEach((b) => b.classList.toggle('on', b.dataset.tool === B.tool));
@@ -370,6 +399,7 @@
 
   // Menu items the board adds to its right click menu
   B.extraMenu = () => [
+    { label: 'Show controls', key: 'Tab', checked: !clean, onClick: () => setClean(!clean) },
     { label: 'Always on top', key: 'Mod+Shift+A', checked: S.alwaysOnTop, onClick: toggleTop },
     { label: 'Click through', key: 'Mod+T', onClick: () => setThrough(true) },
     { label: 'Lock canvas', key: 'Mod+R', checked: B.lockedCanvas, onClick: () => B.setLockedCanvas(!B.lockedCanvas) },
@@ -415,6 +445,7 @@
     const b = $('#update');
     b.hidden = false;
     b.title = `Eye Refs ${u.version} is ready`;
+    if (clean && !b.dataset.told) { b.dataset.told = '1'; toast(`Eye Refs ${u.version} is ready. Restart to update is at the top.`); }
   };
   api.onUpdate(showUpdate);
   api.updateState().then(showUpdate);
@@ -643,7 +674,7 @@
   }
 
   const SHORTCUTS = [
-    ['Board', [['Pan', 'Alt + drag, or middle mouse'], ['Zoom', 'Scroll, or hold Z and drag'], ['Move window', 'Right mouse drag'], ['Menu', 'Right click'], ['Focus image', 'Space'], ['Focus canvas', 'Mod+Space'], ['Reset zoom', 'Mod+0'], ['Zoom in / out', 'Mod+=  /  Mod+-'], ['Next or previous image', '→  ←'], ['Lock canvas', 'Mod+R'], ['Grayscale canvas', 'Mod+Alt+G'], ['Select all', 'Mod+A']]],
+    ['Board', [['Pan', 'Alt + drag, or middle mouse'], ['Zoom', 'Scroll, or hold Z and drag'], ['Move window', 'Right mouse drag'], ['Menu', 'Right click'], ['Focus image', 'Space'], ['Focus canvas', 'Mod+Space'], ['Reset zoom', 'Mod+0'], ['Zoom in / out', 'Mod+=  /  Mod+-'], ['Next or previous image', '→  ←'], ['Lock canvas', 'Mod+R'], ['Grayscale canvas', 'Mod+Alt+G'], ['Hide or show controls', 'Tab'], ['Select all', 'Mod+A']]],
     ['Items', [['Crop', 'Hold C and drag'], ['Pan cropping', 'Hold V and drag'], ['Reset cropping', 'Mod+Shift+C'], ['Rotate', 'Mod + drag'], ['Scale', 'Mod+Alt + drag'], ['Flip', 'Alt+Shift+H  /  Alt+Shift+V'], ['Grayscale', 'Alt+G'], ['Toggle locked', 'Alt+L'], ['Reset transform', 'Mod+Shift+T'], ['Arrange optimal', 'Mod+P'], ['Align', 'Mod + arrows'], ['Normalize', 'Mod+Alt + arrows'], ['Send to front / back', '↑  ↓'], ['Note', 'Mod+N'], ['Copy / Cut / Paste', 'Mod+C  /  Mod+X  /  Mod+V'], ['Delete', 'Del'], ['Undo / Redo', 'Mod+Z  /  Mod+Shift+Z']]],
     ['Draw', [['Draw', 'Mod+D'], ['Pen / Eraser', 'D  /  E'], ['Solid / Dotted / Arrow', '1  /  2  /  3'], ['Pen colour', 'Mod+T'], ['Stop drawing', 'Esc']]],
     ['Video', [['Play or pause', 'K'], ['Set start / end', 'I  /  O'], ['Step a frame', ',  .'], ['Grab frame', 'F'], ['Sound', 'M']]],
@@ -665,7 +696,7 @@
   const keyName = (e) => {
     if (e.code.startsWith('Key')) return e.code.slice(3);
     if (e.code.startsWith('Digit')) return e.code.slice(5);
-    const map = { ArrowUp: 'Up', ArrowDown: 'Down', ArrowLeft: 'Left', ArrowRight: 'Right', Minus: 'Minus', Equal: 'Equal', NumpadAdd: 'Equal', NumpadSubtract: 'Minus', Comma: 'Comma', Period: 'Period', Space: 'Space', Delete: 'Delete', Backspace: 'Backspace', Escape: 'Escape', Enter: 'Enter', NumpadEnter: 'Enter' };
+    const map = { ArrowUp: 'Up', ArrowDown: 'Down', ArrowLeft: 'Left', ArrowRight: 'Right', Minus: 'Minus', Equal: 'Equal', NumpadAdd: 'Equal', NumpadSubtract: 'Minus', Comma: 'Comma', Period: 'Period', Space: 'Space', Delete: 'Delete', Backspace: 'Backspace', Escape: 'Escape', Enter: 'Enter', NumpadEnter: 'Enter', Tab: 'Tab' };
     return map[e.code] || e.key;
   };
   const combo = (e) => {
@@ -718,6 +749,7 @@
     'Mod+Equal': () => B.zoomAt(innerWidth / 2, innerHeight / 2, 1.25),
     'Mod+Minus': () => B.zoomAt(innerWidth / 2, innerHeight / 2, 0.8),
     'Mod+Space': () => B.focusAll(),
+    'Tab': () => setClean(!clean),
     'Left': () => B.focusStep(-1),
     'Right': () => B.focusStep(1),
     'Up': () => B.front(),
