@@ -39,9 +39,9 @@ module.exports = async function (test) {
 
     const id = 'a1b2c3d4-0000-4000-8000-000000000001';
     assert.equal(gas.call({ action: 'projects.create', token: guest, id, name: 'X', client: 'Hutong' }).ok, false, 'outsiders cannot create shared boards');
-    const created = gas.call({ action: 'projects.create', token: owner, id, name: 'Spring Campaign', client: 'Hutong' });
+    const created = gas.call({ action: 'projects.create', token: owner, id, name: 'Spring Campaign' });
     assert.ok(created.ok, created.error);
-    assert.ok(fs.existsSync(path.join(tmp, 'drive', 'Eye Refs', 'Hutong', 'Spring Campaign', 'media')), 'same folder path in Drive');
+    assert.ok(fs.existsSync(path.join(tmp, 'drive', 'Eye Refs', 'Spring Campaign', 'media')), 'same folder path in Drive');
 
     assert.equal(gas.call({ action: 'sync.pull', token: nous, id, device: 'nousaiba-aa11' }).ok, false, 'not a member yet');
     assert.ok(gas.call({ action: 'projects.invite', token: owner, id, emails: ['nousaiba@eyestudio.ae'] }).ok);

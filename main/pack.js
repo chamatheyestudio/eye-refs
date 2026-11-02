@@ -59,7 +59,7 @@ function openZip(file) {
   return new Promise((resolve, reject) => yauzl.open(file, { lazyEntries: true, autoClose: true }, (e, z) => (e ? reject(e) : resolve(z))));
 }
 
-// Unpack into Documents/Eye Refs/<client>/<name> as a new project owned by me.
+// Unpack into Documents/Eye Refs/<name> as a new project owned by me.
 async function unpack(file, root, me) {
   const zip = await openZip(file);
   let dest = null;
@@ -79,7 +79,7 @@ async function unpack(file, root, me) {
             try {
               project = JSON.parse(Buffer.concat(chunks).toString('utf8'));
               if (project.kind !== 'eyerefs-project') throw new Error("That file isn't an Eye Refs board.");
-              dest = await makeProjectDir(root, project.client, project.name);
+              dest = await makeProjectDir(root, '', project.name);
               zip.readEntry();
             } catch (e) { reject(e); }
           });
@@ -98,7 +98,7 @@ async function unpack(file, root, me) {
   });
   if (!project || !dest) throw new Error("That file isn't an Eye Refs board.");
   const data = {
-    kind: 'eyerefs-project', format: 1, id: crypto.randomUUID(), name: project.name, client: project.client,
+    kind: 'eyerefs-project', format: 1, id: crypto.randomUUID(), name: project.name, client: '',
     owner: { email: me.email, name: me.name }, created: Date.now(), shared: null,
     from: { name: project.name, owner: project.owner || null, packed: project.packed || null },
     app: 'Eye Refs by Matte Black',

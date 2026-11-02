@@ -14,7 +14,6 @@ contextBridge.exposeInMainWorld('eyerefs', {
   requestCode: call('auth:request'),
   verifyCode: call('auth:verify'),
   signOut: call('auth:signout'),
-  saveClients: call('clients:save'),
   scan: call('projects:scan'),
   createProject: call('projects:create'),
   openProject: call('projects:open'),

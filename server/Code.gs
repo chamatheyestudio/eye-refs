@@ -309,8 +309,8 @@ API['projects.create'] = function (req) {
       requireRole_(existing, me.email, team, ['owner', 'admin', 'member']);
       return projectSummary_(existing, me.email, team);
     }
-    var client = cleanFolderName_(req.client || 'Other');
-    var clientDir = child_(rootFolder_(), client, true);
+    var client = req.client ? cleanFolderName_(req.client) : '';
+    var clientDir = client ? child_(rootFolder_(), client, true) : rootFolder_();
     var base = cleanFolderName_(req.name), name = base, n = 2;
     while (clientDir.getFoldersByName(name).hasNext()) { name = base + ' ' + n; n++; }
     var dir = clientDir.createFolder(name);
@@ -353,7 +353,7 @@ API['projects.invite'] = function (req) {
     return p;
   });
   emails.forEach(function (e) {
-    notify_(e, me.name + ' shared "' + p.name + '" with you', me.name + ' added you to the board "' + p.name + '" (' + p.client + ') in Eye Refs.\n\nOpen Eye Refs and sign in with ' + e + ' to see it.');
+    notify_(e, me.name + ' shared "' + p.name + '" with you', me.name + ' added you to the board "' + p.name + '" in Eye Refs.\n\nOpen Eye Refs and sign in with ' + e + ' to see it.');
   });
   return { added: emails };
 };

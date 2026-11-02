@@ -20,7 +20,7 @@ let session = null;
 let sync = null;
 let pendingOpenFile = null;
 let clickThrough = false;
-let identity = { admin: false, team: false, clients: [] };
+let identity = { admin: false, team: false };
 
 const settingsPath = () => path.join(app.getPath('userData'), 'settings.json');
 const backupDir = () => path.join(app.getPath('userData'), 'backups');
@@ -78,21 +78,19 @@ async function boot() {
     const who = await cloud.call('me', {}, 12000);
     settings.email = who.email;
     settings.name = who.name;
-    settings.clients = who.clients;
-    identity = { admin: who.admin, team: who.team, clients: who.clients || [] };
+    identity = { admin: who.admin, team: who.team };
     await saveSettings();
   } catch (e) {
     if (e.kind === 'auth') { setToken(null); await saveSettings(); return { screen: 'signin', email: settings.email || '' }; }
     online = false; // work offline with what we know
-    identity = { admin: false, team: true, clients: settings.clients || [] };
+    identity = { admin: false, team: true };
   }
   me = makeMe(settings.email, settings.name);
-  try { await lib.ensureClientFolders(ROOT(), identity.clients); } catch (e) { console.error('Documents folder', e); }
   const projects = await allProjects(online);
   const open = pendingOpenFile;
   pendingOpenFile = null;
   return {
-    screen: 'app', me, online, admin: identity.admin, team: identity.team, clients: identity.clients,
+    screen: 'app', me, online, admin: identity.admin, team: identity.team,
     projects, lastProject: settings.lastProject || null, openFile: open, prefs: prefs(), version: app.getVersion(), root: ROOT(),
   };
 }
@@ -213,20 +211,11 @@ handle('auth:signout', async () => {
   return boot();
 });
 
-handle('clients:save', async (clients) => {
-  const list = await cloud.call('clients.save', { clients });
-  identity.clients = list;
-  settings.clients = list;
-  await saveSettings();
-  await lib.ensureClientFolders(ROOT(), list);
-  return { clients: list };
-});
+handle('projects:scan', async () => ({ projects: await allProjects(true) }));
 
-handle('projects:scan', async () => ({ projects: await allProjects(true), clients: identity.clients }));
-
-handle('projects:create', async (name, client) => {
+handle('projects:create', async (name) => {
   if (!name || !name.trim()) return { error: 'Give the project a name.' };
-  const rec = await lib.createProject(ROOT(), me, name, client || 'Other');
+  const rec = await lib.createProject(ROOT(), me, name, '');
   return openProject(rec);
 });
 
@@ -236,7 +225,7 @@ handle('projects:open', async (id) => {
     // A shared board that isn't on this computer yet: make its folder, then sync fills it
     const remote = (await cloud.call('projects.list')).find((p) => p.id === id);
     if (!remote) return { error: "That board isn't shared with you anymore." };
-    rec = await lib.createProject(ROOT(), me, remote.name, remote.client, {
+    rec = await lib.createProject(ROOT(), me, remote.name, '', {
       id: remote.id, owner: { email: remote.owner, name: remote.ownerName }, shared: { id: remote.id },
     });
   }
@@ -269,7 +258,7 @@ handle('projects:share', async (projectId, emails) => {
   const s = sessionFor(projectId);
   if (!s.rec.shared) {
     await s.flush();
-    await cloud.call('projects.create', { id: s.rec.id, name: s.rec.name, client: s.rec.client });
+    await cloud.call('projects.create', { id: s.rec.id, name: s.rec.name, client: '' });
     await lib.updateProject(s.rec, { shared: { id: s.rec.id } });
     s.rec.shared = { id: s.rec.id };
     startSync(s.rec);

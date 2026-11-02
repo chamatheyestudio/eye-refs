@@ -115,14 +115,13 @@ svg { display: block; }
 #tree::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 3px; }
 .row { display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border-radius: 14px; color: var(--soft); border: 0; background: transparent; width: 100%; text-align: left; cursor: pointer; flex-shrink: 0; }
 .row:hover { background: var(--hover); color: var(--text); }
-.row.project { padding-left: 28px; gap: 8px; }
+.row.project { gap: 8px; }
 .row.project.current { background: var(--lime-tint); color: var(--text); font-weight: 500; }
 .row .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row .meta { font-size: 11px; color: var(--faint); font-weight: 400; display: flex; align-items: center; gap: 4px; white-space: nowrap; }
 .row .meta.here { color: var(--lime); }
 .row .chev { width: 12px; height: 12px; flex-shrink: 0; transition: transform 0.15s; }
 .row.open .chev { transform: rotate(90deg); }
-.row.empty-client { color: var(--faint); }
 .side-foot { display: flex; flex-direction: column; gap: 4px; padding-top: 6px; border-top: 1px solid rgba(255,255,255,0.06); }
 .foot-btn { flex: 1; height: 34px; border-radius: 14px; border: 0; background: transparent; color: var(--soft); font-size: 12px; font-weight: 500; display: flex; align-items: center; justify-content: center; gap: 8px; cursor: pointer; }
 .foot-btn:hover { background: var(--hover); color: var(--text); }
@@ -137,7 +136,6 @@ svg { display: block; }
 #title button { -webkit-app-region: no-drag; }
 body.no-sidebar #title { left: 16px; padding-left: 4px; }
 #title .t-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-#title .t-client { color: var(--faint); font-size: 12px; white-space: nowrap; }
 #title .t-status { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted); white-space: nowrap; }
 #title .t-status.warn { color: var(--warn); }
 #title .t-lock { color: var(--muted); display: flex; }

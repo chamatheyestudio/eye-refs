@@ -5,9 +5,9 @@ By Matte Black.
 
 ## How it saves
 
-* **Your projects stay on your computer** in `Documents/Eye Refs/<Client>/<Project>/`. Nothing leaves your machine unless you share it.
+* **Your projects stay on your computer** in `Documents/Eye Refs/<Project>/`. Nothing leaves your machine unless you share it.
 * **Save as one file** packs a board with all its images and videos into one `.eyerefs` file to send anywhere, like a PureRef file. Opening it makes your own copy.
-* **Sharing** uploads the board to the EyeStudio Google Drive at the same path, `Eye Refs/<Client>/<Project>/`, through the Apps Script in `server/`. Everyone on the board gets a synced copy in their own Documents folder.
+* **Sharing** uploads the board to the EyeStudio Google Drive at the same path, `Eye Refs/<Project>/`, through the Apps Script in `server/`. Everyone on the board gets a synced copy in their own Documents folder.
 * Sign in is by email with a 6 digit code. Anyone can be invited or ask to join with the board's join code; the owner approves.
 * Each computer only writes its own change file, and the app merges everyone's, so nothing is ever overwritten.
 * Media names look like `2026-11-02_CH_k7f3xa9p_lantern-reel.jpg`, and originals are never edited.

@@ -6,7 +6,7 @@
   fillIcons();
 
   const S = {
-    me: null, admin: false, teamMember: false, clients: [], online: true, cloud: null,
+    me: null, admin: false, teamMember: false, online: true, cloud: null,
     projects: [], current: null, status: 'saved', readOnly: false,
     here: [], filter: 'all', search: '', expanded: new Set(), sidebar: true,
     alwaysOnTop: false, clickThrough: false, lockedWindow: false,
@@ -94,7 +94,7 @@
     if (!r || r.error || r.screen !== 'app') return screenFor(r || { error: 'No response' });
     $('#screen').hidden = true;
     S.me = r.me; S.projects = r.projects;
-    S.admin = !!r.admin; S.teamMember = !!r.team; S.clients = r.clients || []; S.online = r.online !== false;
+    S.admin = !!r.admin; S.teamMember = !!r.team; S.online = r.online !== false;
     S.version = r.version || '';
     $$('.beta').forEach((b) => { b.title = versionLabel(); });
     B.me = r.me;
@@ -122,10 +122,8 @@
     S.readOnly = res.readOnly;
     S.here = [];
     S.cloud = null;
-    if (res.unpacked) toast(`Opened as your own copy in ${res.record.client}.`);
+    if (res.unpacked) toast('Opened as your own copy.');
     if (!S.projects.find((p) => p.id === res.record.id)) S.projects.push(res.record);
-    S.expanded.add(res.record.client);
-    saveExpanded();
     B.load(res);
     syncChrome();
     renderSidebar();
@@ -134,7 +132,6 @@
   async function rescan() {
     const r = await api.scan();
     if (!r || r.error) return;
-    S.clients = r.clients || S.clients;
     S.projects = r.projects;
     if (S.current) {
       const cur = S.projects.find((p) => p.id === S.current.id);
@@ -159,24 +156,11 @@
     const shown = S.projects.filter((p) => {
       if (S.filter === 'mine' && !p.mine) return false;
       if (S.filter === 'shared' && !p.shared) return false;
-      if (q && !(`${p.name} ${p.client} ${p.owner ? p.owner.name : ''}`.toLowerCase().includes(q))) return false;
+      if (q && !(`${p.name} ${p.owner ? p.owner.name : ''}`.toLowerCase().includes(q))) return false;
       return true;
     });
-    const clients = [...new Set([...(S.clients || []), ...S.projects.map((p) => p.client)])].sort((a, b) => a.localeCompare(b));
-    for (const c of clients) {
-      const list = shown.filter((p) => p.client === c).sort((a, b) => a.name.localeCompare(b.name));
-      if ((q || S.filter !== 'all') && !list.length) continue;
-      const open = q ? true : S.expanded.has(c);
-      const row = el('button', { class: 'row' + (open && list.length ? ' open' : '') + (list.length ? '' : ' empty-client'), role: 'treeitem', 'aria-expanded': String(open) },
-        el('span', { html: ICONS.chev, style: 'display:flex;visibility:' + (list.length ? 'visible' : 'hidden') }),
-        el('span', { class: 'name', text: c }));
-      row.addEventListener('click', () => {
-        if (!list.length) return newProjectModal(c);
-        if (S.expanded.has(c)) S.expanded.delete(c); else S.expanded.add(c);
-        saveExpanded(); renderSidebar();
-      });
-      tree.append(row);
-      if (!open) continue;
+    const list = shown.sort((a, b) => a.name.localeCompare(b.name));
+    {
       for (const p of list) {
         const isCurrent = S.current && S.current.id === p.id;
         const n = isCurrent ? others(S.here).length : 0;
@@ -213,12 +197,11 @@
       { label: 'Save as one file', onClick: packCurrent, disabled: !S.current },
       { label: 'Show in folder', onClick: () => api.reveal() },
       '-',
-      { label: 'Manage clients', onClick: manageClients, disabled: !S.admin },
       { label: 'Keyboard shortcuts', key: IS_MAC ? 'Ctrl+H' : 'Mod+H', onClick: shortcutsModal },
       '-',
       { label: `Sign out ${S.me.email}`, onClick: async () => { S.current = null; B.unload(); route(await api.signOut()); } },
       { label: `Eye Refs ${versionLabel()}`, disabled: true },
-    ], r.left, r.top - 330);
+    ], r.left, r.top - 300);
   });
 
   // "1.0.0-beta.2" reads as "Version 1.0.0 beta 2"
@@ -246,7 +229,6 @@
     $('#zoom').style.visibility = p ? 'visible' : 'hidden';
     if (!p) { $('#presence').hidden = true; return; }
     $('#tName').textContent = p.name;
-    $('#tClient').textContent = p.client;
     $('#tLock').hidden = !B.lockedCanvas;
     const st = $('#tStatus');
     st.classList.remove('warn');
@@ -390,24 +372,13 @@
   });
 
   // ---------- dialogs ----------
-  function newProjectModal(presetClient) {
-    if (!S.clients.length && S.admin) {
-      return openModal((close) => [
-        el('h2', { text: 'No clients yet' }),
-        el('p', { text: 'Add your clients first. Everyone in the studio picks from this list, so folders match on every computer.' }),
-        el('div', { class: 'actions' },
-          el('button', { class: 'btn ghost', text: 'Close', onclick: close }),
-          el('button', { class: 'btn', text: 'Add clients', onclick: () => { close(); manageClients(); } })),
-      ]);
-    }
-    const clients = S.clients.length ? [...S.clients, ...(S.clients.includes('Other') ? [] : ['Other'])] : ['Other'];
+  function newProjectModal() {
     openModal((close) => {
       const name = el('input', { class: 'input', id: 'npName', placeholder: 'Spring Campaign', maxlength: '60' });
-      const client = el('select', { class: 'input', id: 'npClient' }, clients.map((c) => el('option', { value: c, text: c, selected: c === (presetClient || (S.current && S.current.client)) })));
       const err = el('p', { style: 'color:#F2C9B8;font-size:12px' });
       const go = async () => {
         if (!name.value.trim()) { err.textContent = 'Give the project a name.'; return; }
-        const res = await api.createProject(name.value.trim(), client.value);
+        const res = await api.createProject(name.value.trim());
         if (res && res.error) { err.textContent = res.error; return; }
         close();
         openResult(res);
@@ -417,7 +388,6 @@
       return [
         el('h2', { text: 'New project' }),
         el('div', { class: 'field' }, el('label', { for: 'npName', text: 'Name' }), name),
-        el('div', { class: 'field' }, el('label', { for: 'npClient', text: 'Client' }), client),
         err,
         el('div', { class: 'actions' }, el('button', { class: 'btn ghost', text: 'Cancel', onclick: close }), el('button', { class: 'btn', text: 'Create project', onclick: go })),
       ];
@@ -440,7 +410,7 @@
       const draw = () => {
         box.innerHTML = '';
         if (!p.shared) {
-          box.append(el('p', { text: `This uploads "${p.name}" to the EyeStudio Google Drive at Eye Refs / ${p.client} / ${p.name}. Everyone you invite gets a synced copy in their Documents folder.` }));
+          box.append(el('p', { text: `This uploads "${p.name}" to the EyeStudio Google Drive at Eye Refs / ${p.name}. Everyone you invite gets a synced copy in their Documents folder.` }));
           return;
         }
         const canManage = data.role !== 'member';
@@ -527,34 +497,6 @@
     $('#jobs').hidden = true;
     if (r && r.error) return toast(r.error, true);
     if (r && r.file) toast(`Saved as one file with ${r.files} items. Send it anywhere.`);
-  }
-
-  function manageClients() {
-    let list = [...(S.clients || [])];
-    openModal((close) => {
-      const box = el('div', { class: 'list' });
-      const draw = () => {
-        box.innerHTML = '';
-        for (const c of list) box.append(el('div', { class: 'li' }, el('span', { class: 'grow', text: c }), el('button', { class: 'btn ghost', style: 'height:32px;padding:0 12px', text: 'Remove', onclick: () => { list = list.filter((x) => x !== c); draw(); } })));
-        if (!list.length) box.append(el('p', { text: 'No clients yet.' }));
-      };
-      draw();
-      const input = el('input', { class: 'input', id: 'mcName', placeholder: 'Client name', maxlength: '60' });
-      const add = () => { const v = input.value.trim(); if (v && !list.some((x) => x.toLowerCase() === v.toLowerCase())) { list.push(v); list.sort((a, b) => a.localeCompare(b)); draw(); } input.value = ''; input.focus(); };
-      input.addEventListener('keydown', (e) => { if (e.key === 'Enter') add(); });
-      const save = async () => {
-        const r = await api.saveClients(list);
-        if (r && r.error) return toast(r.error, true);
-        S.clients = r.clients; close(); renderSidebar(); toast('Client list saved');
-      };
-      return [
-        el('h2', { text: 'Clients' }),
-        el('p', { text: 'Everyone sees these folders. Removing a client hides it from the list but keeps its folder and projects.' }),
-        el('div', { style: 'display:flex;gap:8px' }, input, el('button', { class: 'btn ghost', text: 'Add', onclick: add })),
-        box,
-        el('div', { class: 'actions' }, el('button', { class: 'btn ghost', text: 'Cancel', onclick: close }), el('button', { class: 'btn', text: 'Save', onclick: save })),
-      ];
-    });
   }
 
   function renameModal() {

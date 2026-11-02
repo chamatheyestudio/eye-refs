@@ -39,15 +39,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await win.screenshot({ path: `${OUT}/02-code.png` });
   await win.click('#screen >> text=Sign in');
 
-  // Admin: no clients yet, add them
-  await win.waitForSelector('#modalWrap:not([hidden])');
-  await win.click('text=Add clients');
-  for (const c of ['Hutong', 'Jou Jou', 'Indienne', 'Luna']) { await win.fill('#mcName', c); await win.press('#mcName', 'Enter'); }
-  await win.click('#modalWrap >> text=Save');
-  await sleep(300);
-  await win.click('#newProject');
+  // No projects yet: the new project window opens by itself
+  await win.waitForSelector('#npName');
   await win.fill('#npName', 'Spring Campaign');
-  await win.selectOption('#npClient', 'Hutong');
   await win.click('text=Create project');
   await win.waitForSelector('#title:not([hidden])');
   await win.evaluate(async (src) => {
@@ -82,7 +76,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const cloudB = new Cloud(() => srv.url, () => tB, fetch);
   const B = { email: 'nousaiba@eyestudio.ae', name: 'Nousaiba', initials: 'NO', deviceKey: 'nousaiba-bbb222' };
   const remote = (await cloudB.call('projects.list'))[0];
-  const recB = await lib.createProject(path.join(tmp, 'B'), B, remote.name, remote.client, { id: remote.id, owner: { email: remote.owner }, shared: { id: remote.id } });
+  const recB = await lib.createProject(path.join(tmp, 'B'), B, remote.name, '', { id: remote.id, owner: { email: remote.owner }, shared: { id: remote.id } });
   const syncB = new Sync(cloudB, recB, B, { presence() {}, status() {} });
   await sleep(4000); // let the app upload
   await syncB.tick(); await syncB.settle();
@@ -114,7 +108,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const result = await win.evaluate(() => ({ items: Board.live().length, status: document.querySelector('#tStatus').textContent }));
   await syncB.stop(); await sB.close();
   await app.close();
-  const driveDir = path.join(tmp, 'drive', 'Eye Refs', 'Hutong', 'Spring Campaign');
+  const driveDir = path.join(tmp, 'drive', 'Eye Refs', 'Spring Campaign');
   console.log(JSON.stringify({
     result, request: reqRes.ok,
     driveMedia: fs.readdirSync(path.join(driveDir, 'media')).length,

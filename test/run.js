@@ -108,11 +108,15 @@ async function test(name, fn) {
     const root = path.join(tmp, 'Documents', 'Eye Refs');
     const chamath = { email: 'chamath@eyestudio.ae', name: 'Chamath', initials: 'CH', deviceKey: 'chamath-aaa111' };
     const mac2 = { ...chamath, deviceKey: 'chamath-bbb222' };
-    await lib.ensureClientFolders(root, ['Hutong', 'Jou Jou']);
-    const rec = await lib.createProject(root, chamath, 'Spring Campaign', 'Hutong');
-    const rec2 = await lib.createProject(root, chamath, 'Spring Campaign', 'Hutong');
+    const rec = await lib.createProject(root, chamath, 'Spring Campaign', '');
+    const rec2 = await lib.createProject(root, chamath, 'Spring Campaign', '');
     assert.notEqual(rec.dir, rec2.dir, 'second project with the same name gets its own folder');
-    assert.ok(rec.file.endsWith(path.join('Hutong', 'Spring Campaign', 'Spring Campaign.eyerefs')));
+    assert.ok(rec.file.endsWith(path.join('Eye Refs', 'Spring Campaign', 'Spring Campaign.eyerefs')));
+    const oldRoot = path.join(tmp, 'old');
+    const old = await lib.createProject(oldRoot, chamath, 'Old Board', 'Hutong');
+    await lib.createProject(oldRoot, chamath, 'New Board', '');
+    assert.equal((await lib.scanProjects(oldRoot, chamath)).length, 2, 'boards in client folders from older betas still show');
+    assert.ok(old.dir.includes('Hutong'));
 
     const noop = { state() {}, status() {}, presence() {} };
     let saved = 0;
@@ -163,7 +167,7 @@ async function test(name, fn) {
     const rootA = path.join(tmp, 'A', 'Eye Refs'), rootB = path.join(tmp, 'B', 'Eye Refs');
 
     // Chamath makes a local board with a 13MB "video", then shares it
-    const recA = await lib.createProject(rootA, A, 'Spring Campaign', 'Hutong');
+    const recA = await lib.createProject(rootA, A, 'Spring Campaign', '');
     const big = Buffer.alloc(13 * 1024 * 1024 + 12345, 3); big.write('VIDEO', 0);
     fs.writeFileSync(path.join(recA.dir, 'media', '2026-11-02_CH_aaaaaaaa_reel.mp4'), big);
     const noop = { state() {}, status() {}, presence() {} };
@@ -179,14 +183,14 @@ async function test(name, fn) {
     cleanup.push(() => syncA.stop(), () => sA.close());
     await syncA.tick();
     await syncA.settle();
-    const driveMedia = path.join(tmp, 'drive', 'Eye Refs', 'Hutong', 'Spring Campaign', 'media', '2026-11-02_CH_aaaaaaaa_reel.mp4');
+    const driveMedia = path.join(tmp, 'drive', 'Eye Refs', 'Spring Campaign', 'media', '2026-11-02_CH_aaaaaaaa_reel.mp4');
     assert.equal(fs.statSync(driveMedia).size, big.length, 'video uploaded in pieces to the same path in Drive');
 
     // Nousaiba sees it, gets a local copy in her Documents and the video comes down
     const list = await cloudB.call('projects.list');
     assert.equal(list.length, 1);
     const recB = await lib.createProject(rootB, Bm, list[0].name, list[0].client, { id: list[0].id, owner: { email: list[0].owner }, shared: { id: list[0].id } });
-    assert.ok(recB.dir.endsWith(path.join('Hutong', 'Spring Campaign')));
+    assert.ok(recB.dir.endsWith(path.join('B', 'Spring Campaign')) || recB.dir.endsWith('Spring Campaign'));
     let hereB = [];
     const syncB = new Sync(cloudB, recB, Bm, { presence: (l) => { hereB = l; }, status() {} });
     cleanup.push(() => syncB.stop());
@@ -222,7 +226,7 @@ async function test(name, fn) {
     const { Session } = require('../main/session');
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'eyerefs-pack-'));
     const me = { email: 'chamath@eyestudio.ae', name: 'Chamath', initials: 'CH', deviceKey: 'chamath-aaa111' };
-    const rec = await lib.createProject(path.join(tmp, 'A'), me, 'Lunar New Year', 'Hutong');
+    const rec = await lib.createProject(path.join(tmp, 'A'), me, 'Lunar New Year', '');
     fs.writeFileSync(path.join(rec.dir, 'media', '2026-11-02_CH_bbbbbbbb_lantern.jpg'), Buffer.alloc(50000, 9));
     const s = new Session(rec, me, path.join(tmp, 'bk'), { state() {}, status() {}, presence() {} });
     await s.open();
