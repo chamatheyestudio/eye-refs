@@ -1,5 +1,5 @@
 // Eye Refs by Matte Black
-const { app, BrowserWindow, ipcMain, dialog, shell, globalShortcut, net, screen, Menu, safeStorage } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, globalShortcut, net, screen, Menu } = require('electron');
 const path = require('path');
 const fsp = require('fs').promises;
 const { pathToFileURL } = require('url');
@@ -42,17 +42,16 @@ function serverUrl() {
   return settings.server || process.env.EYEREFS_SERVER || (PKG.eyerefs && PKG.eyerefs.server) || '';
 }
 
+// The sign in token sits in the app's own settings file, readable only by this user.
+// No keychain, so macOS and Windows never ask for a password.
 function getToken() {
-  if (!settings.token) return null;
-  try {
-    if (settings.tokenEnc && safeStorage.isEncryptionAvailable()) return safeStorage.decryptString(Buffer.from(settings.token, 'base64'));
-  } catch (_) { return null; }
+  if (!settings.token || settings.tokenEnc) return null;
   return settings.token;
 }
 function setToken(t) {
-  if (!t) { delete settings.token; delete settings.tokenEnc; return; }
-  if (safeStorage.isEncryptionAvailable()) { settings.token = safeStorage.encryptString(t).toString('base64'); settings.tokenEnc = true; }
-  else { settings.token = t; settings.tokenEnc = false; }
+  delete settings.tokenEnc;
+  if (!t) { delete settings.token; return; }
+  settings.token = t;
 }
 
 const cloud = new Cloud(serverUrl, getToken, (url, opts) => net.fetch(url, opts));
@@ -79,6 +78,7 @@ async function boot() {
     const who = await cloud.call('me', {}, 12000);
     settings.email = who.email;
     settings.name = who.name;
+    if (who.token) setToken(who.token); // refreshed each launch, so the code is a one time thing
     identity = { admin: who.admin, team: who.team };
     await saveSettings();
   } catch (e) {

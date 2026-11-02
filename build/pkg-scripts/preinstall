@@ -1,6 +1,6 @@
 #!/bin/bash
-# Runs before Eye Refs installs: close any open copy, then remove the old app and old settings.
-# Projects in Documents/Eye Refs and board backups are never touched.
+# Runs before Eye Refs installs: close any open copy and remove the old app.
+# Your boards, unsaved boards, settings and sign in are all kept.
 pkill -x "Eye Refs" 2>/dev/null
 sleep 1
 pkill -9 -x "Eye Refs" 2>/dev/null
@@ -10,7 +10,6 @@ if [ -n "$USER_NAME" ] && [ "$USER_NAME" != "root" ]; then
   HOME_DIR=$(dscl . -read "/Users/$USER_NAME" NFSHomeDirectory 2>/dev/null | awk '{print $2}')
   if [ -n "$HOME_DIR" ]; then
     rm -rf "$HOME_DIR/Applications/Eye Refs.app"
-    rm -f "$HOME_DIR/Library/Application Support/Eye Refs/settings.json"
     rm -rf "$HOME_DIR/Library/Caches/ae.eyestudio.eyerefs" "$HOME_DIR/Library/Saved Application State/ae.eyestudio.eyerefs.savedState"
   fi
 fi

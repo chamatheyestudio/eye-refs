@@ -270,7 +270,8 @@ API['auth.verify'] = function (req) {
 API['me'] = function (req) {
   var me = readToken_(req.token);
   var team = readTeam_();
-  return { email: me.email, name: me.name, team: isTeam_(me.email), admin: isAdmin_(me.email, team), clients: team.clients || [], owner: ownerEmail_() };
+  // A fresh token each launch: people who use the app never have to enter a code again
+  return { email: me.email, name: me.name, team: isTeam_(me.email), admin: isAdmin_(me.email, team), clients: team.clients || [], owner: ownerEmail_(), token: makeToken_(me.email, me.name) };
 };
 
 API['clients.save'] = function (req) {
