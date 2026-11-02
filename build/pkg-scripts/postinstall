@@ -8,5 +8,7 @@ if [ -n "$USER_NAME" ] && [ "$USER_NAME" != "root" ]; then
   if [ -n "$HOME_DIR" ] && [ -d "$HOME_DIR/Documents" ]; then
     sudo -u "$USER_NAME" mkdir -p "$HOME_DIR/Documents/Eye Refs"
   fi
+  # Open the new version, so an update feels like a restart
+  launchctl asuser "$(id -u "$USER_NAME")" sudo -u "$USER_NAME" open "/Applications/Eye Refs.app" 2>/dev/null || true
 fi
 exit 0

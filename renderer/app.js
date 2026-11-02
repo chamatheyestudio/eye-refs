@@ -372,6 +372,22 @@
     renderPresence(); renderSidebar();
   });
   api.onOpenFile(async (file) => openResult(await api.openProjectFile(file)));
+  // Updates download by themselves; one click restarts into the new version
+  const showUpdate = (u) => {
+    if (!u) return;
+    const b = $('#update');
+    b.hidden = false;
+    b.title = `Eye Refs ${u.version} is ready`;
+  };
+  api.onUpdate(showUpdate);
+  api.updateState().then(showUpdate);
+  $('#update').addEventListener('click', async () => {
+    const b = $('#update');
+    b.disabled = true; b.textContent = 'Updating';
+    const r = await api.installUpdate();
+    if (r && r.error) { b.disabled = false; b.textContent = 'Restart to update'; toast("Couldn't start the update. Try again in a moment.", true); }
+  });
+
   api.onCloud((st) => {
     if (!S.current || st.projectId !== S.current.id) return;
     S.cloud = st;

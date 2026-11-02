@@ -281,6 +281,19 @@ async function test(name, fn) {
     fs.rmSync(tmp, { recursive: true, force: true });
   });
 
+  await test('updates: only newer full releases count', async () => {
+    const Module = require('module');
+    const load = Module._load;
+    Module._load = function (r, ...rest) { return r === 'electron' ? { app: {}, net: {}, shell: {} } : load.call(this, r, ...rest); };
+    const { newer } = require('../main/updater');
+    Module._load = load;
+    assert.ok(newer('1.0.1', '1.0.0'));
+    assert.ok(newer('1.0.0', '1.0.0-beta.11'));
+    assert.ok(newer('1.10.0', '1.9.9'));
+    assert.ok(!newer('1.0.0', '1.0.0'));
+    assert.ok(!newer('1.1.0-beta.1', '1.0.0'), 'test versions never go to the team');
+  });
+
   await require('./server.test.js')(test);
   console.log(`\n${passed} passed`);
 })();

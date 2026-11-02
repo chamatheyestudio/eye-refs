@@ -106,6 +106,11 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await sleep(800);
   await win.click('#modalWrap >> text=Done');
 
+  // An update arrives
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.send('update:ready', { version: '1.0.2' }));
+  await sleep(300);
+  await win.screenshot({ path: `${OUT}/07b-update.png` });
+
   // Account menu
   await win.click('#account');
   await sleep(200);

@@ -1,7 +1,7 @@
 {
   "name": "eye-refs",
   "productName": "Eye Refs",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Reference boards for EyeStudio, with video and Google Drive collaboration.",
   "author": "Matte Black",
   "main": "main/main.js",
@@ -12,6 +12,7 @@
     "dist:win": "electron-builder --win"
   },
   "dependencies": {
+    "electron-updater": "6.6.2",
     "ffmpeg-static": "5.2.0",
     "yauzl": "^3.2.0",
     "yazl": "^2.5.1"

@@ -62,6 +62,9 @@ function makeMe(email, name) {
   return { email: email.toLowerCase(), name: n, initials: initialsFrom(n, email), deviceKey: `${local}-${settings.deviceId}` };
 }
 
+const { createUpdater } = require('./updater');
+const updater = createUpdater((u) => send('update:ready', u));
+
 function send(ch, payload) {
   if (win && !win.isDestroyed()) win.webContents.send(ch, payload);
 }
@@ -184,6 +187,11 @@ function handle(ch, fn) {
 }
 
 handle('boot', boot);
+handle('update:state', async () => updater.state());
+handle('update:install', async () => {
+  if (session) await session.flush();
+  return updater.install();
+});
 
 handle('connect:set', async (url) => {
   url = String(url || '').trim();
@@ -496,6 +504,7 @@ if (!app.requestSingleInstanceLock()) {
     }
     pendingOpenFile = pendingOpenFile || fileFromArgs(process.argv);
     createWindow();
+    updater.start();
   });
 }
 

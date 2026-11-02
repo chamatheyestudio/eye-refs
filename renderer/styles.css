@@ -147,6 +147,8 @@ body.no-sidebar #title { left: 16px; padding-left: 4px; }
 .stack .avatar + .avatar { margin-left: -8px; }
 #presence .p-text { font-size: 12px; color: var(--soft); white-space: nowrap; }
 #share { height: 44px; }
+#update { height: 44px; background: var(--lime-tint); color: var(--lime); }
+#update:hover { background: var(--lime); color: var(--ink); }
 .winctl { display: flex; gap: 2px; padding: 4px; }
 .winctl .icon-btn { width: 34px; height: 34px; }
 
