@@ -1,0 +1,93 @@
+{
+  "name": "eye-refs",
+  "productName": "Eye Refs",
+  "version": "1.0.0",
+  "description": "Reference boards for EyeStudio, with video and Google Drive collaboration.",
+  "author": "Matte Black",
+  "main": "main/main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "node test/run.js",
+    "dist:mac": "electron-builder --mac",
+    "dist:win": "electron-builder --win"
+  },
+  "dependencies": {
+    "ffmpeg-static": "5.2.0"
+  },
+  "devDependencies": {
+    "electron": "33.4.11",
+    "electron-builder": "25.1.8"
+  },
+  "build": {
+    "appId": "ae.eyestudio.eyerefs",
+    "productName": "Eye Refs",
+    "copyright": "Matte Black",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main/**",
+      "shared/**",
+      "renderer/**",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "node_modules/ffmpeg-static/**"
+    ],
+    "fileAssociations": [
+      {
+        "ext": "eyerefs",
+        "name": "Eye Refs Project",
+        "description": "Eye Refs project",
+        "role": "Editor",
+        "icon": "build/file"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.graphics-design",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.icns",
+      "identity": null,
+      "extendInfo": {
+        "NSDesktopFolderUsageDescription": "Eye Refs opens images you drop from your desktop."
+      }
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "shortcutName": "Eye Refs"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "chamatheyestudio",
+        "repo": "eye-refs",
+        "releaseType": "release"
+      }
+    ]
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/chamatheyestudio/eye-refs.git"
+  }
+}

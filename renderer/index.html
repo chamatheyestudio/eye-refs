@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' file: data: blob:; media-src 'self' file: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self'; connect-src 'self'">
+<title>Eye Refs</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body class="has-sidebar">
+
+<div id="canvas" class="grid" tabindex="-1">
+  <div id="world"></div>
+  <div id="overlay"></div>
+  <div id="marquee" hidden></div>
+</div>
+
+<aside id="sidebar" class="panel" aria-label="Projects">
+  <div class="side-head">
+    <span class="logo" data-i="logo"></span>
+    <span class="app-name">Eye Refs</span>
+    <button class="icon-btn small" id="hideSidebar" aria-label="Hide sidebar" data-i="sidebar" style="margin-left:auto"></button>
+  </div>
+  <label class="search" for="search">
+    <span data-i="search"></span>
+    <input id="search" type="text" placeholder="Search" aria-label="Search projects" spellcheck="false">
+    <span class="kbd" id="searchKbd"></span>
+  </label>
+  <div class="seg" role="tablist" aria-label="Show">
+    <button data-filter="all" class="on" role="tab">All</button>
+    <button data-filter="mine" role="tab">Mine</button>
+    <button data-filter="shared" role="tab">Shared</button>
+  </div>
+  <div id="tree" role="tree"></div>
+  <div class="side-foot">
+    <div style="display:flex;gap:4px">
+      <button class="foot-btn" id="newProject"><span data-i="plus"></span>New project</button>
+    </div>
+    <button class="account" id="account" aria-label="Account and settings">
+      <span class="avatar" id="meAvatar"></span>
+      <span style="display:flex;flex-direction:column;min-width:0;line-height:1.2">
+        <span class="who-name" id="meName"></span>
+        <span class="who-sub">Saving to your Google Drive</span>
+      </span>
+    </button>
+  </div>
+</aside>
+
+<div id="title" class="pill" hidden>
+  <button class="logo logo-btn" id="showSidebar" aria-label="Show sidebar" data-i="logo" hidden></button>
+  <span class="t-name" id="tName"></span>
+  <span class="t-client" id="tClient"></span>
+  <span class="t-lock" id="tLock" hidden data-i="lock" title="Canvas locked"></span>
+  <span class="t-status" id="tStatus"></span>
+</div>
+
+<div id="topRight">
+  <div id="presence" class="pill" hidden>
+    <span class="stack" id="pStack"></span>
+    <span class="p-text" id="pText"></span>
+  </div>
+  <button class="btn" id="share" hidden>Share</button>
+  <div class="pill winctl" id="winctl">
+    <button class="icon-btn" id="wMin" aria-label="Minimize" data-i="min"></button>
+    <button class="icon-btn" id="wMax" aria-label="Maximize" data-i="max"></button>
+    <button class="icon-btn" id="wClose" aria-label="Close" data-i="close"></button>
+  </div>
+</div>
+
+<div id="toolbar" class="pill" role="toolbar" aria-label="Tools">
+  <button class="icon-btn on" data-tool="select" aria-label="Select" title="Select" data-i="select"></button>
+  <button class="icon-btn" data-tool="hand" aria-label="Pan" title="Pan (Alt + drag, or middle mouse)" data-i="hand"></button>
+  <span class="sep"></span>
+  <button class="icon-btn" id="tAddImage" aria-label="Add images" title="Add images" data-i="image"></button>
+  <button class="icon-btn" id="tAddVideo" aria-label="Add videos" title="Add videos" data-i="video"></button>
+  <button class="icon-btn" id="tNote" aria-label="Add note" title="Note" data-i="note"></button>
+  <span class="sep"></span>
+  <button class="icon-btn" id="tTop" aria-label="Always on top" title="Always on top" data-i="pin"></button>
+  <button class="icon-btn" id="tThrough" aria-label="Click through" title="Click through" data-i="through"></button>
+</div>
+
+<div id="zoom" class="pill">
+  <button class="icon-btn" id="zOut" aria-label="Zoom out" data-i="minus"></button>
+  <button class="z-val" id="zVal" aria-label="Fit everything">100%</button>
+  <button class="icon-btn" id="zIn" aria-label="Zoom in" data-i="plus"></button>
+</div>
+
+<div id="videoBar" class="pill" hidden>
+  <button class="icon-btn" id="vPlay" aria-label="Play" data-i="play"></button>
+  <span class="time" id="vTime">0:00 / 0:00</span>
+  <div class="track" id="vTrack" aria-label="Scrub">
+    <div class="rail"></div>
+    <div class="range" id="vRange"></div>
+    <div class="mark" id="vIn" title="Start"></div>
+    <div class="mark" id="vOut" title="End"></div>
+    <div class="head" id="vHead"></div>
+  </div>
+  <button class="icon-btn" id="vLoop" aria-label="Loop" title="Loop" data-i="loop"></button>
+  <button class="speed" id="vSpeed" title="Speed">1x</button>
+  <button class="icon-btn" id="vMute" aria-label="Sound" title="Sound" data-i="muted"></button>
+  <button class="icon-btn" id="vGrab" aria-label="Grab frame" title="Grab frame (F)" data-i="camera"></button>
+</div>
+
+<div id="jobs" class="pill" hidden><span class="ring"></span><span id="jobText"></span></div>
+<div id="menu" class="menu" hidden role="menu"></div>
+<div id="modalWrap" hidden></div>
+<div id="toast" role="status" aria-live="polite"></div>
+<div id="screen" hidden></div>
+
+<script src="icons.js"></script>
+<script src="ui.js"></script>
+<script src="board.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
