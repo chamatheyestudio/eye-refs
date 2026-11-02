@@ -20,7 +20,7 @@
     const s = $('#screen');
     s.innerHTML = '';
     const card = el('div', { class: 'card' }, el('span', { class: 'logo', html: ICONS.logo.replace('width="14" height="14"', 'width="26" height="26"') }), build());
-    s.append(card, el('div', { class: 'credit', text: 'Eye Refs Beta by Matte Black' }));
+    s.append(card, el('div', { class: 'credit', text: 'Eye Refs by Matte Black' }));
     s.hidden = false;
     const f = s.querySelector('input'); if (f) f.focus();
   }
@@ -32,7 +32,7 @@
       const go = async () => { err.textContent = ''; const res = await api.connect(input.value); if (res && res.error) err.textContent = res.error; else route(res); };
       input.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
       screen(() => el('div', { style: 'display:contents' },
-        el('h1', { text: 'Eye Refs' }), el('span', { class: 'beta', text: 'Beta' }),
+        el('h1', { text: 'Eye Refs' }),
         el('p', { text: 'Paste the EyeStudio connection link. You only do this once.' }),
         input, err,
         el('div', { class: 'btns' }, el('button', { class: 'btn', text: 'Connect', onclick: go }))));
@@ -77,7 +77,7 @@
     btn.onclick = go;
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
     screen(() => el('div', { style: 'display:contents' },
-      el('h1', { text: 'Eye Refs' }), el('span', { class: 'beta', text: 'Beta' }),
+      el('h1', { text: 'Eye Refs' }),
       el('p', { text: 'Sign in with your EyeStudio email. We send you a 6 digit code, no password.' }),
       field, err, el('div', { class: 'btns' }, btn)));
   }

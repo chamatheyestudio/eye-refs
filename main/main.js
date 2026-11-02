@@ -441,7 +441,7 @@ function createWindow() {
     frame: false,
     backgroundColor: '#1C1B1A',
     show: false,
-    title: 'Eye Refs Beta',
+    title: 'Eye Refs',
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true, spellcheck: false },
   });
   win.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));

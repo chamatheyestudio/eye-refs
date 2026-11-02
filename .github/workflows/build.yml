@@ -2,7 +2,7 @@ name: Build installers
 
 # Every push to main builds both installers.
 # They are published only when package.json has a version that has no release yet
-# (1.0.0-beta.2, 1.0.0-beta.3, ...). While in beta, releases are always pre-releases.
+# Versions with a dash (1.1.0-beta.1) go out as pre-releases, plain versions (1.0.1) as full releases.
 on:
   workflow_dispatch:
   push:
@@ -21,17 +21,11 @@ jobs:
     outputs:
       version: ${{ steps.v.outputs.version }}
       publish: ${{ steps.v.outputs.publish }}
+      type: ${{ steps.v.outputs.type }}
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
-      - name: Remove the accidental v1.0.0 release (published before the app was marked beta)
-        run: |
-          if gh release view v1.0.0 -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
-            gh release delete v1.0.0 -R "$GITHUB_REPOSITORY" --cleanup-tag --yes
-            echo "Deleted release v1.0.0"
-          fi
-          git push origin :refs/tags/v1.0.0 2>/dev/null || true
       - name: Decide whether this version is new
         id: v
         run: |
@@ -45,8 +39,8 @@ jobs:
             echo "Publishing v$VERSION"
           fi
           case "$VERSION" in
-            *-*) ;;
-            *) echo "::error::Eye Refs is in beta. Use a version like 1.0.0-beta.2 in package.json."; exit 1 ;;
+            *-*) echo "type=prerelease" >> "$GITHUB_OUTPUT" ;;
+            *) echo "type=release" >> "$GITHUB_OUTPUT" ;;
           esac
 
   mac:
@@ -60,6 +54,9 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
       - run: npm ci
+      - name: Release or pre-release
+        shell: bash
+        run: node -e "const f='package.json',p=require('./'+f);p.build.publish[0].releaseType='${{ needs.prepare.outputs.type }}';require('fs').writeFileSync(f,JSON.stringify(p,null,2))"
       - name: Apple Silicon build
         run: npx electron-builder --mac dmg pkg --arm64 --publish ${{ needs.prepare.outputs.publish }}
       - name: Intel build (with the Intel copy of ffmpeg)
@@ -85,6 +82,9 @@ jobs:
         with: { node-version: 22 }
       - run: npm ci
       - run: npm test
+      - name: Release or pre-release
+        shell: bash
+        run: node -e "const f='package.json',p=require('./'+f);p.build.publish[0].releaseType='${{ needs.prepare.outputs.type }}';require('fs').writeFileSync(f,JSON.stringify(p,null,2))"
       - run: npx electron-builder --win nsis --x64 --publish ${{ needs.prepare.outputs.publish }}
       - uses: actions/upload-artifact@v4
         with: { name: eye-refs-windows, path: 'dist/*.exe' }
