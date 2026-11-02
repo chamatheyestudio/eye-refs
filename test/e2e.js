@@ -30,7 +30,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
   // Sign in with an emailed code
   await win.waitForSelector('#siEmail');
-  await win.fill('#siEmail', 'chamath@eyestudio.ae');
+  await win.fill('#siEmail', 'chamath');
   await sleep(200);
   await win.screenshot({ path: `${OUT}/01-signin.png` });
   await win.click('text=Send me a code');
@@ -48,6 +48,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   }, SRC);
   await sleep(1200);
   await win.screenshot({ path: `${OUT}/03-board-local.png` });
+  await win.evaluate(() => { const v = [...Board.items.values()].find((it) => it.type === 'video'); Board.sel = new Set([v.id]); Board.focusAll(); });
+  await sleep(400);
+  await win.screenshot({ path: `${OUT}/03a-video.png` });
+  await win.evaluate(() => Board.clearSel());
 
   await win.screenshot({ path: `${OUT}/03b-untitled.png` });
   // Share asks for a name first, then saves into Documents/Eye Refs

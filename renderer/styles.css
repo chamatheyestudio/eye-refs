@@ -158,15 +158,17 @@ body.has-sidebar #toolbar { left: calc(50% + 144px); }
 #zoom .z-val:hover { background: var(--hover); }
 
 /* Video bar */
-#videoBar { position: fixed; z-index: 16; display: flex; align-items: center; gap: 6px; padding: 4px 12px 4px 4px; height: 44px; }
-#videoBar .icon-btn { width: 36px; height: 36px; }
-#videoBar .time { font: 500 11px var(--mono); color: var(--soft); min-width: 92px; text-align: center; font-variant-numeric: tabular-nums; }
-.track { position: relative; width: 260px; height: 28px; cursor: pointer; flex-shrink: 1; }
-.track .rail { position: absolute; left: 0; right: 0; top: 13px; height: 2px; background: rgba(255,255,255,0.18); border-radius: 1px; }
-.track .range { position: absolute; top: 12px; height: 4px; background: rgba(215, 240, 74, 0.35); border-radius: 2px; }
-.track .head { position: absolute; top: 7px; width: 14px; height: 14px; margin-left: -7px; border-radius: 50%; background: var(--text); }
-.track .mark { position: absolute; top: 5px; width: 6px; height: 18px; margin-left: -3px; border-radius: 3px; background: var(--lime); cursor: ew-resize; }
-#videoBar .speed { height: 32px; min-width: 44px; padding: 0 8px; border-radius: 999px; border: 0; background: transparent; color: var(--soft); font: 500 12px var(--mono); cursor: pointer; }
+#videoBar { position: fixed; z-index: 16; display: flex; align-items: center; gap: 2px; padding: 3px 8px 3px 3px; height: 32px; }
+#videoBar .icon-btn { width: 26px; height: 26px; }
+#videoBar .icon-btn svg { width: 14px; height: 14px; }
+#videoBar .icon-btn.on { background: transparent; color: var(--lime); }
+#videoBar .time { font: 500 10px var(--mono); color: var(--soft); min-width: 72px; padding: 0 4px; text-align: center; font-variant-numeric: tabular-nums; }
+.track { position: relative; width: 160px; height: 22px; margin: 0 6px; cursor: pointer; flex-shrink: 1; }
+.track .rail { position: absolute; left: 0; right: 0; top: 10px; height: 2px; background: rgba(255,255,255,0.18); border-radius: 1px; }
+.track .range { position: absolute; top: 10px; height: 2px; background: rgba(215, 240, 74, 0.5); border-radius: 1px; }
+.track .head { position: absolute; top: 6px; width: 10px; height: 10px; margin-left: -5px; border-radius: 50%; background: var(--text); }
+.track .mark { position: absolute; top: 5px; width: 4px; height: 12px; margin-left: -2px; border-radius: 2px; background: var(--lime); cursor: ew-resize; }
+#videoBar .speed { height: 26px; min-width: 32px; padding: 0 6px; border-radius: 999px; border: 0; background: transparent; color: var(--soft); font: 500 10px var(--mono); cursor: pointer; }
 #videoBar .speed:hover { background: var(--hover); color: var(--text); }
 
 /* Menus, modals, toasts */
@@ -220,3 +222,9 @@ select.input { appearance: none; background-image: url("data:image/svg+xml,%3Csv
 #screen .err { color: #F2C9B8; font-size: 12px; min-height: 16px; }
 
 body.clickthrough #canvas { outline: 2px solid rgba(215, 240, 74, 0.5); outline-offset: -2px; }
+
+/* Sign in: name, then a fixed @eyestudio.ae */
+.email-field { display: flex; align-items: center; width: 100%; position: relative; cursor: text; }
+.email-field .input { flex: 1; text-align: right; font-size: 14px; padding-right: 128px; }
+.email-field .input.free { text-align: center; padding-right: 16px; }
+.email-field .suffix { position: absolute; right: 18px; color: var(--faint); font-size: 14px; pointer-events: none; }

@@ -47,22 +47,39 @@
   }
 
   function signInScreen(email) {
-    const input = el('input', { class: 'input', id: 'siEmail', type: 'email', value: email, placeholder: 'you@eyestudio.ae', 'aria-label': 'Email' });
+    // EyeStudio people only type their name; anyone else types a full email
+    const DOMAIN = '@eyestudio.ae';
+    const start = email.endsWith(DOMAIN) ? email.slice(0, -DOMAIN.length) : email;
+    const input = el('input', { class: 'input', id: 'siEmail', type: 'text', value: start, placeholder: 'name', 'aria-label': 'Email', spellcheck: 'false', autocapitalize: 'off', autocomplete: 'username' });
+    const suffix = el('span', { class: 'suffix', text: DOMAIN });
+    const field = el('label', { class: 'email-field' }, input, suffix);
+    const full = () => { const v = input.value.trim().toLowerCase(); return v.includes('@') ? v : v + DOMAIN; };
+    const syncSuffix = () => {
+      const free = input.value.includes('@');
+      suffix.hidden = free;
+      input.classList.toggle('free', free);
+      if (!free && suffix.offsetWidth) input.style.paddingRight = (suffix.offsetWidth + 19) + 'px';
+      else input.style.paddingRight = '';
+    };
+    requestAnimationFrame(syncSuffix);
+    input.addEventListener('input', syncSuffix);
+    syncSuffix();
     const err = el('div', { class: 'err' });
     const btn = el('button', { class: 'btn', text: 'Send me a code' });
     const go = async () => {
       err.textContent = '';
       btn.disabled = true; btn.textContent = 'Sending';
-      const res = await api.requestCode(input.value);
+      if (!input.value.trim()) { btn.disabled = false; btn.textContent = 'Send me a code'; err.textContent = 'Type your name.'; return; }
+      const res = await api.requestCode(full());
       btn.disabled = false; btn.textContent = 'Send me a code';
-      if (res && res.error) err.textContent = res.error; else codeScreen(input.value.trim().toLowerCase());
+      if (res && res.error) err.textContent = res.error; else codeScreen(full());
     };
     btn.onclick = go;
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
     screen(() => el('div', { style: 'display:contents' },
       el('h1', { text: 'Eye Refs' }), el('span', { class: 'beta', text: 'Beta' }),
-      el('p', { text: 'Sign in with your email. We send you a 6 digit code, no password.' }),
-      input, err, el('div', { class: 'btns' }, btn)));
+      el('p', { text: 'Sign in with your EyeStudio email. We send you a 6 digit code, no password.' }),
+      field, err, el('div', { class: 'btns' }, btn)));
   }
 
   function codeScreen(email) {

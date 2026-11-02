@@ -1048,10 +1048,12 @@
     for (const b of [$('#vLoop'), $('#vSpeed'), $('#vGrab')]) b.disabled = B.readOnly;
     // Place under the video, kept inside the window
     const r = B.els.get(id).getBoundingClientRect();
-    const bw = vbar.offsetWidth || 560, bh = 44;
+    // The scrubber stretches with the video, so the bar never outgrows it by much
+    $('#vTrack').style.width = Math.round(Math.max(70, Math.min(220, r.width - 230))) + 'px';
+    const bw = vbar.offsetWidth || 400, bh = 32;
     let x = r.left + r.width / 2 - bw / 2;
-    let y = r.bottom + 12;
-    if (y + bh > window.innerHeight - 76) y = Math.max(76, r.top - bh - 12);
+    let y = r.bottom + 8;
+    if (y + bh > window.innerHeight - 76) y = Math.max(76, r.top - bh - 8);
     if (y + bh > window.innerHeight - 76 || y < 76) y = window.innerHeight - 76 - bh;
     x = Math.max(16, Math.min(window.innerWidth - bw - 16, x));
     vbar.style.left = x + 'px';
