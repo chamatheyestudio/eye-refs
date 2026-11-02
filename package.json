@@ -1,7 +1,7 @@
 {
   "name": "eye-refs",
   "productName": "Eye Refs",
-  "version": "1.0.0-beta.4",
+  "version": "1.0.0-beta.5",
   "description": "Reference boards for EyeStudio, with video and Google Drive collaboration.",
   "author": "Matte Black",
   "main": "main/main.js",
@@ -50,6 +50,13 @@
       "category": "public.app-category.graphics-design",
       "target": [
         {
+          "target": "pkg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        },
+        {
           "target": "dmg",
           "arch": [
             "arm64",
@@ -87,7 +94,19 @@
         "releaseType": "prerelease"
       }
     ],
-    "afterPack": "build/afterPack.js"
+    "afterPack": "build/afterPack.js",
+    "pkg": {
+      "scripts": "pkg-scripts",
+      "installLocation": "/Applications",
+      "isRelocatable": false,
+      "isVersionChecked": false,
+      "overwriteAction": "upgrade",
+      "allowAnywhere": false,
+      "allowCurrentUserHome": false,
+      "mustClose": [
+        "ae.eyestudio.eyerefs"
+      ]
+    }
   },
   "repository": {
     "type": "git",

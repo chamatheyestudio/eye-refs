@@ -61,14 +61,18 @@ jobs:
         with: { node-version: 22 }
       - run: npm ci
       - name: Apple Silicon build
-        run: npx electron-builder --mac dmg --arm64 --publish ${{ needs.prepare.outputs.publish }}
+        run: npx electron-builder --mac dmg pkg --arm64 --publish ${{ needs.prepare.outputs.publish }}
       - name: Intel build (with the Intel copy of ffmpeg)
         run: |
           rm -f node_modules/ffmpeg-static/ffmpeg
           npm_config_arch=x64 node node_modules/ffmpeg-static/install.js
-          npx electron-builder --mac dmg --x64 --publish ${{ needs.prepare.outputs.publish }}
+          npx electron-builder --mac dmg pkg --x64 --publish ${{ needs.prepare.outputs.publish }}
       - uses: actions/upload-artifact@v4
-        with: { name: eye-refs-mac, path: 'dist/*.dmg' }
+        with:
+          name: eye-refs-mac
+          path: |
+            dist/*.dmg
+            dist/*.pkg
 
   windows:
     needs: prepare

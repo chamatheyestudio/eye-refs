@@ -1,0 +1,4 @@
+#!/bin/bash
+# Clear the download flag so macOS opens the app without the "damaged" warning.
+xattr -dr com.apple.quarantine "/Applications/Eye Refs.app" 2>/dev/null
+exit 0

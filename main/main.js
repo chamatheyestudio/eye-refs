@@ -29,6 +29,8 @@ const ROOT = () => process.env.EYEREFS_ROOT || path.join(app.getPath('documents'
 // ---------- settings and sign in ----------
 async function loadSettings() {
   settings = (await readJson(settingsPath())) || {};
+  // Settings from betas 1 to 3 (Drive folder setup) are dropped for a clean start.
+  if ((settings.v || 0) < 4) { settings = { v: 4 }; await saveSettings(); }
   if (!settings.deviceId) { settings.deviceId = randCode(6); await saveSettings(); }
 }
 async function saveSettings() {
