@@ -57,6 +57,23 @@ jobs:
       - name: Release or pre-release
         shell: bash
         run: node -e "const f='package.json',p=require('./'+f);p.build.publish[0].releaseType='${{ needs.prepare.outputs.type }}';require('fs').writeFileSync(f,JSON.stringify(p,null,2))"
+      - name: Load the Eye Refs signing certificate
+        env:
+          P12: ${{ secrets.MAC_CERT_P12 }}
+          PW: ${{ secrets.MAC_CERT_PASSWORD }}
+        run: |
+          if [ -z "$P12" ]; then echo "No certificate, signing ad hoc"; exit 0; fi
+          KC="$RUNNER_TEMP/eyerefs.keychain-db"
+          echo "$P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p ci "$KC"
+          security set-keychain-settings -lut 21600 "$KC"
+          security unlock-keychain -p ci "$KC"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KC" -P "$PW" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k ci "$KC" > /dev/null
+          security list-keychains -d user -s "$KC" $(security list-keychains -d user | tr -d '"')
+          rm "$RUNNER_TEMP/cert.p12"
+          echo "EYEREFS_SIGN_IDENTITY=Eye Refs by Matte Black" >> "$GITHUB_ENV"
+          echo "EYEREFS_SIGN_KEYCHAIN=$KC" >> "$GITHUB_ENV"
       - name: Apple Silicon build
         run: npx electron-builder --mac dmg pkg --arm64 --publish ${{ needs.prepare.outputs.publish }}
       - name: Intel build (with the Intel copy of ffmpeg)
