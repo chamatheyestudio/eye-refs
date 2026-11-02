@@ -61,7 +61,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await win.screenshot({ path: `${OUT}/03c-save.png` });
   await win.press('#svName', 'Enter');
   await win.waitForSelector('#shEmails');
-  await win.fill('#shEmails', 'nousaiba@eyestudio.ae');
+  await win.fill('#shEmails', 'nousaiba');
   await win.screenshot({ path: `${OUT}/04-share.png` });
   await win.click('#modalWrap >> text=Share board');
   await win.waitForSelector('text=People on this board');

@@ -448,9 +448,13 @@
     if (data && data.error) return toast(data.error, true);
     openModal((close) => {
       const box = el('div', { style: 'display:flex;flex-direction:column;gap:14px' });
-      const emails = el('input', { class: 'input', id: 'shEmails', placeholder: 'name@eyestudio.ae, another@email.com', spellcheck: 'false' });
+      // Names get @eyestudio.ae added; a full email works for anyone outside
+      const emails = el('input', { class: 'input', id: 'shEmails', placeholder: 'nousaiba, shoaib', spellcheck: 'false', autocapitalize: 'off' });
       const err = el('p', { style: 'color:#F2C9B8;font-size:12px' });
-      const parse = () => emails.value.split(/[\s,;]+/).map((x) => x.trim()).filter(Boolean);
+      const parse = () => [...new Set(emails.value.split(/[\s,;]+/).map((x) => x.trim().toLowerCase()).filter(Boolean).map((x) => (x.includes('@') ? x : x + '@eyestudio.ae')))];
+      const preview = el('div', { class: 'invite-preview' });
+      const showPreview = () => { preview.textContent = parse().join(', '); };
+      emails.addEventListener('input', showPreview);
       const draw = () => {
         box.innerHTML = '';
         if (!p.shared) {
@@ -489,7 +493,7 @@
       btn.onclick = async () => {
         err.textContent = '';
         const list = parse();
-        if (p.shared && !list.length) { err.textContent = 'Add an email address.'; return; }
+        if (p.shared && !list.length) { err.textContent = 'Type a name.'; return; }
         btn.disabled = true; btn.textContent = p.shared ? 'Inviting' : 'Uploading';
         const r = p.shared ? await api.invite(p.id, list) : await api.share(p.id, list);
         btn.disabled = false; btn.textContent = 'Invite';
@@ -497,6 +501,7 @@
         if (!p.shared) { p.shared = r.shared; data = r.members; toast(list.length ? 'Shared. Invites sent, and the board is uploading.' : 'Shared. The board is uploading to the EyeStudio Drive.'); }
         else toast(list.length === 1 ? 'Invite sent' : `${list.length} invites sent`);
         emails.value = '';
+        showPreview();
         await refresh(); rescan(); syncChrome();
       };
       emails.addEventListener('keydown', (e) => { if (e.key === 'Enter') btn.click(); });
@@ -505,7 +510,7 @@
       return [
         el('h2', { text: p.shared ? 'Share' : `Share "${p.name}"` }),
         box,
-        canInvite ? el('div', { class: 'field' }, el('label', { for: 'shEmails', text: 'Invite by email' }), emails) : null,
+        canInvite ? el('div', { class: 'field' }, el('label', { for: 'shEmails', text: 'Invite people' }), emails, preview) : null,
         err,
         el('div', { class: 'actions' }, el('button', { class: 'btn ghost', text: 'Done', onclick: close }), canInvite ? btn : null),
       ];
