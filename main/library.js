@@ -41,6 +41,7 @@ function toRecord(found, clientFolder, me) {
     created: d.created || 0,
     mine: !d.owner || !me || d.owner.email === me.email,
     shared: d.shared || null,
+    scratch: !!d.scratch,
     dir: found.dir,
     file: found.file,
   };
@@ -83,11 +84,36 @@ async function createProject(root, me, name, client, extra) {
     owner: (extra && extra.owner) || { email: me.email, name: me.name },
     created: Date.now(),
     shared: (extra && extra.shared) || null,
+    scratch: !!(extra && extra.scratch),
     app: 'Eye Refs by Matte Black',
   };
   const file = path.join(dir, `${folder}.eyerefs`);
   await writeJson(file, data);
   return toRecord({ data, file, dir }, client, me);
+}
+
+// Move an unsaved board into Documents/Eye Refs/<name> and give it its name.
+async function saveScratch(rec, root, name) {
+  const clean = cleanFolderName(name);
+  await fsp.mkdir(root, { recursive: true });
+  const folder = await uniqueChild(root, clean);
+  const dest = path.join(root, folder);
+  try {
+    await fsp.rename(rec.dir, dest);
+  } catch (e) {
+    if (e.code !== 'EXDEV') throw e;
+    await fsp.cp(rec.dir, dest, { recursive: true });
+    await fsp.rm(rec.dir, { recursive: true, force: true });
+  }
+  const oldFile = path.join(dest, path.basename(rec.file));
+  const file = path.join(dest, `${folder}.eyerefs`);
+  const data = await readProjectFile(oldFile);
+  if (!data) throw new Error('Project file is missing.');
+  data.name = clean;
+  data.scratch = false;
+  await writeJson(file, data);
+  if (oldFile !== file) { try { await fsp.unlink(oldFile); } catch (_) {} }
+  return toRecord({ data, file, dir: dest }, '', null);
 }
 
 async function updateProject(rec, patch) {
@@ -105,4 +131,4 @@ async function openProjectFile(file, me) {
   return toRecord({ data, file, dir }, '', me);
 }
 
-module.exports = { scanProjects, createProject, updateProject, openProjectFile, readProjectFile, makeProjectDir, exists };
+module.exports = { saveScratch, scanProjects, createProject, updateProject, openProjectFile, readProjectFile, makeProjectDir, exists };

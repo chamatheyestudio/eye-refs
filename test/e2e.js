@@ -39,11 +39,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await win.screenshot({ path: `${OUT}/02-code.png` });
   await win.click('#screen >> text=Sign in');
 
-  // No projects yet: the new project window opens by itself
-  await win.waitForSelector('#npName');
-  await win.fill('#npName', 'Spring Campaign');
-  await win.click('text=Create project');
+  // Like PureRef: straight onto a blank untitled board
   await win.waitForSelector('#title:not([hidden])');
+  await win.waitForFunction(() => document.querySelector('#tName').textContent === 'Untitled');
   await win.evaluate(async (src) => {
     await Board.addPaths([`${src}/mandel.png`, `${src}/warm.jpg`, `${src}/night.jpg`, `${src}/pattern.png`, `${src}/reel.mp4`], { x: 0, y: 0 });
     Board.arrange(); Board.focusAll(); Board.clearSel();
@@ -51,8 +49,13 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await sleep(1200);
   await win.screenshot({ path: `${OUT}/03-board-local.png` });
 
-  // Share it and invite Nousaiba
+  await win.screenshot({ path: `${OUT}/03b-untitled.png` });
+  // Share asks for a name first, then saves into Documents/Eye Refs
   await win.click('#share');
+  await win.waitForSelector('#svName');
+  await win.fill('#svName', 'Spring Campaign');
+  await win.screenshot({ path: `${OUT}/03c-save.png` });
+  await win.press('#svName', 'Enter');
   await win.waitForSelector('#shEmails');
   await win.fill('#shEmails', 'nousaiba@eyestudio.ae');
   await win.screenshot({ path: `${OUT}/04-share.png` });
@@ -105,7 +108,14 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await win.screenshot({ path: `${OUT}/08-account.png` });
   await win.keyboard.press('Escape');
 
-  const result = await win.evaluate(() => ({ items: Board.live().length, status: document.querySelector('#tStatus').textContent }));
+  // New board: back to a blank untitled one, saved board stays in the list
+  await win.keyboard.press('Control+K');
+  await win.waitForFunction(() => document.querySelector('#tName').textContent === 'Untitled');
+  await win.screenshot({ path: `${OUT}/09-new.png` });
+  const fresh = await win.evaluate(() => Board.live().length);
+  await win.click('#tree >> text=Spring Campaign');
+  await win.waitForFunction(() => document.querySelector('#tName').textContent === 'Spring Campaign');
+  const result = await win.evaluate((fresh) => ({ fresh, items: Board.live().length, status: document.querySelector('#tStatus').textContent, rows: [...document.querySelectorAll('#tree .row')].map((r) => r.textContent) }), fresh);
   await syncB.stop(); await sB.close();
   await app.close();
   const driveDir = path.join(tmp, 'drive', 'Eye Refs', 'Spring Campaign');
@@ -114,6 +124,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     driveMedia: fs.readdirSync(path.join(driveDir, 'media')).length,
     driveChanges: fs.readdirSync(path.join(driveDir, 'changes')),
     local: fs.readdirSync(path.join(tmp, 'Documents', 'Eye Refs')),
+    unsaved: fs.readdirSync(path.join(tmp, 'cfg', 'Eye Refs', 'unsaved')),
     members: gas.call({ action: 'projects.members', token: tB, id: remote.id }).data.members.map((m) => m.email),
     errors,
   }, null, 1));

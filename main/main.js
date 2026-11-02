@@ -24,6 +24,7 @@ let identity = { admin: false, team: false };
 
 const settingsPath = () => path.join(app.getPath('userData'), 'settings.json');
 const backupDir = () => path.join(app.getPath('userData'), 'backups');
+const SCRATCH = () => path.join(app.getPath('userData'), 'unsaved');
 const ROOT = () => process.env.EYEREFS_ROOT || path.join(app.getPath('documents'), 'Eye Refs');
 
 // ---------- settings and sign in ----------
@@ -101,7 +102,7 @@ function prefs() {
 
 // Local projects plus shared boards not yet on this computer
 async function allProjects(online = true) {
-  const local = await lib.scanProjects(ROOT(), me);
+  const local = [...await lib.scanProjects(ROOT(), me), ...(await lib.scanProjects(SCRATCH(), me)).map((p) => ({ ...p, scratch: true }))];
   let remote = [];
   if (online) { try { remote = await cloud.call('projects.list', {}, 20000); } catch (_) { remote = []; } }
   const byShared = new Map(local.filter((p) => p.shared).map((p) => [p.shared.id, p]));
@@ -124,7 +125,10 @@ async function closeCurrent() {
 }
 
 async function openProject(rec) {
+  const prev = session && session.rec.scratch && session.rec.id !== rec.id && isEmpty(session) ? session.rec : null;
   await closeCurrent();
+  // An untitled board nobody added anything to just goes away
+  if (prev) { try { await fsp.rm(prev.dir, { recursive: true, force: true }); } catch (_) {} }
   const s = new Session(rec, me, backupDir(), {
     state: (items) => send('board:state', { projectId: rec.id, items }),
     status: (st) => send('board:status', { projectId: rec.id, status: st }),
@@ -157,13 +161,18 @@ function knownHashes() {
   return map;
 }
 
+function isEmpty(s) {
+  const items = s.merged();
+  return !Object.values(items).some((it) => !it.deleted);
+}
+
 function sessionFor(projectId) {
   if (!session || session.rec.id !== projectId) throw new Error('That project is no longer open.');
   return session;
 }
 
 async function findLocal(id) {
-  const list = await lib.scanProjects(ROOT(), me);
+  const list = [...await lib.scanProjects(ROOT(), me), ...await lib.scanProjects(SCRATCH(), me)];
   return list.find((p) => p.id === id || (p.shared && p.shared.id === id)) || null;
 }
 
@@ -216,6 +225,27 @@ handle('projects:scan', async () => ({ projects: await allProjects(true) }));
 handle('projects:create', async (name) => {
   if (!name || !name.trim()) return { error: 'Give the project a name.' };
   const rec = await lib.createProject(ROOT(), me, name, '');
+  return openProject(rec);
+});
+
+// PureRef style: a fresh untitled board, saved with a name later
+handle('projects:new', async (opts) => {
+  if (session && session.rec.scratch && isEmpty(session)) return openProject(session.rec);
+  const discard = opts && opts.discard && session && session.rec.scratch ? session.rec : null;
+  const rec = await lib.createProject(SCRATCH(), me, 'Untitled', '', { scratch: true });
+  const res = await openProject(rec);
+  if (discard) { try { await fsp.rm(discard.dir, { recursive: true, force: true }); } catch (_) {} }
+  return res;
+});
+
+handle('projects:save', async (projectId, name) => {
+  const s = sessionFor(projectId);
+  if (!s.rec.scratch) return { error: 'This board is already saved.' };
+  if (!name || !String(name).trim()) return { error: 'Give the board a name.' };
+  const old = s.rec;
+  await closeCurrent();
+  const rec = await lib.saveScratch(old, ROOT(), name);
+  rec.mine = true;
   return openProject(rec);
 });
 

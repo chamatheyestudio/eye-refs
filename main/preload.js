@@ -16,6 +16,8 @@ contextBridge.exposeInMainWorld('eyerefs', {
   signOut: call('auth:signout'),
   scan: call('projects:scan'),
   createProject: call('projects:create'),
+  newBoard: call('projects:new'),
+  saveBoard: call('projects:save'),
   openProject: call('projects:open'),
   openProjectFile: call('projects:openFile'),
   renameProject: call('projects:rename'),

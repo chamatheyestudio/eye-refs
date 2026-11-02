@@ -5,6 +5,7 @@ By Matte Black.
 
 ## How it saves
 
+* **Start right away** like PureRef: the app opens on a blank untitled board. Press Ctrl or Cmd+S to name it and save it into Documents/Eye Refs. Untitled boards are kept safe until you save them.
 * **Your projects stay on your computer** in `Documents/Eye Refs/<Project>/`. Nothing leaves your machine unless you share it.
 * **Save as one file** packs a board with all its images and videos into one `.eyerefs` file to send anywhere, like a PureRef file. Opening it makes your own copy.
 * **Sharing** uploads the board to the EyeStudio Google Drive at the same path, `Eye Refs/<Project>/`, through the Apps Script in `server/`. Everyone on the board gets a synced copy in their own Documents folder.

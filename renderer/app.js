@@ -110,14 +110,16 @@
     if (S.current) return;
     const last = r.lastProject && S.projects.find((p) => p.id === r.lastProject);
     if (last) openResult(await api.openProject(last.id));
-    else if (!S.projects.length) newProjectModal();
+    else openResult(await api.newBoard());
     syncChrome();
   }
 
   // ---------- projects ----------
   function openResult(res) {
     if (!res || res.error) { toast((res && res.error) || 'Could not open that project.', true); return; }
+    const leftScratch = S.current && S.current.scratch && S.current.id !== res.record.id;
     S.current = res.record;
+    if (leftScratch) setTimeout(rescan, 50);
     S.status = res.status;
     S.readOnly = res.readOnly;
     S.here = [];
@@ -159,13 +161,14 @@
       if (q && !(`${p.name} ${p.owner ? p.owner.name : ''}`.toLowerCase().includes(q))) return false;
       return true;
     });
-    const list = shown.sort((a, b) => a.name.localeCompare(b.name));
+    const list = shown.sort((a, b) => (b.scratch - a.scratch) || a.name.localeCompare(b.name));
     {
       for (const p of list) {
         const isCurrent = S.current && S.current.id === p.id;
         const n = isCurrent ? others(S.here).length : 0;
         let meta = null;
-        if (n) meta = el('span', { class: 'meta here', html: ICONS.people + `<span>${n} here</span>` });
+        if (p.scratch) meta = el('span', { class: 'meta', text: 'Not saved' });
+        else if (n) meta = el('span', { class: 'meta here', html: ICONS.people + `<span>${n} here</span>` });
         else if (p.requests) meta = el('span', { class: 'meta here', text: p.requests === 1 ? '1 request' : `${p.requests} requests` });
         else if (p.cloudOnly) meta = el('span', { class: 'meta', html: ICONS.cloud + '<span>Shared</span>' });
         else if (!p.mine && p.owner) meta = el('span', { class: 'meta', text: `${p.owner.name}'s` });
@@ -185,7 +188,7 @@
     $$('.seg button').forEach((x) => x.classList.toggle('on', x === b));
     renderSidebar();
   }));
-  $('#newProject').addEventListener('click', () => newProjectModal());
+  $('#newProject').addEventListener('click', () => newBoard());
   $('#joinBoard').addEventListener('click', () => joinModal());
   $('#hideSidebar').addEventListener('click', () => setSidebar(false));
   $('#showSidebar').addEventListener('click', () => setSidebar(true));
@@ -195,7 +198,7 @@
       { label: 'Join a board', onClick: joinModal },
       { label: 'Open a file', onClick: openFile },
       { label: 'Save as one file', onClick: packCurrent, disabled: !S.current },
-      { label: 'Show in folder', onClick: () => api.reveal() },
+      { label: 'Show in folder', onClick: () => api.reveal(), disabled: S.current && S.current.scratch },
       '-',
       { label: 'Keyboard shortcuts', key: IS_MAC ? 'Ctrl+H' : 'Mod+H', onClick: shortcutsModal },
       '-',
@@ -233,6 +236,7 @@
     const st = $('#tStatus');
     st.classList.remove('warn');
     if (S.readOnly || S.status === 'readonly') { st.innerHTML = ''; st.append(el('span', { html: ICONS.lock }), 'View only'); }
+    else if (p.scratch) { st.textContent = 'Not saved'; }
     else if (S.status === 'saving') { st.textContent = 'Saving'; }
     else if (S.status === 'local') { st.textContent = 'Saved on this computer'; st.classList.add('warn'); }
     else if (p.shared && S.cloud && S.cloud.state === 'offline') { st.textContent = 'Saved here, will sync'; st.classList.add('warn'); st.title = S.cloud.message || ''; }
@@ -271,7 +275,7 @@
     box.hidden = false;
   }
 
-  $('#tName').addEventListener('dblclick', () => { if (S.current && S.current.mine) renameModal(); });
+  $('#tName').addEventListener('dblclick', () => { if (S.current && S.current.scratch) saveModal(); else if (S.current && S.current.mine) renameModal(); });
   $('#share').addEventListener('click', () => shareModal());
   $('#wMin').addEventListener('click', () => api.minimize());
   $('#wMax').addEventListener('click', () => api.maximize());
@@ -321,8 +325,10 @@
     '-',
     { label: 'Share', onClick: () => shareModal(), disabled: S.readOnly },
     { label: 'Save as one file', onClick: packCurrent },
-    { label: 'Rename project', onClick: renameModal, disabled: !S.current || !S.current.mine },
-    { label: 'Show in folder', onClick: () => api.reveal() },
+    S.current && S.current.scratch
+      ? { label: 'Save', key: 'Mod+S', onClick: () => saveModal() }
+      : { label: 'Rename project', onClick: renameModal, disabled: !S.current || !S.current.mine },
+    { label: 'Show in folder', onClick: () => api.reveal(), disabled: S.current && S.current.scratch },
     '-',
     { label: 'Minimize', key: 'Mod+M', onClick: () => api.minimize() },
     { label: 'Maximize', key: 'Mod+F', onClick: () => api.maximize() },
@@ -372,24 +378,44 @@
   });
 
   // ---------- dialogs ----------
-  function newProjectModal() {
+  // PureRef style: start on a blank untitled board, name it when saving
+  async function newBoard() {
+    if (S.current && S.current.scratch && B.live().length) {
+      return openModal((close) => [
+        el('h2', { text: 'Save this board?' }),
+        el('p', { text: "It isn't saved yet. If you don't save it, it's gone." }),
+        el('div', { class: 'actions' },
+          el('button', { class: 'btn ghost', text: "Don't save", onclick: async () => { close(); openResult(await api.newBoard({ discard: true })); rescan(); } }),
+          el('button', { class: 'btn ghost', text: 'Cancel', onclick: close }),
+          el('button', { class: 'btn', text: 'Save', onclick: () => { close(); saveModal(async () => { openResult(await api.newBoard()); rescan(); }); } })),
+      ]);
+    }
+    openResult(await api.newBoard());
+    rescan();
+  }
+
+  function saveModal(then) {
+    if (!S.current || !S.current.scratch) return;
     openModal((close) => {
-      const name = el('input', { class: 'input', id: 'npName', placeholder: 'Spring Campaign', maxlength: '60' });
+      const name = el('input', { class: 'input', id: 'svName', placeholder: 'Spring Campaign', maxlength: '60' });
       const err = el('p', { style: 'color:#F2C9B8;font-size:12px' });
       const go = async () => {
-        if (!name.value.trim()) { err.textContent = 'Give the project a name.'; return; }
-        const res = await api.createProject(name.value.trim());
+        if (!name.value.trim()) { err.textContent = 'Give the board a name.'; return; }
+        const res = await api.saveBoard(S.current.id, name.value.trim());
         if (res && res.error) { err.textContent = res.error; return; }
         close();
         openResult(res);
-        rescan();
+        await rescan();
+        toast(`Saved in Documents / Eye Refs / ${res.record.name}`);
+        if (then) then();
       };
       name.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
+      setTimeout(() => name.focus(), 30);
       return [
-        el('h2', { text: 'New project' }),
-        el('div', { class: 'field' }, el('label', { for: 'npName', text: 'Name' }), name),
+        el('h2', { text: 'Save board' }),
+        el('div', { class: 'field' }, el('label', { for: 'svName', text: 'Name' }), name),
         err,
-        el('div', { class: 'actions' }, el('button', { class: 'btn ghost', text: 'Cancel', onclick: close }), el('button', { class: 'btn', text: 'Create project', onclick: go })),
+        el('div', { class: 'actions' }, el('button', { class: 'btn ghost', text: 'Cancel', onclick: close }), el('button', { class: 'btn', text: 'Save', onclick: go })),
       ];
     });
   }
@@ -397,6 +423,7 @@
   // Share: upload to the EyeStudio Drive, invite people, approve requests
   async function shareModal() {
     if (!S.current) return;
+    if (S.current.scratch) return saveModal(() => shareModal());
     const p = S.current;
     if (!S.online) return toast("You're offline. Sharing needs a connection.", true);
     if (!p.shared && !S.teamMember) return toast('Only EyeStudio accounts can share boards.', true);
@@ -544,7 +571,7 @@
     ['Board', [['Pan', 'Alt + drag, or middle mouse'], ['Zoom', 'Scroll, or hold Z and drag'], ['Move window', 'Right mouse drag'], ['Menu', 'Right click'], ['Focus image', 'Space'], ['Fit everything', 'Mod+Space'], ['Reset zoom', 'Mod+0'], ['Next or previous image', '→  ←'], ['Lock canvas', 'Mod+R'], ['Grid', 'G']]],
     ['Items', [['Crop', 'Hold C and drag an edge'], ['Move inside crop', 'Hold V and drag'], ['Reset cropping', 'Mod+Shift+C'], ['Rotate', 'Mod + drag'], ['Scale', 'Mod+Alt + drag'], ['Flip', 'Alt+Shift+H  /  Alt+Shift+V'], ['Grayscale', 'Alt+G'], ['Reset transform', 'Mod+Shift+T'], ['Arrange optimal', 'Mod+P'], ['Align', 'Mod + arrows'], ['Normalize size', 'Mod+Alt + arrows'], ['Bring to front or back', '↑  ↓'], ['Lock item', 'Alt+L'], ['Duplicate', 'Mod+D'], ['Note', 'Mod+N'], ['Undo / Redo', 'Mod+Z  /  Mod+Shift+Z']]],
     ['Video', [['Play or pause', 'K'], ['Set start / end', 'I  /  O'], ['Step a frame', ',  .'], ['Grab frame', 'F'], ['Sound', 'M']]],
-    ['Window', [['Always on top', 'Mod+Shift+A'], ['Click through', 'Mod+T'], ['See through', 'Mod+Shift+-  /  Mod+Shift+='], ['Lock window', 'Mod+W'], ['New project', 'Mod+K'], ['Search projects', 'Mod+Shift+P'], ['Add images', 'Mod+I']]],
+    ['Window', [['Always on top', 'Mod+Shift+A'], ['Click through', 'Mod+T'], ['See through', 'Mod+Shift+-  /  Mod+Shift+='], ['Lock window', 'Mod+W'], ['New board', 'Mod+K'], ['Save', 'Mod+S'], ['Search projects', 'Mod+Shift+P'], ['Add images', 'Mod+I']]],
   ];
   function shortcutsModal() {
     openModal((close) => {
@@ -600,10 +627,10 @@
     'Alt+L': () => B.toggleField('locked'),
     'Mod+N': () => B.addNote(),
     'Mod+I': addDialog,
-    'Mod+K': () => newProjectModal(),
+    'Mod+K': () => newBoard(),
     'Mod+L': () => { setSidebar(true); $('#search').focus(); },
     'Mod+Shift+P': () => { setSidebar(true); $('#search').focus(); },
-    'Mod+S': async () => { await api.flush(); toast('Saved'); },
+    'Mod+S': async () => { if (S.current && S.current.scratch) return saveModal(); await api.flush(); toast('Saved'); },
     'Mod+Q': () => api.close(),
     'Mod+M': () => api.minimize(),
     'Mod+F': () => api.maximize(),
