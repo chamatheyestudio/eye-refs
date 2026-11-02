@@ -1,7 +1,7 @@
 {
   "name": "eye-refs",
   "productName": "Eye Refs",
-  "version": "1.0.0-beta.5",
+  "version": "1.0.0-beta.6",
   "description": "Reference boards for EyeStudio, with video and Google Drive collaboration.",
   "author": "Matte Black",
   "main": "main/main.js",
@@ -67,7 +67,9 @@
       "icon": "build/icon.icns",
       "identity": null,
       "extendInfo": {
-        "NSDesktopFolderUsageDescription": "Eye Refs opens images you drop from your desktop."
+        "NSDesktopFolderUsageDescription": "Eye Refs opens images you drop from your desktop.",
+        "NSDocumentsFolderUsageDescription": "Eye Refs keeps your boards in Documents / Eye Refs.",
+        "NSDownloadsFolderUsageDescription": "Eye Refs opens images you drop from Downloads."
       }
     },
     "win": {

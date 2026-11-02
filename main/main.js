@@ -68,6 +68,8 @@ function send(ch, payload) {
 
 // ---------- startup ----------
 async function boot() {
+  // Documents/Eye Refs exists from the first launch, signed in or not.
+  try { await fsp.mkdir(ROOT(), { recursive: true }); } catch (e) { console.error('Documents folder', e); }
   if (!serverUrl()) return { screen: 'connect' };
   if (!getToken() || !settings.email) return { screen: 'signin', email: settings.email || '' };
 
@@ -85,7 +87,7 @@ async function boot() {
     identity = { admin: false, team: true, clients: settings.clients || [] };
   }
   me = makeMe(settings.email, settings.name);
-  await lib.ensureClientFolders(ROOT(), identity.clients);
+  try { await lib.ensureClientFolders(ROOT(), identity.clients); } catch (e) { console.error('Documents folder', e); }
   const projects = await allProjects(online);
   const open = pendingOpenFile;
   pendingOpenFile = null;

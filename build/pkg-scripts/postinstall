@@ -1,4 +1,12 @@
 #!/bin/bash
 # Clear the download flag so macOS opens the app without the "damaged" warning.
 xattr -dr com.apple.quarantine "/Applications/Eye Refs.app" 2>/dev/null
+# Create Documents/Eye Refs for the person installing.
+USER_NAME=$(stat -f%Su /dev/console 2>/dev/null)
+if [ -n "$USER_NAME" ] && [ "$USER_NAME" != "root" ]; then
+  HOME_DIR=$(dscl . -read "/Users/$USER_NAME" NFSHomeDirectory 2>/dev/null | awk '{print $2}')
+  if [ -n "$HOME_DIR" ] && [ -d "$HOME_DIR/Documents" ]; then
+    sudo -u "$USER_NAME" mkdir -p "$HOME_DIR/Documents/Eye Refs"
+  fi
+fi
 exit 0
