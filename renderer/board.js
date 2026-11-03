@@ -1,6 +1,6 @@
 // The canvas: items, selection, gestures, video playback, undo.
 (function () {
-  const { $, el, toast, openMenu, IS_MAC, fmtTime } = window.UI;
+  const { $, el, toast, openMenu, IS_MAC, fmtTime, modalOpen, menuOpen } = window.UI;
   const api = window.eyerefs;
   const ZC = { l: 0, t: 0, r: 0, b: 0 };
   const SVGNS = 'http://www.w3.org/2000/svg';
@@ -110,10 +110,12 @@
   function send(changes) {
     const writes = changes.map((c) => ({ id: c.id, fields: { ...c.fields, by: B.me.name } }));
     unconfirmed.add(writes);
+    const failed = () => { unconfirmed.delete(writes); toast("Couldn't save that change.", true); };
     api.write(B.project.id, writes).then((r) => {
+      if (r && r.readOnly) { unconfirmed.delete(writes); B.readOnly = true; B.onChange('readonly'); return; }
+      if (r && r.error) return failed();
       unconfirmed.delete(writes);
-      if (r && r.readOnly) { B.readOnly = true; B.onChange('readonly'); }
-    });
+    }, failed);
   }
 
   // changes: [{ id, fields }]; before: optional snapshot taken at gesture start
@@ -129,13 +131,13 @@
   }
 
   function undo() {
+    if (!B.undoStack.length || !canEdit()) return;
     const e = B.undoStack.pop();
-    if (!e || !canEdit()) return;
     applyLocal(e.before); send(e.before); B.redoStack.push(e); render();
   }
   function redo() {
+    if (!B.redoStack.length || !canEdit()) return;
     const e = B.redoStack.pop();
-    if (!e || !canEdit()) return;
     applyLocal(e.after); send(e.after); B.undoStack.push(e); render();
   }
 
@@ -187,8 +189,10 @@
     return node;
   }
 
-  function updateEl(node, it) {
-    node.style.zIndex = String(Math.round((it.z || 0) - minZ() + 1));
+  // mz: the lowest z on the board, worked out once per render or gesture frame
+  function updateEl(node, it, mz) {
+    if (!node) return;
+    node.style.zIndex = String(Math.round((it.z || 0) - (mz === undefined ? minZ() : mz) + 1));
     node.classList.toggle('gray', !!it.gray);
     if (it.type === 'note') {
       node.style.width = it.w + 'px';
@@ -236,11 +240,17 @@
     if (v && b) b.hidden = !v.paused;
   }
 
+  // Files that are on disk but can't be decoded. Retrying them never helps.
+  const undecodable = new Set();
+  const decodeKey = (it) => it.id + '|' + it.src;
   async function markMissing(id) {
     const it = B.items.get(id);
     const node = B.els.get(id);
-    if (!it || !node || node.classList.contains('missing')) return;
-    const state = await api.mediaState(B.project.id, it.src);
+    if (!B.project || !it || !node || node.classList.contains('missing')) return;
+    const pid = B.project.id;
+    const state = await api.mediaState(pid, it.src);
+    if (!B.project || B.project.id !== pid || B.els.get(id) !== node) return;
+    if (state === 'here') undecodable.add(decodeKey(it));
     node.classList.add('missing');
     const clip = node.querySelector('.clip');
     const m = clip.querySelector('.media');
@@ -257,24 +267,26 @@
     for (const [id, node] of B.els) {
       if (!node.classList.contains('missing')) continue;
       const it = B.items.get(id);
+      if (it && undecodable.has(decodeKey(it))) continue;
       if (!it || !B.project || (await api.mediaState(B.project.id, it.src)) !== 'here') { if (it && B.project) { node.classList.remove('missing'); markMissing(id); } continue; }
       node.classList.remove('missing');
       const m = node.querySelector('.media');
       const lab = node.querySelector('.missing-label');
       if (lab) lab.remove();
       if (m) { m.style.display = ''; m.dataset.src = ''; }
-      updateEl(node, it);
+      if (B.els.get(id) === node) updateEl(node, it);
     }
   }, 4000);
 
   function render() {
     document.body.classList.toggle('board-empty', !live().length);
     const seen = new Set();
+    const mz = minZ();
     for (const it of B.items.values()) {
       if (it.deleted || !it.type) continue;
       seen.add(it.id);
       const node = B.els.get(it.id) || makeEl(it);
-      updateEl(node, it);
+      updateEl(node, it, mz);
     }
     for (const [id, node] of B.els) {
       if (!seen.has(id)) {
@@ -398,6 +410,7 @@
     g.sx0 = e.clientX; g.sy0 = e.clientY;
     g.w0 = toWorld(e.clientX, e.clientY);
     g.moved = false;
+    g.pointerId = e.pointerId;
     try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
   }
 
@@ -415,8 +428,10 @@
     if (button !== 0) return;
 
     const handle = e.target.closest && e.target.closest('#overlay .h');
+    const unlocked = (ids) => ids.filter((id) => B.items.get(id) && !B.items.get(id).locked);
     if (handle && canEdit(true)) {
-      const ids = [...B.sel];
+      const ids = unlocked([...B.sel]);
+      if (!ids.length) return;
       startGesture({ type: 'resize', corner: handle.dataset.h, ids, before: snapshot(ids, ['x', 'y', 'w', 'fs']), start: ids.map((id) => clone(B.items.get(id))), bb: bbox(ids) }, e);
       return;
     }
@@ -448,7 +463,7 @@
 
     if (hit) {
       const hitItem = B.items.get(hit);
-      if ((B.held.has('c') || B.held.has('v')) && hitItem.type !== 'note' && hitItem.type !== 'draw' && canEdit()) {
+      if ((B.held.has('c') || B.held.has('v')) && hitItem.type !== 'note' && hitItem.type !== 'draw' && !hitItem.locked && canEdit()) {
         B.sel = new Set([hit]);
         startGesture({ type: 'crop', id: hit, pan: B.held.has('v'), start: clone(hitItem), before: snapshot([hit], ['x', 'y', 'w', 'crop']) }, e);
         renderOverlay(); return;
@@ -456,10 +471,16 @@
       if (!B.sel.has(hit)) { if (!e.shiftKey) B.sel.clear(); B.sel.add(hit); }
       else if (e.shiftKey && !mod) { B.sel.delete(hit); renderOverlay(); return; }
       const ids = [...B.sel];
-      if (mod && e.altKey && canEdit()) { startGesture({ type: 'scale', ids, start: ids.map((id) => clone(B.items.get(id))), before: snapshot(ids, ['x', 'y', 'w', 'fs']), bb: bbox(ids) }, e); renderOverlay(); return; }
-      if (mod && canEdit()) { startGesture({ type: 'rotate', ids, start: ids.map((id) => clone(B.items.get(id))), before: snapshot(ids, ['rot']) }, e); renderOverlay(); return; }
-      if (e.altKey && e.shiftKey && canEdit()) { startGesture({ type: 'flip', ids }, e); renderOverlay(); return; }
-      const movable = ids.filter((id) => !B.items.get(id).locked);
+      const free = unlocked(ids);
+      if (mod && e.altKey && canEdit()) { if (free.length) startGesture({ type: 'scale', ids: free, start: free.map((id) => clone(B.items.get(id))), before: snapshot(free, ['x', 'y', 'w', 'fs']), bb: bbox(free) }, e); renderOverlay(); return; }
+      if (mod && canEdit()) {
+        // One turn for the whole selection, around the centre of its box
+        if (free.length) { const bb = bbox(free); startGesture({ type: 'rotate', ids: free, start: free.map((id) => clone(B.items.get(id))), before: snapshot(free, ['rot', 'x', 'y']), c: { x: bb.x + bb.w / 2, y: bb.y + bb.h / 2 } }, e); }
+        renderOverlay(); return;
+      }
+      if (e.altKey && e.shiftKey && canEdit()) { if (free.length) startGesture({ type: 'flip', ids: free }, e); renderOverlay(); return; }
+      // View only boards still select, they just don't move
+      const movable = B.readOnly ? [] : free;
       startGesture({ type: 'move', hit, ids: movable, start: movable.map((id) => ({ id, x: B.items.get(id).x, y: B.items.get(id).y })), before: snapshot(movable, ['x', 'y']) }, e);
       renderOverlay();
       return;
@@ -491,6 +512,7 @@
     g.moved = true;
     const p = toWorld(e.clientX, e.clientY);
     const dx = p.x - g.w0.x, dy = p.y - g.w0.y;
+    const mz = ['move', 'resize', 'scale', 'rotate', 'crop'].includes(g.type) ? minZ() : 0;
 
     switch (g.type) {
       case 'right': {
@@ -509,7 +531,7 @@
       case 'move': {
         let mx = dx, my = dy;
         if (e.shiftKey) { if (Math.abs(dx) > Math.abs(dy)) my = 0; else mx = 0; }
-        for (const s of g.start) { const it = B.items.get(s.id); it.x = s.x + mx; it.y = s.y + my; updateEl(B.els.get(s.id), it); }
+        for (const s of g.start) { const it = B.items.get(s.id); it.x = s.x + mx; it.y = s.y + my; updateEl(B.els.get(s.id), it, mz); }
         renderOverlay();
         break;
       }
@@ -521,7 +543,7 @@
         if (g.ids.length === 1 && (g.start[0].rot || 0) % 360 !== 0) {
           const cx = bb.x + bb.w / 2, cy = bb.y + bb.h / 2;
           f = Math.hypot(p.x - cx, p.y - cy) / Math.max(1, Math.hypot(g.w0.x - cx, g.w0.y - cy));
-          g.start.forEach((s0) => { const it = B.items.get(s0.id); const d0 = dims(s0); it.w = Math.max(MIN_SIZE, s0.w * f); if (s0.fs) it.fs = s0.fs * f; it.x = cx - (d0.w * f) / 2; it.y = cy - (d0.h * f) / 2; updateEl(B.els.get(s0.id), it); });
+          g.start.forEach((s0) => { const it = B.items.get(s0.id); const d0 = dims(s0); it.w = Math.max(MIN_SIZE, s0.w * f); if (s0.fs) it.fs = s0.fs * f; it.x = cx - (d0.w * f) / 2; it.y = cy - (d0.h * f) / 2; updateEl(B.els.get(s0.id), it, mz); });
         } else {
           const fx = Math.abs(p.x - ax) / Math.max(1, bb.w);
           const fy = Math.abs(p.y - ay) / Math.max(1, bb.h);
@@ -532,7 +554,7 @@
             if (s0.fs) it.fs = Math.max(4, s0.fs * f);
             it.x = ax + (s0.x - ax) * f;
             it.y = ay + (s0.y - ay) * f;
-            updateEl(B.els.get(s0.id), it);
+            updateEl(B.els.get(s0.id), it, mz);
           });
         }
         renderOverlay();
@@ -546,21 +568,29 @@
           it.w = Math.max(MIN_SIZE, s0.w * f);
           if (s0.fs) it.fs = Math.max(4, s0.fs * f);
           it.x = cx + (s0.x - cx) * f; it.y = cy + (s0.y - cy) * f;
-          updateEl(B.els.get(s0.id), it);
+          updateEl(B.els.get(s0.id), it, mz);
         });
         renderOverlay();
         break;
       }
       case 'rotate': {
+        const G = g.c;
+        const a0 = Math.atan2(g.w0.y - G.y, g.w0.x - G.x), a1 = Math.atan2(p.y - G.y, p.x - G.x);
+        let delta = ((a1 - a0) * 180) / Math.PI;
+        if (e.shiftKey) {
+          // One item snaps its own angle, a group snaps the turn
+          if (g.start.length === 1) { const r0 = g.start[0].rot || 0; delta = Math.round((r0 + delta) / 15) * 15 - r0; }
+          else delta = Math.round(delta / 15) * 15;
+        }
+        const rad = (delta * Math.PI) / 180, cos = Math.cos(rad), sin = Math.sin(rad);
         g.start.forEach((s0) => {
           const it = B.items.get(s0.id);
           const d = dims(s0);
-          const c = { x: s0.x + d.w / 2, y: s0.y + d.h / 2 };
-          const a0 = Math.atan2(g.w0.y - c.y, g.w0.x - c.x), a1 = Math.atan2(p.y - c.y, p.x - c.x);
-          let r = (s0.rot || 0) + ((a1 - a0) * 180) / Math.PI;
-          if (e.shiftKey) r = Math.round(r / 15) * 15;
-          it.rot = ((r % 360) + 360) % 360;
-          updateEl(B.els.get(s0.id), it);
+          const ox = s0.x + d.w / 2 - G.x, oy = s0.y + d.h / 2 - G.y;
+          it.rot = ((((s0.rot || 0) + delta) % 360) + 360) % 360;
+          it.x = G.x + ox * cos - oy * sin - d.w / 2;
+          it.y = G.y + ox * sin + oy * cos - d.h / 2;
+          updateEl(B.els.get(s0.id), it, mz);
         });
         renderOverlay();
         break;
@@ -572,7 +602,7 @@
         commit(g.ids.map((id) => ({ id, fields: { [key]: !B.items.get(id)[key] } })));
         break;
       }
-      case 'crop': cropMove(g, dx, dy); break;
+      case 'crop': cropMove(g, dx, dy, p, mz); break;
       case 'marquee': {
         const x = Math.min(g.sx0, e.clientX), y = Math.min(g.sy0, e.clientY);
         const w = Math.abs(dxS), h = Math.abs(dyS);
@@ -590,7 +620,38 @@
     }
   });
 
-  function cropMove(g, dx, dy) {
+  // Where the frame sits once the crop changes from s0.crop to c1, so the picture
+  // itself stays where it was. Worked out in the item's own space (its rotation and
+  // flips) and turned back into board space.
+  function reframe(s0, c1) {
+    const d0 = dims(s0);
+    const c0 = { ...ZC, ...(s0.crop || {}) };
+    const W = s0.nw * d0.k, H = s0.nh * d0.k;
+    const w1 = (1 - c1.l - c1.r) * W, h1 = (1 - c1.t - c1.b) * H;
+    const fx = s0.flipX ? -1 : 1, fy = s0.flipY ? -1 : 1;
+    // The picture's top left corner, seen from the frame centre, before and after
+    const ex = fx * ((-c0.l * W - d0.w / 2) - (-c1.l * W - w1 / 2));
+    const ey = fy * ((-c0.t * H - d0.h / 2) - (-c1.t * H - h1 / 2));
+    const a = ((s0.rot || 0) * Math.PI) / 180;
+    const cx = s0.x + d0.w / 2 + ex * Math.cos(a) - ey * Math.sin(a);
+    const cy = s0.y + d0.h / 2 + ex * Math.sin(a) + ey * Math.cos(a);
+    return { x: cx - w1 / 2, y: cy - h1 / 2, w: w1 };
+  }
+
+  // A board point in the item's own space: 0..1 across the picture's frame, measured
+  // along the picture itself (so the left of a flipped picture is its right side on screen)
+  function localUV(s0, pt) {
+    const d0 = dims(s0);
+    const a = (-(s0.rot || 0) * Math.PI) / 180;
+    const dx = pt.x - (s0.x + d0.w / 2), dy = pt.y - (s0.y + d0.h / 2);
+    let u = (dx * Math.cos(a) - dy * Math.sin(a)) / d0.w + 0.5;
+    let v = (dx * Math.sin(a) + dy * Math.cos(a)) / d0.h + 0.5;
+    if (s0.flipX) u = 1 - u;
+    if (s0.flipY) v = 1 - v;
+    return { u, v };
+  }
+
+  function cropMove(g, dx, dy, p, mz) {
     const s0 = g.start;
     const it = B.items.get(g.id);
     const d0 = dims(s0);
@@ -605,7 +666,7 @@
     const MINF = 0.02;
     const c = { ...c0 };
     if (!g.edges) {
-      const u = (g.w0.x - s0.x) / d0.w, v = (g.w0.y - s0.y) / d0.h;
+      const { u, v } = localUV(s0, g.w0);
       g.edges = g.pan ? {} : { l: u < 0.33, r: u > 0.67, t: v < 0.33, b: v > 0.67 };
       if (!g.edges.l && !g.edges.r && !g.edges.t && !g.edges.b) g.pan = true;
     }
@@ -621,13 +682,8 @@
     }
     it.crop = c;
     // Keep the picture itself still while its frame changes
-    const ox = s0.x - c0.l * s0.nw * d0.k, oy = s0.y - c0.t * s0.nh * d0.k;
-    if (!g.pan) {
-      it.x = s0.flipX ? s0.x + (c0.r - c.r) * s0.nw * d0.k : ox + c.l * s0.nw * d0.k;
-      it.y = s0.flipY ? s0.y + (c0.b - c.b) * s0.nh * d0.k : oy + c.t * s0.nh * d0.k;
-      it.w = (1 - c.l - c.r) * s0.nw * d0.k;
-    }
-    updateEl(B.els.get(g.id), it);
+    if (!g.pan) Object.assign(it, reframe(s0, c));
+    updateEl(B.els.get(g.id), it, mz);
     renderOverlay();
   }
 
@@ -651,7 +707,7 @@
         if (g.moved) commit(g.ids.map((id) => { const it = B.items.get(id); const f = { x: it.x, y: it.y, w: it.w }; if (it.type === 'note') f.fs = it.fs; return { id, fields: f }; }), g.before);
         break;
       case 'rotate':
-        if (g.moved) commit(g.ids.map((id) => ({ id, fields: { rot: B.items.get(id).rot } })), g.before);
+        if (g.moved) commit(g.ids.map((id) => { const it = B.items.get(id); return { id, fields: { rot: it.rot, x: it.x, y: it.y } }; }), g.before);
         break;
       case 'erase':
         if (g.ids.size) commit([...g.ids].map((id) => ({ id, fields: { deleted: true } })), [...g.ids].map((id) => ({ id, fields: { deleted: false } })));
@@ -844,8 +900,19 @@
     });
   }
 
+  // An import started on one board must not land on another. Remember the board
+  // when the work starts and check it before placing anything.
+  let goneToastAt = 0;
+  function leftBoard(pid) {
+    if (B.project && B.project.id === pid) return false;
+    if (Date.now() - goneToastAt > 1500) { goneToastAt = Date.now(); toast('That finished after you left the board.'); }
+    return true;
+  }
+  const boardId = () => (B.project ? B.project.id : null);
+
   // results from the main process import → items on the board, laid out from point p
   async function placeResults(results, p, opts = {}) {
+    const pid = opts.pid || boardId();
     const ok = [];
     for (const r of results) {
       if (!r) continue;
@@ -853,7 +920,7 @@
       const m = await measure(r.src, r.kind);
       ok.push({ r, m });
     }
-    if (!ok.length) return [];
+    if (!ok.length || leftBoard(pid)) return [];
     const sizes = ok.map(({ m }) => {
       const f = Math.min(1, MAX_PLACE / Math.max(m.nw, m.nh));
       return { w: (opts.width ? opts.width : m.nw * f), h: (opts.width ? opts.width * (m.nh / m.nw) : m.nh * f) };
@@ -896,28 +963,35 @@
   async function addPaths(paths, at) {
     if (!paths || !paths.length || !canEdit()) return;
     const p = at || viewCenter();
-    const results = await api.importPaths(B.project.id, paths);
+    const pid = boardId();
+    const results = await api.importPaths(pid, paths);
+    if (leftBoard(pid)) return;
     if (results && results.error) return toast(results.error, true);
-    await placeResults(results, p);
+    await placeResults(results, p, { pid });
   }
 
   async function addBytes(files, at) {
     if (!canEdit()) return;
     const p = at || viewCenter();
+    const pid = boardId();
     const results = [];
     for (const f of files) {
       const buf = new Uint8Array(await f.arrayBuffer());
       const ext = (f.type.split('/')[1] || 'png').replace('jpeg', 'jpg').replace('svg+xml', 'svg').replace('quicktime', 'mov');
-      results.push(await api.importBytes(B.project.id, buf, f.name && /\.[a-z0-9]+$/i.test(f.name) ? f.name : `pasted.${ext}`));
+      if (leftBoard(pid)) return;
+      results.push(await api.importBytes(pid, buf, f.name && /\.[a-z0-9]+$/i.test(f.name) ? f.name : `pasted.${ext}`));
     }
-    await placeResults(results, p);
+    if (leftBoard(pid)) return;
+    await placeResults(results, p, { pid });
   }
 
   async function addUrl(url, at) {
     if (!canEdit()) return;
     const p = at || viewCenter();
-    const r = await api.importUrl(B.project.id, url);
-    await placeResults([r], p);
+    const pid = boardId();
+    const r = await api.importUrl(pid, url);
+    if (leftBoard(pid)) return;
+    await placeResults([r], p, { pid });
   }
 
   // Drag and drop from Finder, Explorer or a browser
@@ -951,6 +1025,7 @@
 
   async function pasteInternal(at) {
     if (!B.clip || !canEdit()) return;
+    const pid = boardId();
     const items = B.clip.items;
     const p = at || viewCenter();
     const bb = (() => { let x0 = Infinity, y0 = Infinity; for (const it of items) { x0 = Math.min(x0, it.x); y0 = Math.min(y0, it.y); } return { x: x0, y: y0 }; })();
@@ -959,7 +1034,8 @@
       // Copy the files into this project's media folder
       const srcs = [...new Set(items.filter((it) => it.src).map((it) => it.src))];
       const paths = srcs.map((s) => decodeURIComponent(new URL(B.clip.base + encodeURIComponent(s)).pathname).replace(/^\/([A-Za-z]:)/, '$1'));
-      const res = await api.importPaths(B.project.id, paths);
+      const res = await api.importPaths(pid, paths);
+      if (leftBoard(pid)) return;
       if (res && res.error) return toast(res.error, true);
       srcs.forEach((s, i) => { if (res[i] && res[i].src) srcMap.set(s, res[i].src); });
     }
@@ -994,18 +1070,21 @@
     return new File([bytes], `pasted-${i + 1}.${ext}`, { type });
   }
   async function pasteSources(srcs, at) {
+    const pid = boardId();
     const files = [], urls = [];
     for (let i = 0; i < srcs.length; i++) {
       if (srcs[i].startsWith('data:')) files.push(await dataUrlFile(srcs[i], i)); else urls.push(srcs[i]);
     }
     if (files.length) await addBytes(files, at);
     if (urls.length) {
+      if (leftBoard(pid)) return;
       const p = at || viewCenter();
       const results = [];
-      for (const u of urls) results.push(await api.importUrl(B.project.id, u));
+      for (const u of urls) { if (leftBoard(pid)) return; results.push(await api.importUrl(pid, u)); }
+      if (leftBoard(pid)) return;
       const ok = results.filter((r) => r && !r.error);
       if (!ok.length) return toast((results[0] && results[0].error) || "Couldn't paste that.", true);
-      await placeResults(ok, p);
+      await placeResults(ok, p, { pid });
     }
   }
   const IMAGE_LINK = /^https?:\/\/\S+\.(png|jpe?g|gif|webp|avif|heic|mp4|webm|mov)(\?\S*)?$/i;
@@ -1026,12 +1105,13 @@
   // Windows has no Edit menu, so Ctrl+V may not raise a paste event. If none
   // comes, read the clipboard directly.
   function pasteKey() {
+    if (modalOpen() || menuOpen()) return;
     clearTimeout(pasteTimer);
     pasteTimer = setTimeout(() => pasteNative(null), 120);
   }
 
   document.addEventListener('paste', async (e) => {
-    if (!B.project || B.editingId || e.target.closest('input, textarea, [contenteditable]')) return;
+    if (!B.project || B.editingId || modalOpen() || menuOpen() || e.target.closest('input, textarea, [contenteditable]')) return;
     clearTimeout(pasteTimer);
     e.preventDefault();
     const at = null;
@@ -1055,6 +1135,9 @@
   // ---------- selection actions ----------
   const selIds = () => [...B.sel].filter((id) => B.items.get(id) && !B.items.get(id).deleted);
   const selOrAll = () => (B.sel.size ? selIds() : live().map((it) => it.id));
+  // Locked items keep their place, size, turn, flip and crop
+  const notLocked = (ids) => ids.filter((id) => !B.items.get(id).locked);
+  const LOCK_KEYS = ['flipX', 'flipY'];
 
   function deleteSelection() {
     const ids = selIds();
@@ -1075,13 +1158,13 @@
     commit(changes);
     B.sel = new Set(changes.map((c) => c.id)); renderOverlay();
   }
-  const toggleField = (key) => { const ids = selIds(); if (!ids.length) return; const v = !ids.every((id) => B.items.get(id)[key]); commit(ids.map((id) => ({ id, fields: { [key]: v } }))); };
+  const toggleField = (key) => { const ids = LOCK_KEYS.includes(key) ? notLocked(selIds()) : selIds(); if (!ids.length) return; const v = !ids.every((id) => B.items.get(id)[key]); commit(ids.map((id) => ({ id, fields: { [key]: v } }))); };
   function resetCrop() {
-    const ids = selIds().filter((id) => B.items.get(id).type !== 'note');
-    commit(ids.map((id) => { const it = B.items.get(id); const d = dims(it); const c = it.crop || ZC; return { id, fields: { crop: { ...ZC }, x: it.x - c.l * it.nw * d.k, y: it.y - c.t * it.nh * d.k, w: it.nw * d.k } }; }));
+    const ids = notLocked(selIds()).filter((id) => B.items.get(id).type !== 'note' && B.items.get(id).type !== 'draw');
+    commit(ids.map((id) => ({ id, fields: { crop: { ...ZC }, ...reframe(B.items.get(id), ZC) } })));
   }
   function resetTransform() {
-    const ids = selIds();
+    const ids = notLocked(selIds());
     commit(ids.map((id) => {
       const it = B.items.get(id);
       if (it.type === 'note') return { id, fields: { rot: 0 } };
@@ -1093,7 +1176,7 @@
   function back() { const ids = selIds(); let z = minZ(); commit(ids.map((id) => ({ id, fields: { z: --z } }))); }
 
   function align(dir) {
-    const ids = selIds();
+    const ids = notLocked(selIds());
     if (ids.length < 2) return;
     const bb = bbox(ids);
     commit(ids.map((id) => {
@@ -1106,7 +1189,7 @@
   }
 
   function normalize(kind) {
-    const ids = selIds().filter((id) => B.items.get(id).type !== 'note');
+    const ids = notLocked(selIds()).filter((id) => B.items.get(id).type !== 'note');
     if (ids.length < 2) return;
     const ds = ids.map((id) => ({ id, it: B.items.get(id), d: dims(B.items.get(id)) }));
     const avg = (f) => ds.reduce((a, x) => a + f(x), 0) / ds.length;
@@ -1120,7 +1203,7 @@
 
   // Arrange optimal: pack into a tidy block, largest first
   function arrange() {
-    const ids = selOrAll();
+    const ids = notLocked(selOrAll());
     if (ids.length < 2 || !canEdit()) return;
     const bb = bbox(ids);
     const boxes = ids.map((id) => ({ id, ...dims(B.items.get(id)) })).sort((a, b) => b.h - a.h);
@@ -1227,10 +1310,13 @@
     if (!v || !canEdit()) return;
     const it = B.items.get(id);
     const d = dims(it);
-    const r = await api.grabFrame(B.project.id, it.src, v.currentTime);
+    const pid = boardId();
+    const t = v.currentTime;
+    const r = await api.grabFrame(pid, it.src, t);
+    if (leftBoard(pid)) return;
     if (r && r.error) return toast(r.error, true);
-    await placeResults([r], { x: it.x + d.w + 20, y: it.y }, { exact: true, width: d.w });
-    toast(`Frame at ${fmtTime(v.currentTime)} saved as an image.`);
+    const placed = await placeResults([r], { x: it.x + d.w + 20, y: it.y }, { exact: true, width: d.w, pid });
+    if (placed.length) toast(`Frame at ${fmtTime(t)} saved as an image.`);
   }
 
   function syncVideoBar() {
@@ -1260,11 +1346,13 @@
     // The scrubber stretches with the video, so the bar never outgrows it by much
     $('#vTrack').style.width = Math.round(Math.max(70, Math.min(220, r.width - 230))) + 'px';
     const bw = vbar.offsetWidth || 400, bh = 32;
+    // Inside the part of the window the sidebar and bars leave free
+    const vp = viewport();
     let x = r.left + r.width / 2 - bw / 2;
     let y = r.bottom + 8;
-    if (y + bh > window.innerHeight - 76) y = Math.max(76, r.top - bh - 8);
-    if (y + bh > window.innerHeight - 76 || y < 76) y = window.innerHeight - 76 - bh;
-    x = Math.max(16, Math.min(window.innerWidth - bw - 16, x));
+    if (y + bh > vp.bottom) y = Math.max(vp.top, r.top - bh - 8);
+    if (y + bh > vp.bottom || y < vp.top) y = vp.bottom - bh;
+    x = Math.max(vp.left, Math.min(vp.right - bw, x));
     vbar.style.left = x + 'px';
     vbar.style.top = y + 'px';
   }
@@ -1395,6 +1483,12 @@
   function load(p) {
     unconfirmed.clear();
     unload();
+    // Per board state starts fresh
+    B.lockedCanvas = false;
+    B.grayCanvas = false; world.classList.remove('gray');
+    B.hoverId = null;
+    undecodable.clear();
+    if (B.tool !== 'select') setTool('select');
     B.project = p.record;
     B.mediaBase = p.mediaBase;
     B.readOnly = !!p.readOnly;
@@ -1409,9 +1503,15 @@
   }
 
   function unload() {
+    const g = B.gesture;
+    if (g && g.pointerId !== undefined) { try { canvas.releasePointerCapture(g.pointerId); } catch (_) {} }
+    for (const svg of world.querySelectorAll('svg.live')) svg.remove();
     for (const node of B.els.values()) { const vv = node.querySelector('video'); if (vv) { vv.pause(); vv.removeAttribute('src'); vv.load(); } node.remove(); }
     B.els.clear(); B.items.clear(); B.sel.clear();
-    B.project = null; B.editingId = null; B.gesture = null;
+    B.project = null; B.editingId = null; B.gesture = null; B.pendingRemote = null; B.hoverId = null;
+    clearTimeout(pasteTimer);
+    canvas.classList.remove('panning');
+    marquee.hidden = true;
     overlay.innerHTML = ''; vbar.hidden = true;
   }
 

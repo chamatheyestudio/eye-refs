@@ -245,10 +245,13 @@ handle('connect:set', async (url) => {
   return boot();
 });
 
-handle('auth:request', async (email) => {
+// People outside EyeStudio sign in with the join code of the board they were given
+handle('auth:request', async (email, joinCode) => {
   email = String(email || '').trim().toLowerCase();
-  await cloud.call('auth.request', { email }, 30000);
+  joinCode = String(joinCode || '').trim().toUpperCase();
+  await cloud.call('auth.request', joinCode ? { email, joinCode } : { email }, 30000);
   settings.email = email;
+  settings.pendingJoin = joinCode || null;
   await saveSettings();
   return { sent: true };
 });
@@ -258,8 +261,14 @@ handle('auth:verify', async (code, name) => {
   setToken(r.token);
   settings.email = r.email;
   settings.name = r.name;
+  const join = settings.pendingJoin;
+  settings.pendingJoin = null;
   await saveSettings();
-  return boot();
+  let joinResult = null;
+  if (join) { try { joinResult = await cloud.call('projects.request', { code: join }); } catch (e) { joinResult = { error: e.message }; } }
+  const res = await boot();
+  if (joinResult) res.joinResult = joinResult;
+  return res;
 });
 
 handle('auth:signout', async () => {

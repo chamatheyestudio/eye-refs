@@ -64,22 +64,29 @@
     requestAnimationFrame(syncSuffix);
     input.addEventListener('input', syncSuffix);
     syncSuffix();
+    // Someone outside EyeStudio needs the join code of the board they were given
+    const join = el('input', { class: 'input', id: 'siJoin', placeholder: 'Join code', 'aria-label': 'Join code', spellcheck: 'false', autocapitalize: 'characters', maxlength: '12', style: 'text-align:center;letter-spacing:0.12em', hidden: true });
+    const outsider = () => input.value.includes('@') && !full().endsWith(DOMAIN);
+    const syncJoin = () => { join.hidden = !outsider(); };
+    input.addEventListener('input', syncJoin);
+    syncJoin();
     const err = el('div', { class: 'err' });
     const btn = el('button', { class: 'btn', text: 'Send me a code' });
     const go = async () => {
       err.textContent = '';
       btn.disabled = true; btn.textContent = 'Sending';
       if (!input.value.trim()) { btn.disabled = false; btn.textContent = 'Send me a code'; err.textContent = 'Type your name.'; return; }
-      const res = await api.requestCode(full());
+      const res = await api.requestCode(full(), outsider() ? join.value.trim() : '');
       btn.disabled = false; btn.textContent = 'Send me a code';
       if (res && res.error) err.textContent = res.error; else codeScreen(full());
     };
     btn.onclick = go;
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
+    join.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
     screen(() => el('div', { style: 'display:contents' },
       el('h1', { text: 'Eye Refs' }),
-      el('p', { text: 'Sign in with your EyeStudio email. We send you a 6 digit code, no password.' }),
-      field, err, el('div', { class: 'btns' }, btn)));
+      el('p', { text: 'Sign in with your EyeStudio email. We send you a 6 digit code, no password. Not at EyeStudio? Type your full email and the join code you were given.' }),
+      field, join, err, el('div', { class: 'btns' }, btn)));
   }
 
   function codeScreen(email) {
@@ -111,6 +118,7 @@
     if (!r || r.error || r.screen !== 'app') return screenFor(r || { error: 'No response' });
     $('#screen').hidden = true;
     S.me = r.me; S.projects = r.projects;
+    if (r.joinResult) setTimeout(() => toast(r.joinResult.error ? r.joinResult.error : "Asked to join. You'll see the board once the owner approves.", !!r.joinResult.error), 400);
     S.admin = !!r.admin; S.teamMember = !!r.team; S.online = r.online !== false;
     S.version = r.version || '';
     $$('.beta').forEach((b) => { b.title = versionLabel(); });
@@ -219,7 +227,7 @@
       '-',
       { label: 'Keyboard shortcuts', key: IS_MAC ? 'Ctrl+H' : 'Mod+H', onClick: shortcutsModal },
       '-',
-      { label: `Sign out ${S.me.email}`, onClick: async () => { S.current = null; B.unload(); route(await api.signOut()); } },
+      { label: `Sign out ${S.me.email}`, onClick: async () => { S.current = null; B.unload(); B.clip = null; B.clipMarker = null; route(await api.signOut()); } },
       { label: `Eye Refs ${versionLabel()}`, disabled: true },
     ], r.left, r.top - 300);
   });
@@ -708,8 +716,21 @@
 
   let lastCopy = 0;
   const doCopy = (cut) => { if (Date.now() - lastCopy < 150) return; lastCopy = Date.now(); B.copySelection(cut); };
-  document.addEventListener('copy', (e) => { if (e.target.closest && e.target.closest('input, textarea, [contenteditable]')) return; if (!B.selIds().length) return; e.preventDefault(); doCopy(false); if (B.clipMarker) e.clipboardData.setData('text/plain', B.clipMarker); });
-  document.addEventListener('cut', (e) => { if (e.target.closest && e.target.closest('input, textarea, [contenteditable]')) return; if (!B.selIds().length) return; e.preventDefault(); doCopy(true); if (B.clipMarker) e.clipboardData.setData('text/plain', B.clipMarker); });
+  const overlayOpen = () => modalOpen() || menuOpen();
+  document.addEventListener('copy', (e) => { if (overlayOpen()) return; if (e.target.closest && e.target.closest('input, textarea, [contenteditable]')) return; if (!B.selIds().length) return; e.preventDefault(); doCopy(false); if (B.clipMarker) e.clipboardData.setData('text/plain', B.clipMarker); });
+  document.addEventListener('cut', (e) => { if (overlayOpen()) return; if (e.target.closest && e.target.closest('input, textarea, [contenteditable]')) return; if (!B.selIds().length) return; e.preventDefault(); doCopy(true); if (B.clipMarker) e.clipboardData.setData('text/plain', B.clipMarker); });
+
+  // Search lives in the sidebar, which clean view hides: show the controls first
+  function focusSearch() {
+    if (clean && !body.classList.contains('board-empty')) setClean(false);
+    setSidebar(true);
+    $('#search').focus();
+    $('#search').select();
+  }
+
+  // Held down keys repeat. Only these should act again on every repeat.
+  const REPEATS = new Set(['Mod+Equal', 'Mod+Minus', 'Mod+Z', 'Mod+Shift+Z']);
+  const repeats = (c) => REPEATS.has(c) || /(^|\+)(Up|Down|Left|Right)$/.test(c);
 
   let spaceUsed = false;
   const actions = {
@@ -743,7 +764,7 @@
     'Mod+L': () => openFile(),
     'Mod+Shift+L': async () => { const last = S.projects.find((p) => !p.scratch && (!S.current || p.id !== S.current.id)); if (last) openResult(await api.openProject(last.id)); },
     'Mod+Shift+S': () => packCurrent(),
-    'Mod+Shift+P': () => { setSidebar(true); $('#search').focus(); },
+    'Mod+Shift+P': focusSearch,
     'Mod+S': async () => { if (S.current && S.current.scratch) return saveModal(); await api.flush(); toast('Saved'); },
     'Mod+Q': () => api.close(),
     'Mod+M': () => api.minimize(),
@@ -798,6 +819,7 @@
     if (B.editingId) { if (e.key === 'Escape') { B.stopEditing(); e.preventDefault(); } return; }
     const inField = e.target.closest && e.target.closest('input, textarea, select, [contenteditable]');
     if (inField) return;
+    if (e.repeat && !repeats(c)) { if (actions[c] || e.code === 'Space' || e.code === 'Tab') e.preventDefault(); return; }
     if (!S.current && !['Mod+K', 'Mod+Q', 'Mod+M', 'Mod+F', 'Mod+L', 'Mod+Shift+L', 'Mod+Shift+P'].includes(c)) return;
 
     // Held keys for drag tools (PureRef: C crop, V pan crop, Z zoom, Space)

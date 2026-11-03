@@ -134,7 +134,9 @@ svg { display: block; }
 
 /* Top bar */
 #title { position: fixed; top: 16px; left: 304px; height: 44px; display: flex; align-items: center; gap: 12px; padding: 0 18px; z-index: 15; -webkit-app-region: drag; max-width: calc(100vw - 720px); }
-#title button { -webkit-app-region: no-drag; }
+/* The bar moves the window, everything you can click on it does not. The name is
+   left clickable too, so a double click renames instead of maximizing. */
+#title :is(button, #tName), #topRight :is(button, .pill, #presence) { -webkit-app-region: no-drag; }
 body.no-sidebar #title { left: 16px; padding-left: 4px; }
 #title .t-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 #title .t-status { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted); white-space: nowrap; }

@@ -24,6 +24,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   });
   const win = await app.firstWindow();
   const errors = [];
+  const checks = {};
+  const expect = (name, ok, detail) => { checks[name] = ok; if (!ok) errors.push(`check failed: ${name} ${JSON.stringify(detail || '')}`); console.log('check', name, ok, detail !== undefined ? JSON.stringify(detail) : ''); };
   win.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
   win.on('console', (m) => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
   await app.evaluate(({ BrowserWindow }) => { const w = BrowserWindow.getAllWindows()[0]; w.setSize(1440, 900); w.setPosition(0, 0); });
@@ -65,8 +67,24 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const leftOk = await win.evaluate(() => !document.body.classList.contains('show-top'));
   console.log('clean stays', staysOk, 'leaves', leftOk);
   console.log('clean', hiddenOk, shownOk);
+  // Top bar moves the window, its controls stay clickable
+  await win.mouse.move(720, 10);
+  await sleep(400);
+  const regions = await win.evaluate(() => {
+    const r = (sel) => { const n = document.querySelector(sel); return n ? getComputedStyle(n).getPropertyValue('-webkit-app-region') || getComputedStyle(n).webkitAppRegion : null; };
+    return { topbar: r('#topbar'), name: r('#tName'), share: r('#share'), update: r('#update'), win: r('#wClose'), winctl: r('#winctl'), presence: r('#presence'), logo: r('#showSidebar') };
+  });
+  expect('topbar regions', regions.topbar === 'drag' && ['name', 'share', 'update', 'win', 'winctl', 'presence', 'logo'].every((k) => regions[k] === 'no-drag'), regions);
+  // Search from clean view shows the controls, then focuses the search box
   await win.mouse.move(720, 450);
-  await win.keyboard.press('Tab');
+  await sleep(500);
+  await win.keyboard.press('Control+Shift+P');
+  await sleep(200);
+  const searchOk = await win.evaluate(() => ({ focused: document.activeElement && document.activeElement.id === 'search', clean: document.body.classList.contains('clean'), sidebar: getComputedStyle(document.querySelector('#sidebar')).display !== 'none' }));
+  expect('search from clean view', searchOk.focused && !searchOk.clean && searchOk.sidebar, searchOk);
+  await win.keyboard.press('Escape');
+  await win.mouse.move(720, 450);
+  if (await win.evaluate(() => document.body.classList.contains('clean'))) await win.keyboard.press('Tab');
   await sleep(200);
   await win.evaluate(() => { const v = [...Board.items.values()].find((it) => it.type === 'video'); Board.sel = new Set([v.id]); Board.focusAll(); });
   await sleep(400);
@@ -129,6 +147,70 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   console.log('pasted', (await count()) - n0);
   imgSrv.close();
   await win.evaluate(() => { Board.arrange(); Board.focusAll(); Board.clearSel(); });
+  await sleep(300);
+
+  // Rotating a selection turns every item by the same amount, around the selection's centre
+  await win.evaluate(() => {
+    // The item the pointer would land on at a screen point
+    window.__topAt = (x, y) => { for (const n of document.elementsFromPoint(x, y)) { const it = n.closest && n.closest('#world .item'); if (it) return it.dataset.id; if (n.id === 'canvas') break; } return null; };
+    // A point inside an item, near (fx, fy) of its box, where nothing covers it
+    window.__freePoint = (id, fx, fy) => {
+      const r = Board.els.get(id).getBoundingClientRect();
+      for (let dy = 0; dy <= 0.3; dy += 0.05) for (const s of [1, -1]) { const x = r.left + r.width * fx, y = r.top + r.height * (fy + s * dy); if (window.__topAt(x, y) === id) return { x, y }; }
+      return null;
+    };
+  });
+  const rotSetup = await win.evaluate(() => {
+    const imgs = Board.live().filter((it) => it.type === 'image').slice(0, 2);
+    Board.sel = new Set(imgs.map((i) => i.id)); Board.focusSelection();
+    const centre = (it) => { const n = Board.els.get(it.id).getBoundingClientRect(); return { x: n.left + n.width / 2, y: n.top + n.height / 2 }; };
+    const b = centre(imgs[1]);
+    let a = null;
+    for (const fx of [0.5, 0.3, 0.7, 0.15, 0.85]) { a = window.__freePoint(imgs[0].id, fx, 0.5); if (a) break; }
+    return { ids: imgs.map((i) => i.id), rot0: imgs.map((i) => i.rot || 0), a, g: { x: (centre(imgs[0]).x + b.x) / 2, y: (centre(imgs[0]).y + b.y) / 2 } };
+  });
+  {
+    const { a, g } = rotSetup;
+    // Start on the first item and swing a quarter turn around the group centre
+    const R = Math.hypot(a.x - g.x, a.y - g.y), a0 = Math.atan2(a.y - g.y, a.x - g.x);
+    await win.keyboard.down('Control');
+    await win.mouse.move(a.x, a.y); await win.mouse.down();
+    for (let i = 1; i <= 12; i++) { const t = a0 + (Math.PI / 6) * (i / 12); await win.mouse.move(g.x + Math.cos(t) * R, g.y + Math.sin(t) * R); }
+    await win.mouse.up(); await win.keyboard.up('Control');
+  }
+  const rotRes = await win.evaluate((ids) => ids.map((id) => Board.items.get(id).rot || 0), rotSetup.ids);
+  const deltas = rotRes.map((r, i) => (((r - rotSetup.rot0[i]) % 360) + 360) % 360);
+  expect('multi rotate equal deltas', Math.abs(deltas[0] - deltas[1]) < 0.01 && deltas[0] > 10 && deltas[0] < 50, deltas);
+  await win.evaluate(() => Board.undo());
+
+  // Cropping a flipped picture: the edge you drag on screen is the one that moves
+  const cropSetup = await win.evaluate(() => {
+    for (const it of Board.live().filter((i) => i.type === 'image' && !(i.crop && (i.crop.l || i.crop.r || i.crop.t || i.crop.b)))) {
+      Board.sel = new Set([it.id]); Board.focusSelection();
+      const pt = window.__freePoint(it.id, 0.08, 0.5);
+      if (!pt) continue;
+      Board.toggleField('flipX'); Board.clearSel();
+      const r = Board.els.get(it.id).getBoundingClientRect();
+      return { id: it.id, pt, left: r.left, right: r.right, top: r.top, bottom: r.bottom, w: r.width, h: r.height };
+    }
+    return null;
+  });
+  await sleep(200);
+  await win.mouse.move(cropSetup.pt.x, cropSetup.pt.y);
+  await win.keyboard.down('c');
+  await win.mouse.down();
+  await win.mouse.move(cropSetup.pt.x + cropSetup.w * 0.2, cropSetup.pt.y, { steps: 8 });
+  await win.mouse.up();
+  await win.keyboard.up('c');
+  const cropRes = await win.evaluate((id) => { const r = Board.els.get(id).getBoundingClientRect(); return { left: r.left, right: r.right, crop: Board.items.get(id).crop }; }, cropSetup.id);
+  const want = cropSetup.w * 0.2;
+  expect('crop flipped image moves the dragged edge', Math.abs(cropRes.left - cropSetup.left - want) < 4 && Math.abs(cropRes.right - cropSetup.right) < 2 && cropRes.crop.r > 0.1 && !cropRes.crop.l, { before: cropSetup, after: cropRes });
+  // Reset cropping keeps the flipped picture where it is
+  const resetRes = await win.evaluate((id) => { Board.sel = new Set([id]); Board.resetCrop(); Board.clearSel(); const r = Board.els.get(id).getBoundingClientRect(); return { left: r.left, right: r.right }; }, cropSetup.id);
+  expect('reset crop on flipped image stays put', Math.abs(resetRes.left - cropSetup.left) < 2 && Math.abs(resetRes.right - cropSetup.right) < 2, resetRes);
+  await win.evaluate(() => { Board.undo(); Board.undo(); Board.undo(); });
+  const cropUndone = await win.evaluate((id) => { const it = Board.items.get(id); return !it.flipX && !(it.crop && it.crop.r); }, cropSetup.id);
+  expect('crop test undone', cropUndone);
 
   await win.screenshot({ path: `${OUT}/03b-untitled.png` });
   // Share asks for a name first, then saves into Documents/Eye Refs
@@ -194,9 +276,33 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await win.screenshot({ path: `${OUT}/08-account.png` });
   await win.keyboard.press('Escape');
 
+  // An import still running when you switch boards must not land on the new board,
+  // and a teammate's update held back during a gesture must not follow you there
+  await win.evaluate((src) => {
+    window.__toasts = [];
+    new MutationObserver(() => window.__toasts.push(document.querySelector('#toast').textContent)).observe(document.querySelector('#toast'), { childList: true, characterData: true, subtree: true });
+    // Hold back the size check so the import is still busy when the board changes
+    const RealImage = window.Image;
+    window.__RealImage = RealImage;
+    window.Image = function () {
+      const i = new RealImage(); let f = null;
+      Object.defineProperty(i, 'onload', { set(v) { f = v; i.addEventListener('load', () => setTimeout(() => f && f(), 1500)); }, get() { return f; } });
+      return i;
+    };
+    window.__importDone = Board.addPaths([`${src}/pattern.png`], { x: 0, y: 0 }).then(() => true);
+    Board.gesture = { type: 'pan', v0: { ...Board.view } };
+    Board.applyRemote({ ghost: { id: 'ghost', type: 'note', text: 'ghost', x: 0, y: 0, w: 100, z: 1 } });
+    window.__pendingBefore = !!Board.pendingRemote;
+  }, SRC);
+  await sleep(300);
   // New board: back to a blank untitled one, saved board stays in the list
   await win.keyboard.press('Control+K');
   await win.waitForFunction(() => document.querySelector('#tName').textContent === 'Untitled');
+  await win.waitForFunction(() => window.__importDone, null, { timeout: 15000 });
+  await win.evaluate(() => window.__importDone);
+  const switchRes = await win.evaluate(() => { window.Image = window.__RealImage; return { pendingBefore: window.__pendingBefore, pending: Board.pendingRemote, ghost: Board.items.has('ghost'), count: Board.live().length, toasts: window.__toasts }; });
+  expect('import after board switch skipped', switchRes.count === 0 && switchRes.toasts.includes('That finished after you left the board.'), switchRes);
+  expect('pending remote cleared on board switch', switchRes.pendingBefore && switchRes.pending === null && !switchRes.ghost, switchRes);
   await win.screenshot({ path: `${OUT}/09-new.png` });
   const fresh = await win.evaluate(() => Board.live().length);
   await win.click('#tree >> text=Spring Campaign');
@@ -206,7 +312,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await app.close();
   const driveDir = path.join(tmp, 'drive', 'Eye Refs', 'Spring Campaign');
   console.log(JSON.stringify({
-    result, request: reqRes.ok,
+    result, request: reqRes.ok, checks,
     driveMedia: fs.readdirSync(path.join(driveDir, 'media')).length,
     driveChanges: fs.readdirSync(path.join(driveDir, 'changes')),
     local: fs.readdirSync(path.join(tmp, 'Documents', 'Eye Refs')),
