@@ -14,6 +14,9 @@ function createGas(driveDir, ownerEmail) {
   const uploads = new Map(); // session url -> { folder, name, total, buf }
   const ids = new Map(); // id -> absolute path
   let idSeq = 0;
+  let quota = 1500;
+  const trashDir = path.join(driveDir, '..', path.basename(driveDir) + '-trash');
+  const repath = (from, to) => { for (const [k, v] of ids) if (v === from || v.startsWith(from + path.sep)) ids.set(k, to + v.slice(from.length)); };
   const idFor = (p) => { for (const [k, v] of ids) if (v === p) return k; const id = 'id' + (++idSeq) + crypto.randomBytes(4).toString('hex'); ids.set(id, p); return id; };
   const iter = (arr) => { let i = 0; return { hasNext: () => i < arr.length, next: () => arr[i++] }; };
 
@@ -37,6 +40,15 @@ function createGas(driveDir, ownerEmail) {
       getFiles: () => iter(list().filter((e) => e.isFile()).map((e) => File(path.join(p, e.name)))),
       createFolder: (n) => { fs.mkdirSync(path.join(p, n)); return Folder(path.join(p, n)); },
       createFile: (n, content) => { fs.writeFileSync(path.join(p, n), content); return File(path.join(p, n)); },
+      getParents: () => iter(p === driveDir || p.startsWith(trashDir) ? [] : [Folder(path.dirname(p))]),
+      setName: (n) => { const to = path.join(path.dirname(p), n); fs.renameSync(p, to); repath(p, to); return Folder(to); },
+      isTrashed: () => p.startsWith(trashDir),
+      setTrashed: (on) => {
+        if (!on) return;
+        fs.mkdirSync(trashDir, { recursive: true });
+        const to = path.join(trashDir, idFor(p));
+        fs.renameSync(p, to); repath(p, to);
+      },
     };
   }
 
@@ -46,7 +58,14 @@ function createGas(driveDir, ownerEmail) {
     Logger: { log: () => {} },
     Session: { getEffectiveUser: () => ({ getEmail: () => ownerEmail }) },
     ScriptApp: { getOAuthToken: () => 'fake-token' },
-    PropertiesService: { getScriptProperties: () => ({ getProperty: (k) => (k in props ? props[k] : null), setProperty: (k, v) => { props[k] = String(v); } }) },
+    PropertiesService: {
+      getScriptProperties: () => ({
+        getProperty: (k) => (k in props ? props[k] : null),
+        setProperty: (k, v) => { props[k] = String(v); },
+        getProperties: () => ({ ...props }),
+        deleteProperty: (k) => { delete props[k]; },
+      }),
+    },
     CacheService: {
       getScriptCache: () => ({
         get: (k) => { const e = cache.get(k); if (!e || e.exp < Date.now()) return null; return e.v; },
@@ -55,7 +74,7 @@ function createGas(driveDir, ownerEmail) {
       }),
     },
     LockService: { getScriptLock: () => ({ waitLock: () => {}, releaseLock: () => {} }) },
-    MailApp: { sendEmail: (o) => mail.push(o), getRemainingDailyQuota: () => 1500 },
+    MailApp: { sendEmail: (o) => mail.push(o), getRemainingDailyQuota: () => quota },
     Utilities: {
       getUuid: () => crypto.randomUUID(),
       computeHmacSha256Signature: (v, k) => crypto.createHmac('sha256', k).update(toBuf(v)).digest(),
@@ -66,7 +85,10 @@ function createGas(driveDir, ownerEmail) {
       newBlob: (b) => ({ getDataAsString: () => toBuf(b).toString('utf8') }),
     },
     ContentService: { MimeType: { JSON: 'json' }, createTextOutput: (s) => ({ setMimeType() { return this; }, getContent: () => s }) },
-    DriveApp: { getRootFolder: () => Folder(driveDir), getFolderById: (id) => Folder(ids.get(id)) },
+    DriveApp: {
+      getRootFolder: () => Folder(driveDir),
+      getFolderById: (id) => { const p = ids.get(id); if (!p || !fs.existsSync(p)) throw new Error('No item with the given ID could be found.'); return Folder(p); },
+    },
     UrlFetchApp: {
       fetch(url, o = {}) {
         const resp = (code, body = Buffer.alloc(0), headers = {}) => ({ getResponseCode: () => code, getHeaders: () => headers, getContent: () => body, getContentText: () => body.toString() });
@@ -117,7 +139,8 @@ function createGas(driveDir, ownerEmail) {
       srv.listen(0, '127.0.0.1', () => resolve({ url: `http://127.0.0.1:${srv.address().port}/exec`, close: () => srv.close() }));
     });
   }
-  return { call, listen, mail, ctx };
+  const setQuota = (n) => { quota = n; };
+  return { call, listen, mail, ctx, props, cache, setQuota };
 }
 
 module.exports = { createGas };

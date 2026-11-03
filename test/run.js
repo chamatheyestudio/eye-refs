@@ -94,7 +94,7 @@ async function test(name, fn) {
     assert.equal(cleanFolderName('Spring: "Campaign"?'), 'Spring Campaign');
     assert.equal(cleanFolderName('Lunar New Year...'), 'Lunar New Year');
     assert.equal(cleanFolderName('CON'), 'CON_');
-    assert.equal(slug('Café Menu*Final'), 'café-menu-final');
+    assert.equal(slug('Café Menu*Final'), 'cafe-menu-final');
     assert.equal(slug('aux'), 'file');
     assert.ok(cleanFolderName('x'.repeat(200)).length <= 60);
     const nfd = 'Café';

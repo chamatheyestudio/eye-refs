@@ -21,8 +21,10 @@ function cleanFolderName(name) {
 
 // Short slug for media file names, e.g. "lantern-reel".
 function slug(name) {
-  const base = String(name || '').normalize('NFC').replace(/\.[^.]+$/, '');
-  let s = base.toLowerCase().replace(FORBIDDEN, ' ').replace(/[\s_.]+/g, '-').replace(/-+/g, '-');
+  // Plain letters and numbers only, so every computer and the server accept it:
+  // accents are dropped (café becomes cafe), other scripts become dashes.
+  const base = String(name || '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/\.[^.]+$/, '');
+  let s = base.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/-+/g, '-');
   s = s.replace(/^-|-$/g, '');
   if (s.length > 40) s = s.slice(0, 40).replace(/-$/, '');
   if (!s || WIN_RESERVED.test(s)) s = 'file';

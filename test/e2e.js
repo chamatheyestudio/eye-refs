@@ -230,7 +230,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await win.click('#modalWrap >> text=Done');
 
   // An outside freelancer asks to join with the code
-  const guest = (() => { gas.call({ action: 'auth.request', email: 'rami@freelancer.com' }); return gas.call({ action: 'auth.verify', email: 'rami@freelancer.com', code: codeFor('rami@freelancer.com'), name: 'Rami' }).data.token; })();
+  const guest = (() => { gas.call({ action: 'auth.request', email: 'rami@freelancer.com', joinCode: code }); return gas.call({ action: 'auth.verify', email: 'rami@freelancer.com', code: codeFor('rami@freelancer.com'), name: 'Rami' }).data.token; })();
   const reqRes = gas.call({ action: 'projects.request', token: guest, code });
 
   // Nousaiba opens it on her computer (simulated) and moves an image
