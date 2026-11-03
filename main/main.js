@@ -130,8 +130,10 @@ async function closeCurrent() {
 async function openProject(rec) {
   const prev = session && session.rec.scratch && session.rec.id !== rec.id && isEmpty(session) ? session.rec : null;
   await closeCurrent();
-  // An untitled board nobody added anything to just goes away
-  if (prev) { try { await fsp.rm(prev.dir, { recursive: true, force: true }); } catch (_) {} }
+  // An untitled board nobody added anything to just goes away. Only when it is
+  // truly empty: nothing on it and no files at all in its media folder, so a board
+  // with an import still running is never touched.
+  if (prev && await noMedia(prev.dir)) { try { await fsp.rm(prev.dir, { recursive: true, force: true }); } catch (_) {} }
   const s = new Session(rec, me, backupDir(), {
     state: (items) => send('board:state', { projectId: rec.id, items }),
     status: (st) => send('board:status', { projectId: rec.id, status: st }),
@@ -162,6 +164,10 @@ function knownHashes() {
     if (it.hash && it.src && !it.deleted) map.set(it.hash, it.src);
   }
   return map;
+}
+
+async function noMedia(dir) {
+  try { return (await fsp.readdir(path.join(dir, 'media'))).length === 0; } catch (_) { return false; }
 }
 
 function isEmpty(s) {

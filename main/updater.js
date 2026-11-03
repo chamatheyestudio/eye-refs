@@ -14,7 +14,8 @@ const fsp = fs.promises;
 const { app, net, shell } = require('electron');
 
 const REPO = 'chamatheyestudio/eye-refs';
-const EVERY = 4 * 60 * 60 * 1000;
+const EVERY = 15 * 60 * 1000;      // every 15 minutes while open
+const ON_FOCUS_GAP = 5 * 60 * 1000; // and when you come back to the app, at most every 5 minutes
 
 function newer(a, b) {
   // true when version a is newer than b. Pre-release versions never count.
@@ -30,6 +31,7 @@ function newer(a, b) {
 function createUpdater(notify) {
   let ready = null; // { version, install() }
   let busy = false;
+  let lastCheck = 0;
 
   async function checkMac() {
     const res = await net.fetch(`https://api.github.com/repos/${REPO}/releases/latest`, { headers: { Accept: 'application/vnd.github+json' } });
@@ -84,6 +86,7 @@ function createUpdater(notify) {
   async function check() {
     if (busy || ready || !app.isPackaged) return;
     busy = true;
+    lastCheck = Date.now();
     try {
       if (process.platform === 'darwin') await checkMac();
       else if (process.platform === 'win32') { if (!winUpdater) setupWindows(); await winUpdater.checkForUpdates(); }
@@ -95,7 +98,11 @@ function createUpdater(notify) {
   }
 
   return {
-    start() { setTimeout(check, 8000); setInterval(check, EVERY); },
+    start() {
+      setTimeout(check, 3000);
+      setInterval(check, EVERY);
+      app.on('browser-window-focus', () => { if (Date.now() - lastCheck > ON_FOCUS_GAP) check(); });
+    },
     check,
     state() { return ready ? { version: ready.version } : null; },
     async install() { if (!ready) return { error: 'No update yet.' }; const err = await ready.install(); return err ? { error: err } : { ok: true }; },
