@@ -52,11 +52,18 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await win.mouse.move(720, 450);
   await sleep(300);
   await win.screenshot({ path: `${OUT}/02a-clean.png` });
-  const hiddenOk = await win.evaluate(() => getComputedStyle(document.querySelector('#toolbar')).opacity === '0');
-  await win.mouse.move(720, 880);
-  await sleep(300);
-  await win.screenshot({ path: `${OUT}/02b-clean-bottom.png` });
-  const shownOk = await win.evaluate(() => getComputedStyle(document.querySelector('#toolbar')).opacity === '1');
+  const hiddenOk = await win.evaluate(() => getComputedStyle(document.querySelector('#toolbar')).display === 'none' && getComputedStyle(document.querySelector('#topbar')).opacity === '0');
+  await win.mouse.move(720, 10);
+  await sleep(400);
+  await win.screenshot({ path: `${OUT}/02b-clean-top.png` });
+  const shownOk = await win.evaluate(() => getComputedStyle(document.querySelector('#topbar')).opacity === '1' && getComputedStyle(document.querySelector('#title')).opacity === '1');
+  await win.mouse.move(720, 45);
+  await sleep(500);
+  const staysOk = await win.evaluate(() => document.body.classList.contains('show-top'));
+  await win.mouse.move(720, 300);
+  await sleep(600);
+  const leftOk = await win.evaluate(() => !document.body.classList.contains('show-top'));
+  console.log('clean stays', staysOk, 'leaves', leftOk);
   console.log('clean', hiddenOk, shownOk);
   await win.mouse.move(720, 450);
   await win.keyboard.press('Tab');
@@ -100,6 +107,28 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const strokes = await win.evaluate(() => Board.live().filter((it) => it.type === 'draw').length);
   console.log('strokes', strokes);
   await win.keyboard.press('Escape');
+
+  // Paste from outside: a Google Slides style copy (html with an image link),
+  // a picture copied in another app, and plain text
+  const http = require('http');
+  const imgSrv = http.createServer((q, r) => { r.writeHead(200, { 'content-type': 'image/jpeg' }); fs.createReadStream(`${SRC}/warm.jpg`).pipe(r); });
+  await new Promise((r) => imgSrv.listen(0, '127.0.0.1', r));
+  const imgUrl = `http://127.0.0.1:${imgSrv.address().port}/slidesz/AGV_vUe?key=abc&amp;w=1600`;
+  const count = () => win.evaluate(() => Board.live().filter((it) => it.type !== 'draw').length);
+  const n0 = await count();
+  await app.evaluate(({ clipboard }, u) => clipboard.write({ html: `<meta charset="utf-8"><b id="docs-internal-guid-1"><img src="${u}" width="400"></b>`, text: '' }), imgUrl);
+  await win.mouse.move(720, 450); await win.mouse.click(720, 450);
+  await win.keyboard.press('Control+V');
+  await win.waitForFunction((n) => Board.live().filter((it) => it.type !== 'draw').length > n, n0, { timeout: 15000 });
+  await app.evaluate(({ clipboard, nativeImage }, f) => clipboard.writeImage(nativeImage.createFromPath(f)), `${SRC}/night.jpg`);
+  await win.keyboard.press('Control+V');
+  await win.waitForFunction((n) => Board.live().filter((it) => it.type !== 'draw').length > n + 1, n0, { timeout: 15000 });
+  await app.evaluate(({ clipboard }) => clipboard.writeText('Warmer light, like the second shot'));
+  await win.keyboard.press('Control+V');
+  await win.waitForFunction(() => Board.live().some((it) => it.type === 'note' && /Warmer light/.test(it.text || '')), null, { timeout: 15000 });
+  console.log('pasted', (await count()) - n0);
+  imgSrv.close();
+  await win.evaluate(() => { Board.arrange(); Board.focusAll(); Board.clearSel(); });
 
   await win.screenshot({ path: `${OUT}/03b-untitled.png` });
   // Share asks for a name first, then saves into Documents/Eye Refs

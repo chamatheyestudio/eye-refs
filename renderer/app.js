@@ -208,7 +208,7 @@
   $('#newProject').addEventListener('click', () => newBoard());
   $('#joinBoard').addEventListener('click', () => joinModal());
   $('#hideSidebar').addEventListener('click', () => setSidebar(false));
-  $('#showSidebar').addEventListener('click', () => setSidebar(true));
+  $('#showSidebar').addEventListener('click', () => { if (document.body.classList.contains('clean') && !document.body.classList.contains('board-empty')) { setClean(false); setSidebar(true); } else setSidebar(true); });
   $('#account').addEventListener('click', (e) => {
     const r = e.currentTarget.getBoundingClientRect();
     openMenu([
@@ -308,24 +308,26 @@
     clean = on;
     body.classList.toggle('clean', on);
     try { localStorage.setItem('clean', on ? '1' : '0'); } catch (_) {}
-    if (!quiet) toast(on ? `Controls hidden. Move to an edge to see them, or press Tab.` : 'Controls shown');
+    if (!quiet) toast(on ? 'Only the board. Tab brings the controls back.' : 'Controls shown');
     try { B.applyView(); } catch (_) {}
   }
   setClean(clean, true);
-  const chrome = (sel) => (t) => t && t.closest && t.closest(sel);
-  const inTop = chrome('#title, #topRight'), inBottom = chrome('#toolbar, #zoom, #penBar'), inLeft = chrome('#sidebar');
-  let busy = false;
+  // Top edge: one bar for moving the window, like PureRef. It waits a moment
+  // before leaving, so passing the pointer over it never flickers.
+  const inTop = (t) => t && t.closest && t.closest('#topbar, #title, #topRight');
+  let busy = false, leaveTimer = null;
+  const showTop = (on) => {
+    clearTimeout(leaveTimer);
+    if (on) body.classList.add('show-top');
+    else leaveTimer = setTimeout(() => body.classList.remove('show-top'), 350);
+  };
   window.addEventListener('pointermove', (e) => {
-    if (!clean || busy || modalOpen()) return;
-    const W = window.innerWidth, H = window.innerHeight;
-    body.classList.toggle('show-top', e.clientY < 64 || !!inTop(e.target));
-    body.classList.toggle('show-bottom', e.clientY > H - 72 || !!inBottom(e.target));
-    body.classList.toggle('show-left', S.sidebar && (e.clientX < 20 || !!inLeft(e.target) || (body.classList.contains('show-left') && e.clientX < 300)));
+    if (!clean || busy || modalOpen() || menuOpen()) return;
+    showTop(e.clientY < 28 || (body.classList.contains('show-top') && (e.clientY < 60 || !!inTop(e.target))));
   }, { passive: true });
-  const hideAll = () => body.classList.remove('show-top', 'show-bottom', 'show-left');
-  $('#canvas').addEventListener('pointerdown', () => { if (clean) { busy = true; hideAll(); } });
+  $('#canvas').addEventListener('pointerdown', () => { if (clean) { busy = true; clearTimeout(leaveTimer); body.classList.remove('show-top'); } });
   window.addEventListener('pointerup', () => { busy = false; });
-  document.addEventListener('mouseleave', () => { if (clean) hideAll(); });
+  document.addEventListener('mouseleave', () => { if (clean) showTop(false); });
 
   // ---------- toolbar ----------
   function syncToolbar() {
@@ -445,7 +447,7 @@
     const b = $('#update');
     b.hidden = false;
     b.title = `Eye Refs ${u.version} is ready`;
-    if (clean && !b.dataset.told) { b.dataset.told = '1'; toast(`Eye Refs ${u.version} is ready. Restart to update is at the top.`); }
+    if (clean && !b.dataset.told) { b.dataset.told = '1'; toast(`Eye Refs ${u.version} is ready. Move to the top to restart.`); }
   };
   api.onUpdate(showUpdate);
   api.updateState().then(showUpdate);
@@ -720,6 +722,7 @@
     'Mod+Shift+Z': () => B.redo(),
     'Mod+C': () => doCopy(false),
     'Mod+X': () => doCopy(true),
+    'Mod+V': () => B.pasteKey(),
     'Mod+D': toggleDraw,
     'Mod+Shift+D': toggleDraw,
     'Delete': () => B.deleteSelection(),

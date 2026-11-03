@@ -229,6 +229,7 @@ async function importUrl(mediaDir, url, me, known, fetchImpl) {
   const res = await fetchImpl(url);
   if (!res.ok) throw new Error(`Couldn't download that (${res.status}).`);
   const type = (res.headers.get('content-type') || '').split(';')[0].trim();
+  if (type && !/^(image|video)\//.test(type) && type !== 'application/octet-stream') throw new Error("That link isn't an image or video.");
   let name = decodeURIComponent((new URL(url).pathname.split('/').pop() || 'download').split('?')[0]);
   if (!kindOf(name)) name = `${name || 'download'}.${TYPE_EXT[type] || 'png'}`;
   if (!kindOf(name)) throw new Error("That link isn't an image or video.");

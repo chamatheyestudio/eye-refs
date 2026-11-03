@@ -1,5 +1,5 @@
 // Eye Refs by Matte Black
-const { app, BrowserWindow, ipcMain, dialog, shell, globalShortcut, net, screen, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, globalShortcut, net, screen, Menu, clipboard } = require('electron');
 const path = require('path');
 const fsp = require('fs').promises;
 const { pathToFileURL } = require('url');
@@ -363,6 +363,26 @@ handle('media:importUrl', async (projectId, url) => {
   if (s.readOnly) return { error: 'This project is view only.' };
   if (!/^https?:\/\//i.test(url)) return { error: 'Only web links can be dropped.' };
   return media.importUrl(s.mediaDir, url, me, knownHashes(), (u) => net.fetch(u));
+});
+
+// What the system clipboard holds, for pastes the page itself can't see:
+// pictures copied in Keynote, Figma, Photoshop, screenshots, files copied in Finder.
+handle('clipboard:read', async () => {
+  const out = { text: clipboard.readText() || '', html: clipboard.readHTML() || '', png: null, files: [] };
+  try {
+    if (process.platform === 'darwin') {
+      const u = clipboard.read('public.file-url');
+      if (u && u.startsWith('file://')) out.files.push(decodeURIComponent(new URL(u).pathname));
+    } else if (process.platform === 'win32') {
+      const raw = clipboard.readBuffer('FileNameW');
+      if (raw && raw.length) { const f = raw.toString('ucs2').replace(/\0+$/, ''); if (f) out.files.push(f); }
+    }
+  } catch (_) {}
+  if (!out.files.length) {
+    const img = clipboard.readImage();
+    if (img && !img.isEmpty()) out.png = new Uint8Array(img.toPNG());
+  }
+  return out;
 });
 
 handle('media:grabFrame', async (projectId, src, time) => {

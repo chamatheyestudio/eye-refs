@@ -976,8 +976,63 @@
     renderOverlay();
   }
 
+  // Paste anything: images copied in a browser or Google Slides, screenshots,
+  // pictures from other apps, files from Finder or Explorer, image links, or text
+  // (which becomes a note). Several images paste as a row.
+  function imgSources(html) {
+    if (!html) return [];
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    return [...doc.querySelectorAll('img')].map((i) => i.getAttribute('src') || '').filter((s) => /^(https?:|data:image\/)/i.test(s));
+  }
+  async function dataUrlFile(src, i) {
+    const m = /^data:([^;,]+)(;base64)?,(.*)$/s.exec(src);
+    const type = (m && m[1]) || 'image/png';
+    const raw = m ? (m[2] ? atob(m[3]) : decodeURIComponent(m[3])) : '';
+    const bytes = new Uint8Array(raw.length);
+    for (let j = 0; j < raw.length; j++) bytes[j] = raw.charCodeAt(j);
+    const ext = (type.split('/')[1] || 'png').replace('jpeg', 'jpg').replace('svg+xml', 'svg');
+    return new File([bytes], `pasted-${i + 1}.${ext}`, { type });
+  }
+  async function pasteSources(srcs, at) {
+    const files = [], urls = [];
+    for (let i = 0; i < srcs.length; i++) {
+      if (srcs[i].startsWith('data:')) files.push(await dataUrlFile(srcs[i], i)); else urls.push(srcs[i]);
+    }
+    if (files.length) await addBytes(files, at);
+    if (urls.length) {
+      const p = at || viewCenter();
+      const results = [];
+      for (const u of urls) results.push(await api.importUrl(B.project.id, u));
+      const ok = results.filter((r) => r && !r.error);
+      if (!ok.length) return toast((results[0] && results[0].error) || "Couldn't paste that.", true);
+      await placeResults(ok, p);
+    }
+  }
+  const IMAGE_LINK = /^https?:\/\/\S+\.(png|jpe?g|gif|webp|avif|heic|mp4|webm|mov)(\?\S*)?$/i;
+  let pasteTimer = null;
+  async function pasteNative(at) {
+    if (!B.project || !canEdit()) return;
+    const c = await api.readClipboard();
+    if (!c || c.error) return;
+    if (B.clipMarker && c.text === B.clipMarker) return pasteInternal(at);
+    if (c.files && c.files.length) return addPaths(c.files, at);
+    const srcs = imgSources(c.html);
+    if (srcs.length) return pasteSources(srcs, at);
+    if (c.png) return addBytes([new File([c.png], 'pasted.png', { type: 'image/png' })], at);
+    const text = (c.text || '').trim();
+    if (IMAGE_LINK.test(text)) return addUrl(text, at);
+    if (text) addNote(at, text);
+  }
+  // Windows has no Edit menu, so Ctrl+V may not raise a paste event. If none
+  // comes, read the clipboard directly.
+  function pasteKey() {
+    clearTimeout(pasteTimer);
+    pasteTimer = setTimeout(() => pasteNative(null), 120);
+  }
+
   document.addEventListener('paste', async (e) => {
     if (!B.project || B.editingId || e.target.closest('input, textarea, [contenteditable]')) return;
+    clearTimeout(pasteTimer);
     e.preventDefault();
     const at = null;
     const cd = e.clipboardData;
@@ -991,11 +1046,10 @@
       if (blobs.length) await addBytes(blobs, at);
       return;
     }
-    const html = cd.getData('text/html');
-    const m = html && /<img[^>]+src="(https?:[^"]+)"/i.exec(html);
-    if (m) return addUrl(m[1], at);
-    if (/^https?:\/\/\S+\.(png|jpe?g|gif|webp|avif|mp4|webm|mov)(\?\S*)?$/i.test(text.trim())) return addUrl(text.trim(), at);
-    if (text.trim()) addNote(null, text.trim());
+    const srcs = imgSources(cd.getData('text/html'));
+    if (srcs.length) return pasteSources(srcs, at);
+    // Nothing the page can read (a picture from another app, a copied file): ask the system
+    return pasteNative(at);
   });
 
   // ---------- selection actions ----------
@@ -1326,7 +1380,7 @@
         { label: 'Add images and videos', key: 'Mod+I', onClick: async () => addPaths(await api.openImagesDialog(), at), disabled: !ed },
         { label: 'Import a folder of images', onClick: async () => addPaths(await api.importFolderDialog(), at), disabled: !ed },
         { label: 'New note', key: 'Mod+N', onClick: () => addNote(at), disabled: !ed },
-        { label: 'Paste', key: 'Mod+V', onClick: () => pasteInternal(at), disabled: !ed || !B.clip },
+        { label: 'Paste', key: 'Mod+V', onClick: () => pasteNative(at), disabled: !ed },
         '-');
     }
     items.push(
@@ -1379,7 +1433,7 @@
   Object.assign(B, {
     load, unload, applyRemote, render, applyView, zoomAt, fitRect, toWorld, toScreen,
     commit, undo, redo, addPaths, addBytes, addUrl, addNote, editNote, stopEditing,
-    copySelection, pasteInternal, deleteSelection, duplicate, toggleField, resetCrop, resetTransform, front, back,
+    copySelection, pasteInternal, pasteNative, pasteKey, deleteSelection, duplicate, toggleField, resetCrop, resetTransform, front, back,
     align, normalize, arrange, focusSelection, focusAll, focusStep, selectAll, clearSel, selIds,
     togglePlay, setInOut, toggleLoop, cycleSpeed, toggleMute, step, grabFrame, activeVideoId,
     setTool, setGrid, setGrayCanvas, setLockedCanvas, binItems, restore, mediaUrl, contextMenu, live,

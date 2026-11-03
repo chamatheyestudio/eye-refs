@@ -34,6 +34,7 @@ contextBridge.exposeInMainWorld('eyerefs', {
   importPaths: call('media:importPaths'),
   importBytes: call('media:importBytes'),
   importUrl: call('media:importUrl'),
+  readClipboard: call('clipboard:read'),
   grabFrame: call('media:grabFrame'),
   mediaState: call('media:state'),
   openImagesDialog: call('dialog:openImages'),
