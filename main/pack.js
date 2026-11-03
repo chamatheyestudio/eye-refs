@@ -43,15 +43,20 @@ async function pack(rec, outFile, onProgress) {
     done += size;
   }
   const tmp = path.join(path.dirname(outFile), `.${path.basename(outFile)}.${randCode(5)}.tmp`);
-  await new Promise((resolve, reject) => {
-    const out = fs.createWriteStream(tmp);
-    let written = 0;
-    zip.outputStream.on('data', (d) => { written += d.length; if (onProgress && total) onProgress(Math.min(1, written / total)); });
-    zip.outputStream.pipe(out).on('close', resolve).on('error', reject);
-    zip.outputStream.on('error', reject);
-    zip.end();
-  });
-  await fsp.rename(tmp, outFile);
+  try {
+    await new Promise((resolve, reject) => {
+      const out = fs.createWriteStream(tmp);
+      let written = 0;
+      zip.outputStream.on('data', (d) => { written += d.length; if (onProgress && total) onProgress(Math.min(1, written / total)); });
+      zip.outputStream.pipe(out).on('close', resolve).on('error', reject);
+      zip.outputStream.on('error', reject);
+      zip.end();
+    });
+    await fsp.rename(tmp, outFile);
+  } catch (e) {
+    try { await fsp.unlink(tmp); } catch (_) {}
+    throw e;
+  }
   return { files: files.length, bytes: done };
 }
 
@@ -61,6 +66,17 @@ function openZip(file) {
 
 // Unpack into Documents/Eye Refs/<name> as a new project owned by me.
 async function unpack(file, root, me) {
+  const made = { dir: null };
+  try {
+    return await unpackInto(file, root, me, made);
+  } catch (e) {
+    // A damaged file leaves nothing behind
+    if (made.dir) { try { await fsp.rm(made.dir, { recursive: true, force: true }); } catch (_) {} }
+    throw new Error(/Eye Refs board/.test(e.message) ? e.message : "That file is damaged and can't be opened.");
+  }
+}
+
+async function unpackInto(file, root, me, made) {
   const zip = await openZip(file);
   let dest = null;
   let project = null;
@@ -73,6 +89,7 @@ async function unpack(file, root, me) {
       if (name === 'project.json') {
         zip.openReadStream(entry, (err, rs) => {
           if (err) return reject(err);
+          rs.on('error', reject);
           const chunks = [];
           rs.on('data', (d) => chunks.push(d));
           rs.on('end', async () => {
@@ -80,6 +97,7 @@ async function unpack(file, root, me) {
               project = JSON.parse(Buffer.concat(chunks).toString('utf8'));
               if (project.kind !== 'eyerefs-project') throw new Error("That file isn't an Eye Refs board.");
               dest = await makeProjectDir(root, '', project.name);
+              made.dir = dest.dir;
               zip.readEntry();
             } catch (e) { reject(e); }
           });
@@ -89,9 +107,12 @@ async function unpack(file, root, me) {
       if (!okPath || !dest) { zip.readEntry(); return; }
       zip.openReadStream(entry, (err, rs) => {
         if (err) return reject(err);
+        // Written under a hidden name, renamed once the whole entry checked out
         const target = path.join(dest.dir, name);
-        const ws = fs.createWriteStream(target);
-        rs.pipe(ws).on('close', () => zip.readEntry()).on('error', reject);
+        const part = path.join(path.dirname(target), `.${path.basename(target)}.${randCode(5)}.part`);
+        const ws = fs.createWriteStream(part);
+        rs.on('error', (e) => { ws.destroy(); reject(e); });
+        rs.pipe(ws).on('close', async () => { try { await fsp.rename(part, target); zip.readEntry(); } catch (e) { reject(e); } }).on('error', reject);
       });
     });
     zip.readEntry();

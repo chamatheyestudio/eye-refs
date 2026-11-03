@@ -66,8 +66,15 @@ async function scanProjects(root, me) {
 async function makeProjectDir(root, client, name) {
   const clientDir = client ? path.join(root, cleanFolderName(client)) : root;
   await fsp.mkdir(clientDir, { recursive: true });
-  const folder = await uniqueChild(clientDir, cleanFolderName(name));
-  const dir = path.join(clientDir, folder);
+  // Claim the folder with a plain mkdir, which fails if it already exists, so two
+  // boards made at the same moment can never end up in one folder.
+  const base = cleanFolderName(name);
+  let folder = null, dir = null;
+  for (let n = 1; n < 500 && !folder; n++) {
+    const candidate = n === 1 ? base : `${base} ${n}`;
+    try { await fsp.mkdir(path.join(clientDir, candidate)); folder = candidate; dir = path.join(clientDir, candidate); } catch (e) { if (e.code !== 'EEXIST') throw e; }
+  }
+  if (!folder) throw new Error('Could not pick a folder name.');
   await fsp.mkdir(path.join(dir, 'media'), { recursive: true });
   await fsp.mkdir(path.join(dir, 'changes'), { recursive: true });
   return { dir, folder };
@@ -98,12 +105,25 @@ async function saveScratch(rec, root, name) {
   await fsp.mkdir(root, { recursive: true });
   const folder = await uniqueChild(root, clean);
   const dest = path.join(root, folder);
-  try {
-    await fsp.rename(rec.dir, dest);
-  } catch (e) {
-    if (e.code !== 'EXDEV') throw e;
-    await fsp.cp(rec.dir, dest, { recursive: true });
-    await fsp.rm(rec.dir, { recursive: true, force: true });
+  // Windows refuses to move a folder while something inside is open (a video
+  // still playing, an antivirus scan). Retry, then fall back to copying.
+  let moved = false, lastErr = null;
+  for (let i = 0; i < 6 && !moved; i++) {
+    try { await fsp.rename(rec.dir, dest); moved = true; } catch (e) {
+      lastErr = e;
+      if (e.code === 'EXDEV') break;
+      if (!['EPERM', 'EBUSY', 'EACCES', 'ENOTEMPTY'].includes(e.code)) throw e;
+      await new Promise((r) => setTimeout(r, 200 * (i + 1)));
+    }
+  }
+  if (!moved) {
+    try {
+      await fsp.cp(rec.dir, dest, { recursive: true });
+    } catch (e) {
+      try { await fsp.rm(dest, { recursive: true, force: true }); } catch (_) {}
+      throw lastErr || e;
+    }
+    try { await fsp.rm(rec.dir, { recursive: true, force: true }); } catch (_) {} // leftovers are harmless
   }
   const oldFile = path.join(dest, path.basename(rec.file));
   const file = path.join(dest, `${folder}.eyerefs`);

@@ -1,14 +1,16 @@
 // Safe, unique file and folder names that work on both Mac and Windows.
 
-const WIN_RESERVED = /^(con|prn|aux|nul|com[0-9]|lpt[0-9])$/i;
+const WIN_RESERVED = /^(con|prn|aux|nul|com[0-9]|lpt[0-9])(\..*)?$/i;
 const FORBIDDEN = /[<>:"/\\|?*\u0000-\u001F]/g;
 
 function cleanPart(s, max) {
   let out = String(s || '').normalize('NFC').replace(FORBIDDEN, ' ');
   out = out.replace(/\s+/g, ' ').trim();
+  out = out.replace(/^[. ]+/g, ''); // a leading dot hides the folder
   out = out.replace(/[. ]+$/g, ''); // Windows drops trailing dots and spaces
-  if (out.length > max) out = out.slice(0, max).replace(/[. ]+$/g, '');
-  if (!out || WIN_RESERVED.test(out)) out = (out || 'untitled') + '_';
+  if ([...out].length > max) out = [...out].slice(0, max).join('').replace(/[. ]+$/g, ''); // never split an emoji
+  if (!out) return 'Untitled';
+  if (WIN_RESERVED.test(out)) out += '_';
   return out;
 }
 

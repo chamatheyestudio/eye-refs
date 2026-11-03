@@ -43,10 +43,12 @@ class Session {
     // Use whichever copy of our own file is further ahead: the one in Drive or the local backup.
     const inDrive = await readJson(this.ownPath);
     const backup = await readJson(this.backupPath);
-    const good = (f) => f && f.items && f.device && f.device.key === this.me.deviceKey;
+    const good = (f) => f && f.items && typeof f.items === 'object' && f.device && f.device.key === this.me.deviceKey;
     let own = good(inDrive) ? inDrive : null;
-    if (good(backup) && (!own || (backup.clock || 0) > (own.clock || 0))) {
-      own = backup;
+    const sameBoard = backup && (!backup.localDir || backup.localDir === this.rec.dir);
+    if (good(backup) && sameBoard && (!own || (backup.clock || 0) > (own.clock || 0))) {
+      own = { ...backup };
+      delete own.localDir;
       this.needsRestoreSave = true;
     }
     this.own = own || emptyDeviceFile(this.device());
@@ -116,7 +118,9 @@ class Session {
     const snapshot = JSON.parse(JSON.stringify(this.own));
     this.saving = this.saving.then(async () => {
       // Local backup first, so a crash or a Drive hiccup never loses work.
-      try { await writeJson(this.backupPath, snapshot); } catch (_) {}
+      // The backup remembers which folder it belongs to, so a copied board folder
+      // never picks up the original's edits.
+      try { await writeJson(this.backupPath, { ...snapshot, localDir: this.rec.dir }); } catch (_) {}
       try {
         await writeJson(this.ownPath, snapshot);
         if (!this.saveTimer) this.setStatus('saved');

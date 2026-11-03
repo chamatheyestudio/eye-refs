@@ -7,7 +7,21 @@ const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
 const { spawn } = require('child_process');
-const { mediaName, randCode } = require('../shared/names');
+const { mediaName, randCode, slug } = require('../shared/names');
+
+const MAX_DOWNLOAD = 2 * 1024 * 1024 * 1024;
+
+// Media names come from board files other people can write. Only plain names
+// that stay inside the board's media folder are accepted.
+function safeSrc(src) {
+  const s = String(src || '');
+  return s && s === path.basename(s) && !s.startsWith('.') && !/[\\/:*?"<>|]/.test(s) ? s : null;
+}
+function inMedia(mediaDir, src) {
+  const s = safeSrc(src);
+  if (!s) throw new Error("That file isn't part of this board.");
+  return path.join(mediaDir, s);
+}
 const { exists } = require('./fsutil');
 
 const COMPRESS_OVER_BYTES = 500 * 1024 * 1024;
@@ -143,31 +157,52 @@ async function convertVideo(src, dest, mode, info, onProgress) {
   }
 }
 
+// Converts into a hidden temporary file and renames it at the end, so sync never
+// sees a half written picture.
 async function convertImage(src, dest) {
-  // macOS has a built in converter that understands iPhone HEIC photos.
-  if (process.platform === 'darwin') {
-    try {
-      await new Promise((resolve, reject) => {
-        const p = spawn('sips', ['-s', 'format', 'jpeg', src, '--out', dest]);
-        p.on('error', reject);
-        p.on('close', (c) => (c === 0 ? resolve() : reject(new Error('sips failed'))));
-      });
-      return;
-    } catch (_) {}
+  const ext = path.extname(dest);
+  const part = path.join(path.dirname(dest), `.${path.basename(dest, ext)}.${randCode(5)}.part${ext}`);
+  try {
+    let done = false;
+    // macOS has a built in converter that understands iPhone HEIC photos.
+    if (process.platform === 'darwin') {
+      try {
+        await new Promise((resolve, reject) => {
+          const p = spawn('sips', ['-s', 'format', ext === '.png' ? 'png' : 'jpeg', src, '--out', part]);
+          p.on('error', reject);
+          p.on('close', (c) => (c === 0 ? resolve() : reject(new Error('sips failed'))));
+        });
+        done = true;
+      } catch (_) {}
+    }
+    if (!done) {
+      try {
+        await run(['-hide_banner', '-y', '-i', src, '-frames:v', '1', '-q:v', '2', part]);
+      } catch (e) {
+        if (/\.hei[cf]$/i.test(src)) throw new Error('HEIC photos open on Mac only. Export it as JPEG first.');
+        throw e;
+      }
+    }
+    await fsp.rename(part, dest);
+  } catch (e) {
+    try { await fsp.unlink(part); } catch (_) {}
+    throw e;
   }
-  await run(['-hide_banner', '-y', '-i', src, '-frames:v', '1', '-q:v', '2', dest]);
 }
 
 // Import one file from disk into the project. known: Map(hash -> src) for reuse.
-async function importFile(mediaDir, file, me, known, onProgress) {
-  const original = path.basename(file);
+async function importFile(mediaDir, file, me, known, onProgress, asName) {
+  const original = asName || path.basename(file);
   const kind = kindOf(original);
   if (!kind) return { error: `${original} isn't an image or video Eye Refs can open.` };
   const hash = await quickHash(file);
-  if (known && known.has(hash) && (await exists(path.join(mediaDir, known.get(hash))))) {
-    return { kind, src: known.get(hash), hash, reused: true, original };
+  const reuse = known && known.has(hash) && safeSrc(known.get(hash));
+  if (reuse && (await exists(path.join(mediaDir, reuse)))) {
+    return { kind, src: reuse, hash, reused: true, original };
   }
-  await fsp.mkdir(mediaDir, { recursive: true });
+  // The board's media folder must already exist. Never recreate it: if the board
+  // was removed while this import ran, the file has nowhere to go.
+  if (!(await exists(mediaDir))) throw new Error('That board was closed before the file finished.');
   const ext = extOf(original);
 
   if (kind === 'image') {
@@ -211,10 +246,11 @@ async function importFile(mediaDir, file, me, known, onProgress) {
 
 // Images pasted from the clipboard or dragged from a browser arrive as bytes.
 async function importBytes(mediaDir, bytes, suggestedName, me, known) {
-  const tmp = path.join(os.tmpdir(), `eyerefs-${randCode(8)}-${path.basename(suggestedName || 'pasted.png')}`);
+  const ext = (path.extname(String(suggestedName || '')).slice(1).toLowerCase().replace(/[^a-z0-9]/g, '') || 'png').slice(0, 8);
+  const tmp = path.join(os.tmpdir(), `eyerefs-${randCode(8)}-${slug(suggestedName || 'pasted')}.${ext}`);
   await fsp.writeFile(tmp, Buffer.from(bytes));
   try {
-    return await importFile(mediaDir, tmp, me, known);
+    return await importFile(mediaDir, tmp, me, known, null, suggestedName ? path.basename(String(suggestedName)) : null);
   } finally {
     try { await fsp.unlink(tmp); } catch (_) {}
   }
@@ -230,15 +266,35 @@ async function importUrl(mediaDir, url, me, known, fetchImpl) {
   if (!res.ok) throw new Error(`Couldn't download that (${res.status}).`);
   const type = (res.headers.get('content-type') || '').split(';')[0].trim();
   if (type && !/^(image|video)\//.test(type) && type !== 'application/octet-stream') throw new Error("That link isn't an image or video.");
-  let name = decodeURIComponent((new URL(url).pathname.split('/').pop() || 'download').split('?')[0]);
-  if (!kindOf(name)) name = `${name || 'download'}.${TYPE_EXT[type] || 'png'}`;
+  const size = Number(res.headers.get('content-length') || 0);
+  if (size > MAX_DOWNLOAD) throw new Error('That file is too big to download here.');
+  let name = (new URL(url).pathname.split('/').pop() || 'download').split('?')[0];
+  try { name = decodeURIComponent(name); } catch (_) {}
+  if (!kindOf(name)) name = `${slug(name) || 'download'}.${TYPE_EXT[type] || 'png'}`;
   if (!kindOf(name)) throw new Error("That link isn't an image or video.");
-  const buf = Buffer.from(await res.arrayBuffer());
-  return importBytes(mediaDir, buf, name, me, known);
+  // Stream to a temporary file with a size cap, so a huge link can't fill memory
+  const tmp = path.join(os.tmpdir(), `eyerefs-${randCode(8)}-${slug(name)}.${extOf(name)}`);
+  const out = fs.createWriteStream(tmp);
+  let got = 0;
+  try {
+    const reader = res.body.getReader();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      got += value.length;
+      if (got > MAX_DOWNLOAD) { try { reader.cancel(); } catch (_) {} throw new Error('That file is too big to download here.'); }
+      if (!out.write(Buffer.from(value))) await new Promise((r) => out.once('drain', r));
+    }
+    await new Promise((resolve, reject) => out.end((e) => (e ? reject(e) : resolve())));
+    return await importFile(mediaDir, tmp, me, known, null, name);
+  } finally {
+    out.destroy();
+    try { await fsp.unlink(tmp); } catch (_) {}
+  }
 }
 
 async function grabFrame(mediaDir, src, time, me) {
-  const input = path.join(mediaDir, src);
+  const input = inMedia(mediaDir, src);
   const base = src.replace(/^\d{4}-\d{2}-\d{2}_[A-Z0-9]+_[a-z0-9]{8}_/, '').replace(/\.[^.]+$/, '');
   const { name, p } = await uniqueMediaPath(mediaDir, `${base}-frame`, me.initials, 'jpg');
   const part = path.join(mediaDir, `.${name}.${randCode(5)}.part.jpg`);
@@ -247,4 +303,4 @@ async function grabFrame(mediaDir, src, time, me) {
   return { kind: 'image', src: name, hash: await quickHash(p) };
 }
 
-module.exports = { importFile, importBytes, importUrl, grabFrame, kindOf, quickHash, probeInfo, COMPRESS_OVER_BYTES, ffmpegPath };
+module.exports = { safeSrc, inMedia, importFile, importBytes, importUrl, grabFrame, kindOf, quickHash, probeInfo, COMPRESS_OVER_BYTES, ffmpegPath };

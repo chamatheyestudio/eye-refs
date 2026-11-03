@@ -105,7 +105,13 @@ function prefs() {
 
 // Local projects plus shared boards not yet on this computer
 async function allProjects(online = true) {
-  const local = [...await lib.scanProjects(ROOT(), me), ...(await lib.scanProjects(SCRATCH(), me)).map((p) => ({ ...p, scratch: true }))];
+  const local = [];
+  const seenIds = new Set();
+  for (const p of [...await lib.scanProjects(ROOT(), me), ...(await lib.scanProjects(SCRATCH(), me)).map((p) => ({ ...p, scratch: true }))]) {
+    if (seenIds.has(p.id)) continue; // a half finished move can leave a copy behind
+    seenIds.add(p.id);
+    local.push(p);
+  }
   let remote = [];
   if (online) { try { remote = await cloud.call('projects.list', {}, 20000); } catch (_) { remote = []; } }
   const byShared = new Map(local.filter((p) => p.shared).map((p) => [p.shared.id, p]));
@@ -114,6 +120,10 @@ async function allProjects(online = true) {
     if (l) {
       Object.assign(l, { shared: l.shared || { id: r.id }, role: r.role, requests: r.requests, members: r.members, ownerName: r.ownerName });
       l.mine = r.owner === me.email;
+      // The owner renamed it: show the new name here too (the folder keeps its name)
+      if (r.name && r.name !== l.name && !l.mine) {
+        try { await lib.updateProject(l, { name: r.name }); l.name = r.name; if (session && session.rec.id === l.id) session.rec.name = r.name; } catch (_) {}
+      }
     } else {
       local.push({ id: r.id, name: r.name, client: r.client, owner: { email: r.owner, name: r.ownerName }, mine: r.owner === me.email, shared: { id: r.id }, cloudOnly: true, role: r.role, requests: r.requests, members: r.members });
     }
@@ -122,9 +132,32 @@ async function allProjects(online = true) {
 }
 
 // ---------- board session ----------
+// Save first, then the final upload, so the very last edit reaches teammates.
 async function closeCurrent() {
-  if (sync) { const s = sync; sync = null; try { await s.stop(); } catch (_) {} }
-  if (session) { const s = session; session = null; try { await s.close(); } catch (_) {} }
+  const s = session, y = sync;
+  session = null; sync = null;
+  if (s) { try { await s.flush(); } catch (_) {} }
+  if (y) { try { await y.stop(); } catch (_) {} }
+  if (s) { try { await s.close(); } catch (_) {} }
+}
+
+// Opening, closing, saving and sharing boards run one at a time, so two quick
+// clicks can never leave a board running in the background.
+let boardQueue = Promise.resolve();
+function serial(fn) {
+  const run = boardQueue.then(fn, fn);
+  boardQueue = run.catch(() => {});
+  return run;
+}
+
+// Imports still running per board. A board is never cleared while one is.
+const importing = new Map();
+async function tracked(rec, fn) {
+  importing.set(rec.id, (importing.get(rec.id) || 0) + 1);
+  try { return await fn(); } finally {
+    const n = (importing.get(rec.id) || 1) - 1;
+    if (n > 0) importing.set(rec.id, n); else importing.delete(rec.id);
+  }
 }
 
 async function openProject(rec) {
@@ -133,7 +166,7 @@ async function openProject(rec) {
   // An untitled board nobody added anything to just goes away. Only when it is
   // truly empty: nothing on it and no files at all in its media folder, so a board
   // with an import still running is never touched.
-  if (prev && await noMedia(prev.dir)) { try { await fsp.rm(prev.dir, { recursive: true, force: true }); } catch (_) {} }
+  if (prev && !importing.has(prev.id) && await noMedia(prev.dir)) { try { await fsp.rm(prev.dir, { recursive: true, force: true }); } catch (_) {} }
   const s = new Session(rec, me, backupDir(), {
     state: (items) => send('board:state', { projectId: rec.id, items }),
     status: (st) => send('board:status', { projectId: rec.id, status: st }),
@@ -141,13 +174,15 @@ async function openProject(rec) {
   }, { onSaved: () => { if (sync) sync.kick(); } });
   session = s;
   const items = await s.open();
-  if (rec.shared) startSync(rec);
+  if (rec.shared) startSync(rec, s);
   settings.lastProject = rec.id;
   saveSettings();
   return { record: rec, items, status: s.status, readOnly: s.readOnly, mediaBase: pathToFileURL(s.mediaDir).href + '/' };
 }
 
-function startSync(rec) {
+function startSync(rec, forSession) {
+  if (forSession && session !== forSession) return; // that board was closed meanwhile
+  if (sync) { const old = sync; sync = null; old.stop().catch(() => {}); }
   sync = new Sync(cloud, rec, me, {
     presence: (list) => send('board:presence', { projectId: rec.id, here: list }),
     status: (st) => send('cloud:status', { projectId: rec.id, ...st }),
@@ -195,7 +230,7 @@ function handle(ch, fn) {
 handle('boot', boot);
 handle('update:state', async () => updater.state());
 handle('update:install', async () => {
-  if (session) await session.flush();
+  await serial(closeCurrent); // save and upload everything before the installer takes over
   return updater.install();
 });
 
@@ -236,34 +271,43 @@ handle('auth:signout', async () => {
 
 handle('projects:scan', async () => ({ projects: await allProjects(true) }));
 
-handle('projects:create', async (name) => {
+handle('projects:create', (name) => serial(async () => {
   if (!name || !name.trim()) return { error: 'Give the project a name.' };
   const rec = await lib.createProject(ROOT(), me, name, '');
   return openProject(rec);
-});
+}));
 
 // PureRef style: a fresh untitled board, saved with a name later
-handle('projects:new', async (opts) => {
+handle('projects:new', (opts) => serial(async () => {
   if (session && session.rec.scratch && isEmpty(session)) return openProject(session.rec);
   const discard = opts && opts.discard && session && session.rec.scratch ? session.rec : null;
   const rec = await lib.createProject(SCRATCH(), me, 'Untitled', '', { scratch: true });
   const res = await openProject(rec);
-  if (discard) { try { await fsp.rm(discard.dir, { recursive: true, force: true }); } catch (_) {} }
+  if (discard && !importing.has(discard.id)) { try { await fsp.rm(discard.dir, { recursive: true, force: true }); } catch (_) {} }
   return res;
-});
+}));
 
-handle('projects:save', async (projectId, name) => {
+handle('projects:save', (projectId, name) => serial(async () => {
   const s = sessionFor(projectId);
   if (!s.rec.scratch) return { error: 'This board is already saved.' };
   if (!name || !String(name).trim()) return { error: 'Give the board a name.' };
+  if (importing.has(s.rec.id)) return { error: 'Wait for the files to finish coming in, then save.' };
   const old = s.rec;
   await closeCurrent();
-  const rec = await lib.saveScratch(old, ROOT(), name);
+  let rec;
+  try {
+    rec = await lib.saveScratch(old, ROOT(), name);
+  } catch (e) {
+    // Couldn't move it: keep working on the untitled board rather than leave nothing open
+    const res = await openProject(old);
+    res.error = "Couldn't save the board there. Close anything using its files and try again.";
+    return res;
+  }
   rec.mine = true;
   return openProject(rec);
-});
+}));
 
-handle('projects:open', async (id) => {
+handle('projects:open', (id) => serial(async () => {
   let rec = await findLocal(id);
   if (!rec) {
     // A shared board that isn't on this computer yet: make its folder, then sync fills it
@@ -274,9 +318,9 @@ handle('projects:open', async (id) => {
     });
   }
   return openProject(rec);
-});
+}));
 
-handle('projects:openFile', async (file) => {
+handle('projects:openFile', (file) => serial(async () => {
   if (await isPacked(file)) {
     const projectFile = await unpack(file, ROOT(), me);
     const rec = await lib.openProjectFile(projectFile, me);
@@ -287,13 +331,16 @@ handle('projects:openFile', async (file) => {
   const rec = await lib.openProjectFile(file, me);
   if (!rec) return { error: "That file isn't an Eye Refs project." };
   return openProject(rec);
-});
+}));
 
 handle('projects:rename', async (newName) => {
   if (!session) return { error: 'No project open.' };
   if (!session.rec.mine) return { error: 'Only the owner can rename this project.' };
-  const data = await lib.updateProject(session.rec, { name: cleanFolderName(newName) });
-  session.rec.name = data.name;
+  const s = session;
+  const data = await lib.updateProject(s.rec, { name: cleanFolderName(newName) });
+  s.rec.name = data.name;
+  // Shared boards: everyone else sees the new name too
+  if (s.rec.shared) { try { await cloud.call('projects.rename', { id: s.rec.shared.id, name: data.name }); } catch (_) {} }
   return { name: data.name };
 });
 
@@ -305,7 +352,7 @@ handle('projects:share', async (projectId, emails) => {
     await cloud.call('projects.create', { id: s.rec.id, name: s.rec.name, client: '' });
     await lib.updateProject(s.rec, { shared: { id: s.rec.id } });
     s.rec.shared = { id: s.rec.id };
-    startSync(s.rec);
+    await serial(async () => startSync(s.rec, s)); // only if this board is still the open one
   }
   if (emails && emails.length) await cloud.call('projects.invite', { id: s.rec.shared.id, emails });
   return { shared: s.rec.shared, members: await cloud.call('projects.members', { id: s.rec.shared.id }) };
@@ -327,7 +374,8 @@ handle('projects:pack', async (projectId) => {
   const r = await dialog.showSaveDialog(win, { title: 'Save as one file', defaultPath: path.join(app.getPath('documents'), `${s.rec.name}.eyerefs`), filters: [{ name: 'Eye Refs', extensions: ['eyerefs'] }] });
   if (r.canceled || !r.filePath) return { canceled: true };
   const out = r.filePath.toLowerCase().endsWith('.eyerefs') ? r.filePath : r.filePath + '.eyerefs';
-  if (path.resolve(out) === path.resolve(s.rec.file)) return { error: 'Choose a different place than the project folder.' };
+  const same = (a, b) => (process.platform === 'linux' ? a === b : a.toLowerCase() === b.toLowerCase());
+  if (same(path.resolve(out), path.resolve(s.rec.file))) return { error: 'Choose a different place than the project folder.' };
   const res = await pack(s.rec, out, (f) => send('pack:progress', { fraction: f }));
   shell.showItemInFolder(out);
   return { file: out, ...res };
@@ -341,6 +389,7 @@ handle('board:flush', async () => { if (session) await session.flush(); return t
 handle('media:importPaths', async (projectId, paths) => {
   const s = sessionFor(projectId);
   if (s.readOnly) return { error: 'This project is view only.' };
+  return tracked(s.rec, async () => {
   const out = [];
   const known = knownHashes();
   for (let i = 0; i < paths.length; i++) {
@@ -356,19 +405,20 @@ handle('media:importPaths', async (projectId, paths) => {
     send('import:progress', { ...job, done: true });
   }
   return out;
+  });
 });
 
 handle('media:importBytes', async (projectId, bytes, name) => {
   const s = sessionFor(projectId);
   if (s.readOnly) return { error: 'This project is view only.' };
-  return media.importBytes(s.mediaDir, bytes, name, me, knownHashes());
+  return tracked(s.rec, () => media.importBytes(s.mediaDir, bytes, name, me, knownHashes()));
 });
 
 handle('media:importUrl', async (projectId, url) => {
   const s = sessionFor(projectId);
   if (s.readOnly) return { error: 'This project is view only.' };
   if (!/^https?:\/\//i.test(url)) return { error: 'Only web links can be dropped.' };
-  return media.importUrl(s.mediaDir, url, me, knownHashes(), (u) => net.fetch(u));
+  return tracked(s.rec, () => media.importUrl(s.mediaDir, url, me, knownHashes(), (u) => net.fetch(u)));
 });
 
 // What the system clipboard holds, for pastes the page itself can't see:
@@ -394,7 +444,7 @@ handle('clipboard:read', async () => {
 handle('media:grabFrame', async (projectId, src, time) => {
   const s = sessionFor(projectId);
   if (s.readOnly) return { error: 'This project is view only.' };
-  return media.grabFrame(s.mediaDir, src, time, me);
+  return tracked(s.rec, () => media.grabFrame(s.mediaDir, src, time, me));
 });
 
 // 'here', 'downloading' (a shared file still on its way) or 'missing'
@@ -522,8 +572,11 @@ if (!app.requestSingleInstanceLock()) {
     if (process.platform === 'darwin') {
       Menu.setApplicationMenu(Menu.buildFromTemplate([
         { role: 'appMenu' },
-        { label: 'Edit', submenu: [{ role: 'cut' }, { role: 'copy' }, { role: 'paste' }] },
-        { role: 'windowMenu' },
+        // Undo, Redo and Select all for notes and text boxes. On the board the page
+        // handles these keys itself first.
+        { label: 'Edit', submenu: [{ role: 'undo' }, { role: 'redo' }, { type: 'separator' }, { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' }] },
+        // No Close item: Cmd+W is Lock window, as in PureRef
+        { label: 'Window', submenu: [{ role: 'minimize' }, { role: 'zoom' }, { type: 'separator' }, { role: 'front' }] },
       ]));
     } else {
       Menu.setApplicationMenu(null);

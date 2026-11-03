@@ -255,6 +255,7 @@ async function test(name, fn) {
     const { execFileSync } = require('child_process');
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'eyerefs-media-'));
     const md = path.join(tmp, 'media');
+    fs.mkdirSync(md);
     const me = { initials: 'CH' };
     const img = path.join(tmp, 'IMG_0012.png');
     execFileSync(media.ffmpegPath(), ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=gray:s=64x48', '-frames:v', '1', img]);
@@ -278,6 +279,51 @@ async function test(name, fn) {
     const frame = await media.grabFrame(md, v.src, 0.5, me);
     assert.ok(fs.existsSync(path.join(md, frame.src)) && frame.src.endsWith('.jpg'));
     assert.ok(!fs.readdirSync(md).some((f) => f.includes('.part')), 'no half written files left');
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  await test('audit fixes: hostile and damaged board files', async () => {
+    const m = require('../shared/merge');
+    // An item called __proto__ must not touch every object in the app
+    m.mergeFiles([{ device: { key: 'x' }, items: JSON.parse('{"__proto__":{"server":["https://bad.example",5]}}') }]);
+    assert.equal(({}).server, undefined, 'no prototype pollution');
+    // A damaged file must not break editing
+    assert.doesNotThrow(() => m.maxClock([{ items: { a: { x: null } } }]));
+    // An absurd clock is ignored, so normal edits still win
+    const own = m.emptyDeviceFile({ key: 'b' });
+    const floor = m.maxClock([{ clock: 2 ** 53, items: { a: { x: [1, 2 ** 53] } } }]);
+    m.applyWrites(own, [{ id: 'a', fields: { x: 9 } }], floor);
+    const merged = m.mergeFiles([{ device: { key: 'a' }, items: { a: { x: [1, 2 ** 53] } } }, { device: { key: 'b' }, ...own }]);
+    assert.equal(merged.a.x, 9);
+    // Names
+    const n = require('../shared/names');
+    assert.equal(n.cleanFolderName('.Moodboard'), 'Moodboard');
+    assert.equal(n.cleanFolderName('...'), 'Untitled');
+    assert.equal(n.cleanFolderName('nul.txt'), 'nul.txt_');
+    // Media names from other people stay inside the board
+    const media = require('../main/media');
+    assert.equal(media.safeSrc('../../x.mov'), null);
+    assert.equal(media.safeSrc('2026-11-02_CH_abcdefgh_x.jpg'), '2026-11-02_CH_abcdefgh_x.jpg');
+  });
+
+  await test('audit fixes: damaged packed file and folder races', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'eyerefs-audit-'));
+    const lib = require('../main/library');
+    const { pack, unpack } = require('../main/pack');
+    const me = { email: 'chamath@eyestudio.ae', name: 'Chamath', initials: 'CH', deviceKey: 'chamath-aaa111' };
+    const root = path.join(tmp, 'Eye Refs');
+    // Two boards with the same name at the same moment get separate folders
+    const [a, b] = await Promise.all([lib.createProject(root, me, 'Same', ''), lib.createProject(root, me, 'Same', '')]);
+    assert.notEqual(a.dir, b.dir);
+    // A truncated .eyerefs file fails cleanly and leaves nothing behind
+    fs.writeFileSync(path.join(a.dir, 'media', 'big.jpg'), Buffer.alloc(300000, 7));
+    const packed = path.join(tmp, 'Same.eyerefs');
+    await pack(a, packed);
+    const buf = fs.readFileSync(packed);
+    fs.writeFileSync(packed, buf.subarray(0, Math.floor(buf.length * 0.6)));
+    const before = fs.readdirSync(root).length;
+    await assert.rejects(unpack(packed, root, me));
+    assert.equal(fs.readdirSync(root).length, before, 'no half built board left');
     fs.rmSync(tmp, { recursive: true, force: true });
   });
 

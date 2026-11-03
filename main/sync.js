@@ -9,6 +9,7 @@ const fsp = fs.promises;
 const path = require('path');
 const { writeAtomic, listDir } = require('./fsutil');
 const { randCode } = require('../shared/names');
+const { safeSrc } = require('./media');
 
 const PULL_MS = 15000;
 const CHUNK = 6 * 1024 * 1024; // 8MB once base64 encoded
@@ -86,13 +87,23 @@ class Sync {
   }
 
   async pull() {
-    const res = await this.cloud.call('sync.pull', { id: this.id, device: this.me.deviceKey, known: this.known });
-    for (const c of res.changes || []) {
-      const name = path.basename(String(c.name));
-      if (!name.endsWith('.json') || name === `${this.me.deviceKey}.json` || name.startsWith('.')) continue;
-      await writeAtomic(path.join(this.changesDir, name), c.data);
-      this.known[name] = c.modified;
+    // Only plain device file names, and never our own (compared without caring
+    // about capitals, since Mac and Windows disks don't either).
+    const ownName = `${this.me.deviceKey}.json`.toLowerCase();
+    const okChange = (n) => /^[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.json$/.test(n) && n.toLowerCase() !== ownName;
+    let res;
+    // The server sends change files in batches and says when there are more
+    for (let round = 0; round < 20; round++) {
+      res = await this.cloud.call('sync.pull', { id: this.id, device: this.me.deviceKey, known: this.known });
+      for (const c of res.changes || []) {
+        const name = String(c.name || '');
+        if (!okChange(name) || typeof c.data !== 'string') continue;
+        await writeAtomic(path.join(this.changesDir, name), c.data);
+        this.known[name] = c.modified;
+      }
+      if (!res.more || !(res.changes || []).length) break;
     }
+    res.media = (res.media || []).filter((m) => m && safeSrc(m.name));
     const here = (res.here || [])
       .filter((h) => h.device !== this.me.deviceKey)
       .map((h) => ({ ...h, self: h.email === this.me.email }));
