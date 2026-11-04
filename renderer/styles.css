@@ -181,7 +181,7 @@ body.no-sidebar #title { left: 16px; padding-left: 4px; }
 body.has-sidebar #toolbar { left: calc(50% + 144px); }
 #penBar { position: fixed; bottom: 72px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 4px; padding: 4px 6px; height: 36px; z-index: 15; }
 body.has-sidebar #penBar { left: calc(50% + 144px); }
-#penBar .styles { display: flex; align-items: center; gap: 2px; }
+#penBar .styles, #penBar .sizes { display: flex; align-items: center; gap: 2px; }
 #penBar .styles button, #penBar .tool { color: var(--soft); }
 #penBar .styles button svg, #penBar .tool svg { width: 15px; height: 15px; }
 #penBar .styles button.on, #penBar .tool.on { background: var(--hover); color: var(--text); }
@@ -347,7 +347,6 @@ body.clickthrough #canvas { outline: 2px solid rgba(215, 240, 74, 0.5); outline-
   #share { padding: 0 14px; }
   .setpill { display: none; }
   #penBar .styles, #penBar .styles + .sep { display: none; }
-  #penBar .tipsize input { width: 64px; }
 }
 @media (max-width: 420px) {
   #share { display: none; }

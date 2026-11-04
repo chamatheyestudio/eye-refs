@@ -556,18 +556,21 @@
       b.onclick = () => penStyle(st);
       styles.append(b);
     }
-    const size = Math.max(1, Math.min(40, Math.round(B.pen.size || 4)));
-    const sz = $('#penSize');
-    if (document.activeElement !== sz) sz.value = String(size);
-    $('#penSizeVal').textContent = `${size} px`;
+    // Three tip sizes as dots; the nearest one shows as picked
+    const sizes = $('#penSizes');
+    sizes.innerHTML = '';
+    const cur = B.pen.size || 4;
+    const near = PEN_SIZES.reduce((a, b) => (Math.abs(b - cur) < Math.abs(a - cur) ? b : a));
+    PEN_SIZES.forEach((z, i) => {
+      const d = [4, 7, 11][i];
+      const b = el('button', { class: z === near ? 'on' : '', 'aria-label': ['Thin', 'Medium', 'Thick'][i], title: ['Thin', 'Medium', 'Thick'][i] }, el('span', { class: 'dot', style: `width:${d}px;height:${d}px` }));
+      b.onclick = () => { B.pen.size = z; if (B.tool === 'eraser') B.setTool('pen'); savePen(); restyleTargets(true); };
+      sizes.append(b);
+    });
     const c = penCss();
-    const d = Math.max(3, Math.min(20, size / 2 + 2));
-    Object.assign($('#tipDot').style, { width: d + 'px', height: d + 'px', background: c });
     $('#penColorDot').style.background = c;
     if (!$('#picker').hidden) paintPicker();
   }
-  $('#penSize').addEventListener('input', (e) => { B.pen.size = Number(e.target.value); if (B.tool === 'eraser') B.setTool('pen'); savePen(); restyleTargets(false); });
-  $('#penSize').addEventListener('change', () => restyleTargets(true));
 
   // ---------- colour picker ----------
   // A disc for the colour (around for the colour, inward for softer), sliders for
