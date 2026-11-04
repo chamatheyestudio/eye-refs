@@ -26,8 +26,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const errors = [];
   const checks = {};
   const expect = (name, ok, detail) => { checks[name] = ok; if (!ok) errors.push(`check failed: ${name} ${JSON.stringify(detail || '')}`); console.log('check', name, ok, detail !== undefined ? JSON.stringify(detail) : ''); };
-  win.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
-  win.on('console', (m) => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
+  win.on('pageerror', (e) => { errors.push('pageerror: ' + e.message); console.log('PAGEERROR', e.message); });
+  win.on('console', (m) => { if (m.type() === 'error') { errors.push('console: ' + m.text()); console.log('CONSOLEERR', m.text()); } });
   await app.evaluate(({ BrowserWindow }) => { const w = BrowserWindow.getAllWindows()[0]; w.setSize(1440, 900); w.setPosition(0, 0); });
 
   // Sign in with an emailed code
@@ -124,6 +124,65 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await win.screenshot({ path: `${OUT}/03d-draw.png` });
   const strokes = await win.evaluate(() => Board.live().filter((it) => it.type === 'draw').length);
   console.log('strokes', strokes);
+  // Pen thickness belongs to the board: the same at any zoom you draw at
+  const v0 = await win.evaluate(() => ({ ...Board.view }));
+  const swAt = async (s) => {
+    await win.evaluate((s) => { Board.view.s = s; Board.applyView(); }, s);
+    await win.keyboard.press('d');
+    await win.mouse.move(600, 300); await win.mouse.down();
+    for (let i = 0; i <= 10; i++) await win.mouse.move(600 + i * 8, 300 + i * 3);
+    await win.mouse.up();
+    const sw = await win.evaluate(() => { const d = Board.live().filter((it) => it.type === 'draw').sort((a, b) => b.created - a.created)[0]; return { sw: d.sw, size: Board.pen.size }; });
+    await win.keyboard.press('Control+Z');
+    await win.keyboard.press('d');
+    return sw;
+  };
+  const swOut = await swAt(0.5), swIn = await swAt(2);
+  await win.evaluate((v) => { Object.assign(Board.view, v); Board.applyView(); }, v0);
+  expect('pen width is the same on the board at any zoom', swOut.sw === swIn.sw && swOut.sw === swOut.size, { swOut, swIn });
+  // A line drawn on a picture sticks to it: drag, scale, delete and undo carry it along
+  const host = await win.evaluate(() => { const it = Board.live().filter((x) => x.type === 'image').sort((a, b) => b.w - a.w)[0]; const r = Board.toScreen(it.x + it.w / 2, it.y + 40); return { id: it.id, sx: r.x, sy: r.y, x: it.x, w: it.w }; });
+  await win.evaluate(() => Board.setTool('pen'));
+  await win.mouse.move(host.sx - 30, host.sy); await win.mouse.down();
+  for (let i = 0; i <= 12; i++) await win.mouse.move(host.sx - 30 + i * 5, host.sy + Math.sin(i) * 6);
+  await win.mouse.up();
+  await win.evaluate(() => Board.setTool('select'));
+  const line0 = await win.evaluate(() => { const d = Board.live().filter((it) => it.type === 'draw').sort((a, b) => b.created - a.created)[0]; return { id: d.id, on: d.on, x: d.x, y: d.y, w: d.w }; });
+  await win.evaluate((id) => { Board.clearSel(); }, host.id);
+  await win.mouse.move(host.sx + 60, host.sy + 30); await win.mouse.down();
+  await win.mouse.move(host.sx + 160, host.sy + 80, { steps: 8 });
+  const midDrag = await win.evaluate((id) => Board.items.get(id).x, line0.id);
+  await win.mouse.up();
+  const afterDrag = await win.evaluate(([lid, hid]) => ({ l: Board.items.get(lid), h: Board.items.get(hid) }), [line0.id, host.id]);
+  await win.evaluate((hid) => { const h = Board.items.get(hid); Board.commit([{ id: hid, fields: { w: h.w * 2, x: h.x, y: h.y } }]); }, host.id);
+  const afterScale = await win.evaluate((lid) => Board.items.get(lid).w, line0.id);
+  await win.evaluate((hid) => Board.commit([{ id: hid, fields: { deleted: true } }]), host.id);
+  const afterDel = await win.evaluate((lid) => !!Board.items.get(lid).deleted, line0.id);
+  for (let i = 0; i < 3; i++) await win.evaluate(() => Board.undo());
+  const afterUndo = await win.evaluate(([lid, hid]) => ({ l: Board.items.get(lid), h: Board.items.get(hid) }), [line0.id, host.id]);
+  const dxL = afterDrag.l.x - line0.x, dxH = afterDrag.h.x - host.x;
+  expect('line sticks to the picture it was drawn on', line0.on === host.id && Math.abs(dxL - dxH) < 0.5 && dxH > 10 && Math.abs(midDrag - line0.x) > 5 && Math.abs(afterScale - line0.w * 2) < 0.5 && afterDel && !afterUndo.l.deleted && Math.abs(afterUndo.l.x - line0.x) < 0.5 && Math.abs(afterUndo.h.x - host.x) < 0.5,
+    { on: line0.on, host: host.id, dxL, dxH, midDrag, x0: line0.x, afterScale, w0: line0.w, afterDel, undoX: afterUndo.l.x });
+  // Scrolling always zooms, even a sideways swipe never moves the board
+  const vz = await win.evaluate(() => ({ ...Board.view }));
+  await win.mouse.move(720, 450);
+  await win.mouse.wheel(0, -30);
+  await sleep(100);
+  const vz1 = await win.evaluate(() => ({ ...Board.view }));
+  await win.mouse.wheel(60, 0);
+  await sleep(100);
+  const vz2 = await win.evaluate(() => ({ ...Board.view }));
+  await win.evaluate((v) => { Object.assign(Board.view, v); Board.applyView(); }, vz);
+  expect('scroll zooms, swipes never pan', vz1.s > vz.s && vz2.x === vz1.x && vz2.y === vz1.y && vz2.s === vz1.s, { vz, vz1, vz2 });
+  // A message never sits on the pen bar
+  await win.evaluate(() => Board.setTool('pen'));
+  await win.waitForSelector('#penBar:not([hidden])');
+  await win.evaluate(() => UI.toast('No longer on top'));
+  await sleep(250);
+  const tb = await win.evaluate(() => { const t = document.querySelector('#toast').getBoundingClientRect(); const p = document.querySelector('#penBar').getBoundingClientRect(); const b = document.querySelector('#toolbar').getBoundingClientRect(); return { toastBottom: t.bottom, penTop: p.top, barTop: b.top }; });
+  await win.screenshot({ path: `${OUT}/03e-toast.png` });
+  expect('message sits above the pen bar', tb.toastBottom <= Math.min(tb.penTop, tb.barTop) - 4, tb);
+  await win.evaluate(() => Board.setTool('select'));
   await win.keyboard.press('Escape');
 
   // Paste from outside: a Google Slides style copy (html with an image link),
@@ -303,10 +362,26 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const switchRes = await win.evaluate(() => { window.Image = window.__RealImage; return { pendingBefore: window.__pendingBefore, pending: Board.pendingRemote, ghost: Board.items.has('ghost'), count: Board.live().length, toasts: window.__toasts }; });
   expect('import after board switch skipped', switchRes.count === 0 && switchRes.toasts.includes('That finished after you left the board.'), switchRes);
   expect('pending remote cleared on board switch', switchRes.pendingBefore && switchRes.pending === null && !switchRes.ghost, switchRes);
+  // Start screen on a fresh board, like PureRef: drop zone plus recent boards
+  await win.waitForFunction(() => document.querySelectorAll('#startCards .start-card').length > 0, null, { timeout: 8000 });
+  const startRes = await win.evaluate(() => ({ shown: getComputedStyle(document.querySelector('#start')).display !== 'none' && !document.querySelector('#start').hidden, cards: [...document.querySelectorAll('#startCards .start-card .nm')].map((n) => n.textContent), pics: document.querySelectorAll('#startCards img').length }));
   await win.screenshot({ path: `${OUT}/09-new.png` });
+  expect('start screen shows recent boards', startRes.shown && startRes.cards.includes('Spring Campaign') && startRes.pics > 0, startRes);
   const fresh = await win.evaluate(() => Board.live().length);
+  // Something on the untitled board: leaving it asks first, and "Don't save" throws it away
+  await win.evaluate(() => Board.addNote());
+  await win.keyboard.press('Escape');
+  await sleep(500);
+  const startGone = await win.evaluate(() => getComputedStyle(document.querySelector('#start')).display === 'none');
   await win.click('#tree >> text=Spring Campaign');
+  await win.waitForSelector('#modal >> text=Save this board?', { timeout: 5000 }).catch(() => {});
+  const asked = await win.evaluate(() => !!document.querySelector('.modal, #modal') && document.body.textContent.includes('Save this board?'));
+  await win.screenshot({ path: `${OUT}/09b-ask.png` });
+  await win.click("#modalWrap button:has-text(\"Don't save\")");
   await win.waitForFunction(() => document.querySelector('#tName').textContent === 'Spring Campaign');
+  await sleep(800);
+  const unsavedLeft = await win.evaluate(() => [...document.querySelectorAll('#tree .row .name')].filter((n) => n.textContent === 'Untitled').length);
+  expect('leaving an unsaved board asks, and Don\'t save removes it', startGone && asked && unsavedLeft === 0, { startGone, asked, unsavedLeft });
   const result = await win.evaluate((fresh) => ({ fresh, items: Board.live().length, status: document.querySelector('#tStatus').textContent, rows: [...document.querySelectorAll('#tree .row')].map((r) => r.textContent) }), fresh);
   await syncB.stop(); await sB.close();
   await app.close();

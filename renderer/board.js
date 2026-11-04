@@ -121,7 +121,9 @@
   // changes: [{ id, fields }]; before: optional snapshot taken at gesture start
   function commit(changes, before) {
     if (!changes.length || !canEdit()) return;
-    const prev = before || changes.map((c) => ({ id: c.id, fields: pick(B.items.get(c.id), Object.keys(c.fields)) }));
+    changes = changes.map((c) => ({ id: c.id, fields: { ...c.fields } }));
+    const prev = (before || changes.map((c) => ({ id: c.id, fields: pick(B.items.get(c.id), Object.keys(c.fields)) }))).map((p) => ({ id: p.id, fields: { ...p.fields } }));
+    addFollowers(changes, prev);
     applyLocal(changes);
     send(changes);
     B.undoStack.push({ before: prev, after: clone(changes) });
@@ -401,6 +403,128 @@
   }
 
   // ---------- gestures ----------
+  // ---------- lines stick to the picture they're drawn on ----------
+  // A picture's whole content frame (centre, width, turn, flips), so cropping
+  // never shifts a line drawn on it.
+  function frameOf(it) {
+    const d = dims(it);
+    const c = { ...ZC, ...(it.crop || {}) };
+    const W = it.type === 'note' || !it.nw ? d.w : it.nw * d.k;
+    const H = it.type === 'note' || !it.nh ? d.h : it.nh * d.k;
+    const fx = it.flipX ? -1 : 1, fy = it.flipY ? -1 : 1;
+    const ox = fx * (W / 2 - c.l * W - d.w / 2), oy = fy * (H / 2 - c.t * H - d.h / 2);
+    const rot = it.rot || 0, a = (rot * Math.PI) / 180;
+    return { cx: it.x + d.w / 2 + ox * Math.cos(a) - oy * Math.sin(a), cy: it.y + d.h / 2 + ox * Math.sin(a) + oy * Math.cos(a), W: Math.max(1, W), a, rot, fx, fy };
+  }
+  // Where a line goes when its picture changes from hOld to hNew
+  function followFields(hOld, hNew, st) {
+    const F0 = frameOf(hOld), F1 = frameOf(hNew);
+    const sd = dims(st);
+    const dx = st.x + sd.w / 2 - F0.cx, dy = st.y + sd.h / 2 - F0.cy;
+    const u = ((dx * Math.cos(F0.a) + dy * Math.sin(F0.a)) / F0.W) * F0.fx;
+    const v = ((-dx * Math.sin(F0.a) + dy * Math.cos(F0.a)) / F0.W) * F0.fy;
+    const lx = u * F1.W * F1.fx, ly = v * F1.W * F1.fy;
+    const cx = F1.cx + lx * Math.cos(F1.a) - ly * Math.sin(F1.a), cy = F1.cy + lx * Math.sin(F1.a) + ly * Math.cos(F1.a);
+    const k = F1.W / F0.W;
+    const rc = ((st.rot || 0) - F0.rot) * F0.fx * F0.fy;
+    const rot = (((F1.rot + rc * F1.fx * F1.fy) % 360) + 360) % 360;
+    const w = st.w * k, h = sd.h * k;
+    const out = { x: cx - w / 2, y: cy - h / 2, w, rot };
+    const fxc = !!st.flipX !== (F0.fx < 0), fyc = !!st.flipY !== (F0.fy < 0);
+    const nfx = fxc !== (F1.fx < 0), nfy = fyc !== (F1.fy < 0);
+    if (nfx !== !!st.flipX) out.flipX = nfx;
+    if (nfy !== !!st.flipY) out.flipY = nfy;
+    return out;
+  }
+  // The picture a line was drawn on: the selected one if it touches it, otherwise
+  // the top one covering at least half of the line
+  function hostForBox(box, keep) {
+    const area = Math.max(1, box.w * box.h);
+    let best = null, bestZ = -Infinity;
+    const cover = (it) => { const r = bbox([it.id]); if (!r) return 0; const ix = Math.max(0, Math.min(box.x + box.w, r.x + r.w) - Math.max(box.x, r.x)); const iy = Math.max(0, Math.min(box.y + box.h, r.y + r.h) - Math.max(box.y, r.y)); return (ix * iy) / area; };
+    const k = keep && B.items.get(keep);
+    if (k && !k.deleted && cover(k) >= 0.5) return keep;
+    for (const it of live()) {
+      if (it.type === 'draw') continue;
+      const r = bbox([it.id]);
+      if (!r) continue;
+      const ix = Math.max(0, Math.min(box.x + box.w, r.x + r.w) - Math.max(box.x, r.x));
+      const iy = Math.max(0, Math.min(box.y + box.h, r.y + r.h) - Math.max(box.y, r.y));
+      const share = (ix * iy) / area;
+      if (B.sel.has(it.id) && share > 0) return it.id;
+      if (share >= 0.5 && (it.z || 0) > bestZ) { best = it.id; bestZ = it.z || 0; }
+    }
+    return best;
+  }
+  const followBase = new Map(); // line id -> where it was when a gesture began
+  const GEO = ['x', 'y', 'w', 'rot', 'flipX', 'flipY', 'crop', 'fs'];
+  // Any change to a picture carries the lines on it along, in the same undo step
+  function addFollowers(changes, prev) {
+    const ids = new Set(changes.map((c) => c.id));
+    const strokes = [...B.items.values()].filter((it) => it.type === 'draw' && it.on);
+    const add = (id, fields, old) => {
+      const keys = Object.keys(fields);
+      if (!keys.length) return;
+      const ex = changes.find((c) => c.id === id);
+      if (ex) { Object.assign(ex.fields, fields); const pb = prev.find((p) => p.id === id); if (pb) for (const k of keys) if (!(k in pb.fields)) pb.fields[k] = pick(old, [k])[k]; return; }
+      changes.push({ id, fields });
+      prev.push({ id, fields: pick(old, keys) });
+    };
+    for (const c of [...changes]) {
+      const host = B.items.get(c.id);
+      if (!host) continue;
+      const f = c.fields;
+      if (host.type === 'draw') {
+        // A line moved on its own comes loose, or sticks to the picture it lands on
+        if (('x' in f || 'y' in f) && !(host.on && ids.has(host.on))) {
+          const n = { ...host, ...f }, d = dims(n);
+          const on = hostForBox({ x: n.x, y: n.y, w: d.w, h: d.h }, host.on) || null;
+          if (on !== (host.on || null)) add(c.id, { on }, followBase.get(c.id) || host);
+        }
+        continue;
+      }
+      const geo = GEO.some((k) => k in f), del = 'deleted' in f;
+      if (!geo && !del) continue;
+      const pb = prev.find((p) => p.id === c.id);
+      const hOld = { ...host, ...(pb ? pb.fields : {}) }, hNew = { ...host, ...f };
+      for (const st of strokes) {
+        if (st.on !== c.id || ids.has(st.id)) continue;
+        const old = followBase.get(st.id) || st;
+        const fields = {};
+        if (geo && !old.deleted) Object.assign(fields, followFields(hOld, hNew, old));
+        if (del && f.deleted && !old.deleted) { fields.deleted = true; fields.delWith = c.id; }
+        if (del && !f.deleted && old.deleted && old.delWith === c.id) { fields.deleted = false; fields.delWith = null; }
+        add(st.id, fields, old);
+      }
+    }
+  }
+  // While a picture is dragged, scaled or turned, its lines move with it live
+  function followLive(g, mz) {
+    if (!g.fol) {
+      const hosts = Array.isArray(g.ids) ? g.ids : g.ids instanceof Set ? [...g.ids] : g.id ? [g.id] : [];
+      const moving = new Set(hosts);
+      g.fol = [];
+      for (const hid of hosts) {
+        const h = B.items.get(hid);
+        if (!h || h.type === 'draw') continue;
+        const pb = (g.before || []).find((p) => p.id === hid);
+        const h0 = { ...clone(h), ...(pb ? clone(pb.fields) : {}) };
+        const st = live().filter((x) => x.type === 'draw' && x.on === hid && !moving.has(x.id)).map((x) => ({ id: x.id, s0: clone(x) }));
+        if (st.length) g.fol.push({ hid, h0, st });
+      }
+    }
+    for (const f of g.fol) {
+      const h = B.items.get(f.hid);
+      for (const { id, s0 } of f.st) {
+        followBase.set(id, s0);
+        const it = B.items.get(id);
+        Object.assign(it, followFields(f.h0, h, s0));
+        const node = B.els.get(id);
+        if (node) updateEl(node, it, mz);
+      }
+    }
+  }
+
   function snapshot(ids, keys) {
     return ids.map((id) => ({ id, fields: pick(B.items.get(id), keys) }));
   }
@@ -450,7 +574,9 @@
       const live = document.createElementNS(SVGNS, 'svg');
       live.setAttribute('class', 'live');
       const path = document.createElementNS(SVGNS, 'path');
-      const sw = B.pen.size / B.view.s;
+      // Thickness belongs to the board, like ink on paper, so lines always match the
+      // pictures at any zoom. Never thinner than one screen pixel while drawing.
+      const sw = Math.max(B.pen.size, 1 / B.view.s);
       path.setAttribute('fill', 'none'); path.setAttribute('stroke', B.pen.color); path.setAttribute('stroke-width', sw);
       path.setAttribute('stroke-linecap', 'round'); path.setAttribute('stroke-linejoin', 'round');
       if (B.pen.style === 'dotted') path.setAttribute('stroke-dasharray', `0 ${sw * 2}`);
@@ -618,6 +744,7 @@
         break;
       }
     }
+    if (g.moved && ['move', 'resize', 'scale', 'rotate', 'crop'].includes(g.type)) followLive(g, mz);
   });
 
   // Where the frame sits once the crop changes from s0.crop to c1, so the picture
@@ -720,6 +847,7 @@
         if (g.moved) { const it = B.items.get(g.id); commit([{ id: g.id, fields: { x: it.x, y: it.y, w: it.w, crop: it.crop } }], g.before); }
         break;
     }
+    followBase.clear();
     if (B.pendingRemote) { const p = B.pendingRemote; B.pendingRemote = null; applyRemote(p); }
     renderOverlay();
   }
@@ -739,13 +867,13 @@
   canvas.addEventListener('wheel', (e) => {
     e.preventDefault();
     if (!B.project) return;
+    // Like PureRef: scrolling always zooms, on a wheel, a Magic Mouse or a trackpad.
+    // Sideways swipes never move the board; middle click drag or Alt drag moves it.
     const mouseLike = e.deltaMode === 1 || (e.deltaX === 0 && Number.isInteger(e.deltaY) && Math.abs(e.deltaY) >= 40);
-    if (e.ctrlKey || e.metaKey || mouseLike) {
-      const dy = e.deltaMode === 1 ? e.deltaY * 30 : e.deltaY;
-      zoomAt(e.clientX, e.clientY, Math.exp(-dy * (e.ctrlKey && !mouseLike ? 0.01 : 0.0018)));
-    } else {
-      B.view.x -= e.deltaX; B.view.y -= e.deltaY; applyView();
-    }
+    const dy = e.deltaMode === 1 ? e.deltaY * 30 : e.deltaY;
+    if (!dy) return;
+    const rate = e.ctrlKey && !mouseLike ? 0.01 : mouseLike ? 0.0018 : 0.004;
+    zoomAt(e.clientX, e.clientY, Math.exp(-Math.max(-200, Math.min(200, dy)) * rate));
   }, { passive: false });
 
   window.addEventListener('resize', () => applyView());
@@ -825,7 +953,8 @@
     const pts = g.pts.map((p) => `${r(p.x - x0)} ${r(p.y - y0)}`).join(' ');
     const nw = r(x1 - x0), nh = r(y1 - y0);
     const id = uid();
-    commit([{ id, fields: { type: 'draw', pts, nw, nh, w: nw, x: x0, y: y0, sw: r(g.sw), color: B.pen.color, style: B.pen.style, z: maxZ() + 1, rot: 0, deleted: false, created: Date.now(), addedBy: B.me.name } }]);
+    const on = hostForBox({ x: x0, y: y0, w: nw, h: nh });
+    commit([{ id, fields: { type: 'draw', on: on || null, pts, nw, nh, w: nw, x: x0, y: y0, sw: r(g.sw), color: B.pen.color, style: B.pen.style, z: maxZ() + 1, rot: 0, deleted: false, created: Date.now(), addedBy: B.me.name } }]);
   }
 
   // Eraser: anything drawn that the pointer passes over goes, as one undo step

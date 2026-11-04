@@ -198,7 +198,9 @@
       if (q && !(`${p.name} ${p.owner ? p.owner.name : ''}`.toLowerCase().includes(q))) return false;
       return true;
     });
-    const list = shown.sort((a, b) => (b.scratch - a.scratch) || a.name.localeCompare(b.name));
+    // Latest edited on top
+    const when = (p) => p.modified || 0;
+    const list = shown.sort((a, b) => (when(b) - when(a)) || a.name.localeCompare(b.name));
     {
       for (const p of list) {
         const isCurrent = S.current && S.current.id === p.id;
@@ -430,6 +432,11 @@
   }, { passive: true });
   $('#canvas').addEventListener('pointerdown', () => { if (isClean()) { busy = true; clearTimeout(leaveTimer); clearTimeout(bottomTimer); body.classList.remove('show-top', 'show-bottom'); } });
   window.addEventListener('pointerup', () => { busy = false; });
+  // The pointer left the window, or another app came to the front: hide the bars
+  // (unless the window is being moved by its top bar right now)
+  const hideEdges = () => { if (!isClean()) return; showTop(false); showBottom(false); };
+  document.documentElement.addEventListener('mouseleave', hideEdges);
+  window.addEventListener('blur', hideEdges);
 
   // ---------- toolbar ----------
   function syncToolbar() {
@@ -737,7 +744,7 @@
     return `Edited ${d} day${d === 1 ? '' : 's'} ago`;
   }
   function miniBoard(shapes) {
-    const box = el('div', { class: 'thumb' });
+    const box = el('div', { class: 'mini' });
     if (!shapes.length) return box;
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
     for (const q of shapes) { x0 = Math.min(x0, q.x); y0 = Math.min(y0, q.y); x1 = Math.max(x1, q.x + q.w); y1 = Math.max(y1, q.y + q.h); }

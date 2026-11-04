@@ -114,6 +114,15 @@ function prefs() {
   };
 }
 
+// When a board last changed: the newest of its change files
+async function lastEdited(dir) {
+  let t = 0;
+  for (const f of await fsp.readdir(path.join(dir, 'changes')).catch(() => [])) {
+    try { t = Math.max(t, (await fsp.stat(path.join(dir, 'changes', f))).mtimeMs); } catch (_) {}
+  }
+  return t;
+}
+
 // What is on a board, read straight from its files: live pieces, when it last
 // changed, and a small layout for the start screen thumbnail.
 async function boardSummary(dir) {
@@ -186,6 +195,7 @@ async function allProjects(online = true) {
   for (const p of [...await lib.scanProjects(ROOT(), me), ...(await lib.scanProjects(SCRATCH(), me)).map((p) => ({ ...p, scratch: true }))]) {
     if (seenIds.has(p.id)) continue; // a half finished move can leave a copy behind
     seenIds.add(p.id);
+    p.modified = await lastEdited(p.dir);
     local.push(p);
   }
   let remote = [];

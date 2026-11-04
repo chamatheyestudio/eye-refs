@@ -350,11 +350,11 @@ body:not(.board-empty) #start, body.ui-hidden #start { display: none; }
 .start-actions { display: flex; gap: 6px; }
 .start-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; max-height: 360px; overflow: auto; }
 .start-card { display: flex; flex-direction: column; gap: 8px; padding: 0; background: none; border: 0; color: var(--text); text-align: left; cursor: pointer; font: inherit; min-width: 0; }
-.start-card .thumb { position: relative; aspect-ratio: 4 / 3; border-radius: 12px; background: var(--bg); border: 1px solid var(--line); overflow: hidden; }
+.start-card .mini { position: relative; display: block; width: 100%; height: 0; padding-bottom: 75%; flex-shrink: 0; border-radius: 12px; background: var(--bg); border: 1px solid var(--line); overflow: hidden; }
 .start-card:hover .thumb { border-color: var(--accent); }
-.start-card .thumb > * { position: absolute; }
-.start-card .thumb img { object-fit: cover; }
-.start-card .thumb .blk { background: var(--hover); border-radius: 2px; }
+.start-card .mini > * { position: absolute; }
+.start-card .mini img { object-fit: cover; }
+.start-card .mini .blk { background: var(--hover); border-radius: 2px; }
 .start-card .nm { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .start-card .when { font-size: 11px; color: var(--muted); margin-top: -6px; }
 @media (max-width: 760px) { body.has-sidebar #start { left: 0; } .start-cards { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); } }
