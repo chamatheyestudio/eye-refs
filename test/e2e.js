@@ -234,6 +234,36 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     return { hidden, back, kept };
   });
   expect('selection boxes hide while another app is in front', awayRes.hidden && awayRes.back && awayRes.kept, awayRes);
+  // Shift draws a straight line
+  await win.evaluate(() => Board.setTool('pen'));
+  await win.keyboard.down('Shift');
+  await win.mouse.move(500, 250); await win.mouse.down();
+  for (let i = 0; i <= 15; i++) await win.mouse.move(500 + i * 12, 250 + Math.sin(i) * 10 + i * 0.5);
+  await win.mouse.up();
+  await win.keyboard.up('Shift');
+  const straight = await win.evaluate(() => { const d = Board.live().filter((it) => it.type === 'draw').sort((a, b) => b.created - a.created)[0]; const n = d.pts.trim().split(/\s+/).length / 2; Board.undo(); return { points: n }; });
+  await win.evaluate(() => Board.setTool('select'));
+  expect('shift draws a straight line', straight.points === 2, straight);
+  // Rulers: a pattern that follows the view
+  const rul = await win.evaluate(async () => {
+    const pick = (label) => [...document.querySelectorAll('#settings .set-row')].find((r) => r.querySelector('.set-label').textContent === 'Pattern').querySelectorAll('button');
+    document.querySelector('#settingsBtn').click();
+    await new Promise((r) => setTimeout(r, 100));
+    [...pick()].find((b) => b.textContent === 'Rulers').click();
+    await new Promise((r) => setTimeout(r, 100));
+    const top = document.querySelector('#rulerTop');
+    const shown = getComputedStyle(top).display !== 'none' && getComputedStyle(document.querySelector('#rulerLeft')).display !== 'none';
+    const ink = (cv) => { const d = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data; let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 0) n++; return n; };
+    const a = top.toDataURL();
+    Board.zoomAt(700, 400, 2);
+    const b = top.toDataURL();
+    Board.zoomAt(700, 400, 0.5);
+    const r = { shown, ink: ink(top), changes: a !== b, noDots: !document.querySelector('#canvas').classList.contains('bg-dots') };
+    [...pick()].find((b) => b.textContent === 'Dots').click();
+    document.querySelector('#settingsBtn').click();
+    return r;
+  });
+  expect('rulers show and follow the zoom', rul.shown && rul.ink > 50 && rul.changes && rul.noDots, rul);
   // A message never sits on the pen bar
   await win.evaluate(() => Board.setTool('pen'));
   await win.waitForSelector('#penBar:not([hidden])');

@@ -344,6 +344,7 @@
     canvas.style.backgroundSize = `${28 * v.s}px ${28 * v.s}px`;
     canvas.style.backgroundPosition = `${v.x}px ${v.y}px`;
     $('#zVal').textContent = Math.round(v.s * 100) + '%';
+    if (B.onView) B.onView(v);
     renderOverlay();
     clearTimeout(viewTimer);
     viewTimer = setTimeout(() => {
@@ -639,7 +640,21 @@
     }
     const dxS = e.clientX - g.sx0, dyS = e.clientY - g.sy0;
     if (g.type === 'draw') {
-      const p = toWorld(e.clientX, e.clientY);
+      let p = toWorld(e.clientX, e.clientY);
+      // Hold Shift for a straight line from where Shift went down. It snaps to
+      // flat, upright and diagonal when close. Let go of Shift to carry on freehand.
+      if (e.shiftKey) {
+        if (g.anchor == null) g.anchor = g.pts.length - 1;
+        const a = g.pts[g.anchor];
+        const ang = Math.atan2(p.y - a.y, p.x - a.x), len = Math.hypot(p.x - a.x, p.y - a.y);
+        const snap = Math.round(ang / (Math.PI / 4)) * (Math.PI / 4);
+        if (Math.abs(ang - snap) < (5 * Math.PI) / 180) p = { x: a.x + Math.cos(snap) * len, y: a.y + Math.sin(snap) * len };
+        g.pts.length = g.anchor + 1;
+        if (len * B.view.s >= 1.5) { g.pts.push(p); g.moved = true; }
+        g.path.setAttribute('d', strokePath(g.pts, B.pen.style === 'arrow' ? g.sw : 0));
+        return;
+      }
+      if (g.anchor != null) g.anchor = null;
       const last = g.pts[g.pts.length - 1];
       if (Math.hypot(p.x - last.x, p.y - last.y) * B.view.s < 1.5) return;
       g.moved = true;

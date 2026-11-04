@@ -563,6 +563,7 @@
         '-',
         { label: 'Dots', checked: S.bg === 'dots', onClick: () => setBg('dots') },
         { label: 'Grid', checked: S.bg === 'grid', onClick: () => setBg('grid') },
+        { label: 'Rulers', checked: S.bg === 'ruler', onClick: () => setBg('ruler') },
         { label: 'No pattern', checked: S.bg === 'plain', onClick: () => setBg('plain') },
         '-',
         { label: 'See through', checked: S.transparent, onClick: () => setTransparent(!S.transparent) },
@@ -601,14 +602,59 @@
   };
   function resetZoom() { const c = B.toWorld(innerWidth / 2, innerHeight / 2); B.view = { s: 1, x: innerWidth / 2 - c.x, y: innerHeight / 2 - c.y }; B.applyView(); }
 
+  // ---------- rulers ----------
+  // Board units along the top and left, like a design app. Labels sit about every
+  // 80 pixels on screen, on round numbers (1, 2 or 5 times a power of ten).
+  function drawRulers() {
+    if (S.bg !== 'ruler') return;
+    const v = B.view, dpr = window.devicePixelRatio || 1, T = 22;
+    const cs = getComputedStyle(body);
+    const ink = cs.getPropertyValue('--muted').trim() || '#8A8780', line = cs.getPropertyValue('--line-strong').trim() || 'rgba(255,255,255,0.14)';
+    const raw = 80 / v.s, pow = Math.pow(10, Math.floor(Math.log10(raw)));
+    const mult = [1, 2, 5, 10].find((m) => m * pow >= raw);
+    const step = mult * pow, minor = step / (mult === 2 ? 4 : 5);
+    const label = (n) => { const r = Math.round(n * 1000) / 1000; return Math.abs(r) >= 10000 ? Math.round(r / 1000) + 'k' : String(r); };
+    for (const [id, horiz] of [['#rulerTop', true], ['#rulerLeft', false]]) {
+      const cv = $(id);
+      const len = horiz ? innerWidth - T : innerHeight - T;
+      cv.width = Math.round(len * dpr); cv.height = Math.round(T * dpr);
+      if (horiz) { cv.style.width = len + 'px'; cv.style.height = T + 'px'; }
+      else { cv.width = Math.round(T * dpr); cv.height = Math.round(len * dpr); cv.style.width = T + 'px'; cv.style.height = len + 'px'; }
+      const x = cv.getContext('2d');
+      x.setTransform(dpr, 0, 0, dpr, 0, 0);
+      x.clearRect(0, 0, horiz ? len : T, horiz ? T : len);
+      const off = horiz ? v.x : v.y; // screen position of board zero
+      const w0 = (T - off) / v.s, w1 = (T + len - off) / v.s;
+      x.strokeStyle = line; x.fillStyle = ink; x.lineWidth = 1;
+      x.font = '500 9px Inter, system-ui, sans-serif';
+      x.beginPath();
+      for (let w = Math.floor(w0 / minor) * minor; w <= w1; w += minor) {
+        const sp = Math.round(w * v.s + off - T) + 0.5;
+        const major = Math.abs(w / step - Math.round(w / step)) < 1e-6;
+        const h = major ? 10 : 5;
+        if (horiz) { x.moveTo(sp, T); x.lineTo(sp, T - h); } else { x.moveTo(T, sp); x.lineTo(T - h, sp); }
+      }
+      x.stroke();
+      for (let w = Math.floor(w0 / step) * step; w <= w1; w += step) {
+        const sp = Math.round(w * v.s + off - T);
+        if (horiz) x.fillText(label(w), sp + 3, 10);
+        else { x.save(); x.translate(10, sp + 3); x.rotate(-Math.PI / 2); x.textAlign = 'right'; x.fillText(label(w), 0, 0); x.restore(); }
+      }
+    }
+  }
+  B.onView = () => drawRulers();
+  window.addEventListener('resize', drawRulers);
+
   // ---------- background and see through ----------
   S.bg = 'dots';
   try { S.bg = localStorage.getItem('bg') || 'dots'; } catch (_) {}
   function setBg(bg, quiet) {
-    S.bg = ['dots', 'grid', 'plain'].includes(bg) ? bg : 'dots';
+    S.bg = ['dots', 'grid', 'ruler', 'plain'].includes(bg) ? bg : 'dots';
     const c = $('#canvas');
     c.classList.toggle('bg-dots', S.bg === 'dots');
     c.classList.toggle('bg-grid', S.bg === 'grid');
+    body.classList.toggle('rulers', S.bg === 'ruler');
+    drawRulers();
     c.classList.remove('grid');
     try { localStorage.setItem('bg', S.bg); } catch (_) {}
     drawSettings();
@@ -647,7 +693,7 @@
     p.append(
       el('div', { class: 'set-head' }, el('b', { text: 'Settings' }), el('span', { class: 'k', text: keyLabel('Mod+U') })),
       // Pattern and background are separate, so the pattern can change while see through is on
-      seg('Pattern', [['dots', 'Dots'], ['grid', 'Grid'], ['plain', 'None']], S.bg, (v) => setBg(v)),
+      seg('Pattern', [['dots', 'Dots'], ['grid', 'Grid'], ['ruler', 'Rulers'], ['plain', 'None']], S.bg, (v) => setBg(v)),
       seg('Background', [['solid', 'Solid'], ['see', 'See through']], S.transparent ? 'see' : 'solid', (v) => { if ((v === 'see') !== !!S.transparent) setTransparent(v === 'see'); }),
       seg('Controls', [['auto', 'Auto hide'], ['shown', 'Always'], ['hidden', 'Hidden']], uiMode, (v) => setUi(v, true)),
       seg('Opens with', [['new', 'New board'], ['last', 'Last board']], S.startWith || 'new', async (v) => { const r = await api.setPrefs({ startWith: v }); S.startWith = r.startWith; drawSettings(); }),
