@@ -307,7 +307,7 @@
     $('name').textContent = st.name;
     $('by').textContent = 'by ' + st.owner;
     offerApp(st.downloads || {});
-    items = st.items || [];
+    items = (st.items || []).filter(function (it) { return it && it.type && it.type !== 'comment' && isFinite(it.x) && isFinite(it.w); });
     if (!items.length) { message('Nothing on this board yet', 'Check back once something is added.'); return; }
     $('msg').hidden = true;
     $('zoom').hidden = false;

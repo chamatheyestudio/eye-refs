@@ -375,7 +375,7 @@ module.exports = async function (test) {
     const nous = signIn('nousaiba@eyestudio.ae', 'Nousaiba');
     board(owner, ID, 'Spring Campaign');
     // Owner pushes a change file and a picture
-    const file = { format: 1, device: { key: 'contact-aaa111' }, clock: 3, items: { a: { type: ['image', 1], src: ['2026-11-04_CO_abcdefgh_x.png', 1], x: [0, 1], y: [0, 1], w: [100, 1], nw: [100, 1], nh: [50, 1] }, b: { type: ['note', 2], text: ['hello', 2], deleted: [true, 3] } } };
+    const file = { format: 1, device: { key: 'contact-aaa111' }, clock: 3, items: { a: { type: ['image', 1], src: ['2026-11-04_CO_abcdefgh_x.png', 1], x: [0, 1], y: [0, 1], w: [100, 1], nw: [100, 1], nh: [50, 1] }, b: { type: ['note', 2], text: ['hello', 2], deleted: [true, 3] }, c: { type: ['comment', 2], text: ['private team note', 2], author: ['Contact', 2] } } };
     assert.ok(gas.call({ action: 'sync.push', token: owner, id: ID, device: 'contact-aaa111', data: JSON.stringify(file) }).ok);
     fs.writeFileSync(path.join(drive, 'Eye Refs', 'Spring Campaign', 'media', '2026-11-04_CO_abcdefgh_x.png'), Buffer.from('fakepng'));
     // Only the owner can make a link
@@ -383,7 +383,7 @@ module.exports = async function (test) {
     const on = gas.call({ action: 'projects.viewLink', token: owner, id: ID, on: true });
     assert.ok(on.ok && /^[A-Za-z0-9]{24}$/.test(on.data.key));
     const key = on.data.key;
-    // Anyone with the key sees merged items (deleted ones left out) and media sizes, no token needed
+    // Anyone with the key sees merged items (deleted ones and team comments left out) and media sizes, no token needed
     const st = gas.ctx.viewState(key);
     assert.ok(st.ok, st.error);
     assert.equal(st.data.name, 'Spring Campaign');

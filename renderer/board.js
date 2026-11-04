@@ -221,7 +221,9 @@
       node.classList.toggle('plain', !!it.plain);
       const t = node.firstChild;
       t.style.color = it.plain ? (it.color || '#D7F04A') : '';
-      t.style.opacity = it.op != null && it.op < 1 ? String(it.op) : '';
+      const fade = it.op != null && it.op < 1 ? String(it.op) : '';
+      t.style.opacity = it.plain ? fade : '';
+      node.style.opacity = it.plain ? '' : fade;
       if (B.editingId !== it.id && t.textContent !== (it.text || '')) t.textContent = it.text || '';
       node.style.transform = `translate(${it.x}px, ${it.y}px) rotate(${it.rot || 0}deg)`;
       return;
@@ -598,7 +600,9 @@
     const handle = e.target.closest && e.target.closest('#overlay .h');
     const unlocked = (ids) => ids.filter((id) => B.items.get(id) && !B.items.get(id).locked);
     if (handle && canEdit(true)) {
-      const ids = unlocked([...B.sel]);
+      let ids = unlocked([...B.sel]);
+      // A section only resizes on its own; with other pieces it stays as it is
+      if (ids.length > 1) ids = noSections(ids);
       if (!ids.length) return;
       startGesture({ type: 'resize', corner: handle.dataset.h, ids, before: snapshot(ids, ['x', 'y', 'w', 'h', 'fs']), start: ids.map((id) => clone(B.items.get(id))), bb: bbox(ids) }, e);
       return;
@@ -651,7 +655,7 @@
 
     if (hit) {
       const hitItem = B.items.get(hit);
-      if ((B.held.has('c') || B.held.has('v')) && hitItem.type !== 'note' && hitItem.type !== 'draw' && !hitItem.locked && canEdit()) {
+      if ((B.held.has('c') || B.held.has('v')) && hitItem.type !== 'note' && hitItem.type !== 'draw' && hitItem.type !== 'section' && !hitItem.locked && canEdit()) {
         B.sel = new Set([hit]);
         startGesture({ type: 'crop', id: hit, pan: B.held.has('v'), start: clone(hitItem), before: snapshot([hit], ['x', 'y', 'w', 'crop']) }, e);
         renderOverlay(); return;
@@ -659,7 +663,9 @@
       if (!B.sel.has(hit)) { if (!e.shiftKey) B.sel.clear(); B.sel.add(hit); }
       else if (e.shiftKey && !mod) { B.sel.delete(hit); renderOverlay(); return; }
       const ids = [...B.sel];
-      const free = unlocked(ids);
+      const all = unlocked(ids);
+      // Turning, scaling and flipping are for pictures; a section only moves and resizes
+      const free = noSections(all);
       if (mod && e.altKey && canEdit()) { if (free.length) startGesture({ type: 'scale', ids: free, start: free.map((id) => clone(B.items.get(id))), before: snapshot(free, ['x', 'y', 'w', 'fs']), bb: bbox(free) }, e); renderOverlay(); return; }
       if (mod && canEdit()) {
         // One turn for the whole selection, around the centre of its box
@@ -668,7 +674,7 @@
       }
       if (e.altKey && e.shiftKey && canEdit()) { if (free.length) startGesture({ type: 'flip', ids: free }, e); renderOverlay(); return; }
       // View only boards still select, they just don't move
-      const movable = B.readOnly ? [] : withSectionContents(free);
+      const movable = B.readOnly ? [] : withSectionContents(all);
       startGesture({ type: 'move', hit, ids: movable, start: movable.map((id) => ({ id, x: B.items.get(id).x, y: B.items.get(id).y })), before: snapshot(movable, ['x', 'y']) }, e);
       renderOverlay();
       return;
@@ -918,7 +924,7 @@
         break;
       case 'resize':
       case 'scale':
-        if (g.moved) commit(g.ids.map((id) => { const it = B.items.get(id); const f = { x: it.x, y: it.y, w: it.w }; if (it.type === 'note') f.fs = it.fs; return { id, fields: f }; }), g.before);
+        if (g.moved) commit(g.ids.map((id) => { const it = B.items.get(id); const f = { x: it.x, y: it.y, w: it.w }; if (it.type === 'note') f.fs = it.fs; if (it.type === 'section') f.h = it.h; return { id, fields: f }; }), g.before);
         break;
       case 'rotate':
         if (g.moved) commit(g.ids.map((id) => { const it = B.items.get(id); return { id, fields: { rot: it.rot, x: it.x, y: it.y } }; }), g.before);
@@ -1270,8 +1276,9 @@
     if (!files.length) {
       // A link dragged from the browser's address bar or a post
       const link = (e.dataTransfer.getData('text/uri-list') || '').split('\n').map((l) => l.trim()).find((l) => /^https?:/.test(l)) || (e.dataTransfer.getData('text/plain') || '').trim();
-      if (isSocial(link)) return addSocial(link, at);
       const html = e.dataTransfer.getData('text/html');
+      const pic = html && /<img[^>]+src="(https?:[^"]+)"/i.exec(html);
+      if (isSocial(link)) return addSocial(link, at, pic ? pic[1].replace(/&amp;/g, '&') : null);
       const m = html && /<img[^>]+src="([^"]+)"/i.exec(html);
       const url = (m && m[1]) || (e.dataTransfer.getData('text/uri-list') || '').split('\n').find((l) => /^https?:/.test(l));
       if (url) await addUrl(url, at);
@@ -1373,7 +1380,7 @@
     bar.style.width = Math.max(4, Math.min(100, p.pct || 0)) + '%';
     c.node.classList.toggle('waiting', !(p.pct > 0));
   });
-  async function addSocial(url, at) {
+  async function addSocial(url, at, fallbackImg) {
     if (!canEdit()) return;
     const p = at || viewCenter();
     const pid = boardId();
@@ -1387,8 +1394,9 @@
         el('div', { class: 'fc-phase', text: 'Looking at the link' }),
         el('div', { class: 'fc-bar' }, el('i')),
         el('div', { class: 'fc-actions' })));
+    node.addEventListener('pointerdown', (e) => e.stopPropagation());
     world.append(node);
-    const card = { node, token: null };
+    const card = { node, token: null, pid };
     fetchCards.set(key, card);
     const actions = node.querySelector('.fc-actions');
     const close = () => { fetchCards.delete(key); node.remove(); };
@@ -1396,7 +1404,7 @@
     cancelBtn.onclick = () => { if (card.token) api.pluckCancel(card.token); close(); };
     actions.append(cancelBtn);
     const r = await api.pluckFetch(pid, url, key);
-    if (!fetchCards.has(key)) { if (r && r.token) api.pluckCleanup(r.token); return; }
+    if (!fetchCards.has(key) || leftBoard(pid)) { if (r && r.token) api.pluckCleanup(r.token); fetchCards.delete(key); node.remove(); return; }
     if (r && r.files && r.files.length && !leftBoard(pid)) {
       close();
       await addPaths(r.files, p);
@@ -1408,6 +1416,7 @@
     node.classList.remove('waiting');
     node.classList.add('failed');
     actions.innerHTML = '';
+    if (r && r.missing && fallbackImg) { close(); return addUrl(fallbackImg, p); }
     if (r && r.missing) {
       node.querySelector('.fc-phase').textContent = "Pluck isn't on this computer yet. Get it once, then paste the link again.";
       const get = el('button', { class: 'fc-btn primary', text: 'Get Pluck' });
@@ -1502,8 +1511,9 @@
     const ids = notLocked(selIds()).filter((id) => B.items.get(id).type !== 'note' && B.items.get(id).type !== 'draw');
     commit(ids.map((id) => ({ id, fields: { crop: { ...ZC }, ...reframe(B.items.get(id), ZC) } })));
   }
+  const noSections = (ids) => ids.filter((id) => B.items.get(id) && B.items.get(id).type !== 'section');
   function resetTransform() {
-    const ids = notLocked(selIds());
+    const ids = noSections(notLocked(selIds()));
     commit(ids.map((id) => {
       const it = B.items.get(id);
       if (it.type === 'note') return { id, fields: { rot: 0 } };
@@ -1515,7 +1525,7 @@
   function back() { const ids = selIds(); let z = minZ(); commit(ids.map((id) => ({ id, fields: { z: --z } }))); }
 
   function align(dir) {
-    const ids = notLocked(selIds());
+    const ids = noSections(notLocked(selIds()));
     if (ids.length < 2) return;
     const bb = bbox(ids);
     commit(ids.map((id) => {
@@ -1528,7 +1538,7 @@
   }
 
   function normalize(kind) {
-    const ids = notLocked(selIds()).filter((id) => B.items.get(id).type !== 'note');
+    const ids = noSections(notLocked(selIds())).filter((id) => B.items.get(id).type !== 'note');
     if (ids.length < 2) return;
     const ds = ids.map((id) => ({ id, it: B.items.get(id), d: dims(B.items.get(id)) }));
     const avg = (f) => ds.reduce((a, x) => a + f(x), 0) / ds.length;
@@ -1542,7 +1552,7 @@
 
   // Arrange optimal: pack into a tidy block, largest first
   function arrange() {
-    const ids = notLocked(selOrAll());
+    const ids = noSections(notLocked(selOrAll()));
     if (ids.length < 2 || !canEdit()) return;
     const bb = bbox(ids);
     const boxes = ids.map((id) => ({ id, ...dims(B.items.get(id)) })).sort((a, b) => b.h - a.h);
@@ -1862,6 +1872,7 @@
     if (!host || host.deleted) return null;
     return fromContent(host, c.u || 0, c.v || 0);
   }
+  const who = (c) => c.author || c.by || 'Someone';
   const threadOf = (rootId) => comments().filter((c) => c.id === rootId || c.root === rootId).sort((a, b) => (a.at || 0) - (b.at || 0));
   const roots = () => comments().filter((c) => !c.root);
   let openRoot = null, draft = null;
@@ -1873,8 +1884,8 @@
       const p = pinPoint(c);
       if (!p) continue;
       const n = threadOf(c.id).length;
-      const pin = el('button', { class: 'cpin' + (c.resolved ? ' resolved' : '') + (openRoot === c.id ? ' open' : ''), 'data-id': c.id, title: `${c.by || 'Someone'}: ${String(c.text || '').slice(0, 80)}`, style: `transform: translate(${p.x}px, ${p.y}px) scale(var(--ls, 1))` },
-        el('span', { class: 'cpin-face', text: initials(c.by || '?') }), n > 1 ? el('span', { class: 'cpin-n', text: String(n) }) : null);
+      const pin = el('button', { class: 'cpin' + (c.resolved ? ' resolved' : '') + (openRoot === c.id ? ' open' : ''), 'data-id': c.id, title: `${who(c)}: ${String(c.text || '').slice(0, 80)}`, style: `transform: translate(${p.x}px, ${p.y}px) scale(var(--ls, 1))` },
+        el('span', { class: 'cpin-face', text: initials(who(c)) }), n > 1 ? el('span', { class: 'cpin-n', text: String(n) }) : null);
       pin.addEventListener('pointerdown', (e) => e.stopPropagation());
       pin.addEventListener('click', (e) => { e.stopPropagation(); openThread(c.id); });
       pins.append(pin);
@@ -1930,11 +1941,12 @@
     if (root) {
       const list = el('div', { class: 'th-list' });
       for (const m of threadOf(root.id)) {
-        const mine = m.email && B.me.email ? m.email === B.me.email : m.by === B.me.name;
+        const em = m.authorEmail || m.email;
+        const mine = em && B.me.email ? em === B.me.email : who(m) === B.me.name;
         const row = el('div', { class: 'th-msg' },
-          el('span', { class: 'th-face', text: initials(m.by || '?') }),
+          el('span', { class: 'th-face', text: initials(who(m)) }),
           el('div', { class: 'th-body' },
-            el('div', { class: 'th-meta' }, el('b', { text: m.by || 'Someone' }), el('span', { text: fmtAgo(m.at) })),
+            el('div', { class: 'th-meta' }, el('b', { text: who(m) }), el('span', { text: fmtAgo(m.at) })),
             el('div', { class: 'th-text', text: m.text || '' })));
         if (mine && canEdit(true)) {
           const del = el('button', { class: 'th-del', text: 'Delete', 'aria-label': 'Delete this message' });
@@ -1959,7 +1971,8 @@
         if (!text) return;
         box.value = '';
         const id = uid();
-        const base = { type: 'comment', text, by: B.me.name || 'Someone', email: B.me.email || '', at: Date.now(), deleted: false, created: Date.now() };
+        // The writer of a comment is kept apart from 'by', which records whoever touched it last
+        const base = { type: 'comment', text, author: B.me.name || 'Someone', authorEmail: B.me.email || '', at: Date.now(), deleted: false, created: Date.now() };
         if (root) commit([{ id, fields: { ...base, root: root.id } }]);
         else { commit([{ id, fields: { ...base, root: null, on: draft.on, u: draft.u ?? null, v: draft.v ?? null, x: draft.x ?? null, y: draft.y ?? null, resolved: false } }]); draft = null; openRoot = id; if (B.tool === 'comment') setTool('select'); }
         box.value = '';
@@ -1985,9 +1998,10 @@
   function commentCount() { return roots().filter((c) => !c.resolved).length; }
 
   // ---------- saved versions ----------
+  const plainFields = (it) => { const o = {}; for (const k in it) if (k[0] !== '_' && k !== 'id') o[k] = it[k]; return o; };
   function versionItems() {
     const out = {};
-    for (const it of live()) out[it.id] = clone(it);
+    for (const it of live()) out[it.id] = clone(plainFields(it));
     return out;
   }
   // Put the board back as it was: one undo step, and teammates see it too
@@ -1995,11 +2009,12 @@
     if (!canEdit() || !items) return 0;
     const changes = [];
     for (const id in items) {
-      const want = { ...items[id], deleted: false };
-      delete want.id;
+      const want = { ...plainFields(items[id]), deleted: false };
       const cur = B.items.get(id);
+      // Anything added to a piece since (a fade, a crop, a lock) goes back to empty
+      if (cur) for (const k in plainFields(cur)) if (!(k in want) && cur[k] != null) want[k] = null;
       const diff = {};
-      for (const k in want) if (!cur || JSON.stringify(cur[k]) !== JSON.stringify(want[k])) diff[k] = want[k];
+      for (const k in want) if (!cur || JSON.stringify(cur[k] == null ? null : cur[k]) !== JSON.stringify(want[k] == null ? null : want[k])) diff[k] = want[k];
       if (Object.keys(diff).length) changes.push({ id, fields: diff });
     }
     for (const it of live()) if (!items[it.id]) changes.push({ id: it.id, fields: { deleted: true } });
@@ -2045,6 +2060,7 @@
         return img;
       } catch (_) { return null; } finally { setTimeout(() => URL.revokeObjectURL(url), 1000); }
     };
+    let missingN = 0;
     for (const it of list) {
       const d = dims(it);
       x.save();
@@ -2069,7 +2085,7 @@
           x.translate(d.w / 2, d.h / 2); x.scale(it.flipX ? -1 : 1, it.flipY ? -1 : 1); x.translate(-d.w / 2, -d.h / 2);
           x.drawImage(img, c.l * iw, c.t * ih, iw * (1 - c.l - c.r), ih * (1 - c.t - c.b), 0, 0, d.w, d.h);
           x.restore();
-        } else { x.fillStyle = '#2A2927'; x.fillRect(0, 0, d.w, d.h); }
+        } else { missingN++; x.fillStyle = '#2A2927'; x.fillRect(0, 0, d.w, d.h); }
       } else if (it.type === 'draw') {
         const kk = d.k || (it.nw ? it.w / it.nw : 1);
         x.scale(kk, kk);
@@ -2105,12 +2121,12 @@
       }
       x.restore();
     }
-    return { canvas: cv, w: W, h: H };
+    return { canvas: cv, w: W, h: H, missing: missingN };
   }
 
   async function exportAs(kind, onlySelection) {
     if (!B.project) return;
-    const ids = onlySelection ? selIds() : null;
+    const ids = onlySelection ? withSectionContents(selIds()) : null;
     toast('Getting the export ready');
     const r = await renderExport(ids);
     if (!r) return toast('Nothing to export yet.', true);
@@ -2118,7 +2134,7 @@
     const bytes = new Uint8Array(await blob.arrayBuffer());
     const name = (B.project.name || 'Eye Refs') + (onlySelection ? ' selection' : '');
     const res = await api.exportSave({ kind, bytes, w: r.w, h: r.h, name });
-    if (res && res.saved) toast(`Saved ${res.name}`);
+    if (res && res.saved) toast(r.missing ? `Saved ${res.name}. ${r.missing === 1 ? 'One picture' : r.missing + ' pictures'} hadn't downloaded yet, so ${r.missing === 1 ? 'it shows' : 'they show'} as grey boxes.` : `Saved ${res.name}`);
     else if (res && res.error) toast(res.error, true);
   }
 
@@ -2174,9 +2190,10 @@
           { label: v && !v.muted ? 'Mute' : 'Play sound', key: 'M', onClick: toggleMute },
         ] });
     }
-    if (ids.length) {
-      const cur = B.items.get(ids[0]).op == null ? 1 : B.items.get(ids[0]).op;
-      items.push({ label: 'Opacity', sub: PEN_OPACITY.map((o) => ({ label: Math.round(o * 100) + ' percent', checked: Math.abs(cur - o) < 0.01, disabled: !ed, onClick: () => commit(ids.map((id) => ({ id, fields: { op: o } }))) })) });
+    const fadeable = ids.filter((id) => B.items.get(id).type !== 'section');
+    if (fadeable.length) {
+      const cur = B.items.get(fadeable[0]).op == null ? 1 : B.items.get(fadeable[0]).op;
+      items.push({ label: 'Opacity', sub: PEN_OPACITY.map((o) => ({ label: Math.round(o * 100) + ' percent', checked: Math.abs(cur - o) < 0.01, disabled: !ed, onClick: () => commit(fadeable.map((id) => ({ id, fields: { op: o } }))) })) });
     }
     if (one && one.type === 'note') items.push({ label: 'Edit note', key: 'Enter', onClick: () => editNote(one.id), disabled: !ed });
     if (ids.length) {
@@ -2257,6 +2274,8 @@
     B.els.clear(); B.items.clear(); B.sel.clear();
     B.project = null; B.editingId = null; B.gesture = null; B.pendingRemote = null; B.hoverId = null;
     draft = null; openRoot = null; thread.hidden = true; thread.innerHTML = ''; pins.innerHTML = '';
+    for (const c of fetchCards.values()) { if (c.token) api.pluckCancel(c.token); c.node.remove(); }
+    fetchCards.clear();
     clearTimeout(pasteTimer);
     canvas.classList.remove('panning');
     marquee.hidden = true;

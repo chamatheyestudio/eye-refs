@@ -913,6 +913,8 @@
             if (!full || !S.current || S.current.id !== pid) return;
             // Keep where things are now too, so restoring never loses work
             await api.versionSave(pid, `Before restoring ${v.name}`, B.versionItems());
+            // The board could have changed while that saved
+            if (!S.current || S.current.id !== pid || !B.project || B.project.id !== pid) return close();
             const n = B.restoreVersion(full.items);
             close();
             toast(n ? `Back to ${v.name}` : `Already the same as ${v.name}`);
@@ -935,7 +937,7 @@
       setTimeout(() => name.focus(), 50);
       return [
         el('h2', { text: 'Versions' }),
-        el('p', { text: 'Save the board as it is now, and go back to it any time.' }),
+        el('p', { text: 'Save the board as it is now, and go back to it any time. Versions are kept on this computer. Restoring one updates the board for everyone.' }),
         el('div', { class: 'vsave' }, name, save),
         rows,
         el('div', { class: 'actions' }, el('button', { class: 'btn ghost', text: 'Done', onclick: close })),

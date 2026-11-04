@@ -70,7 +70,7 @@ async function ensure(onStatus) {
 
 // The board page only shows local pictures, so the preview comes over as data
 async function thumbData(u) {
-  if (!/^https?:\/\//.test(String(u || ''))) return '';
+  if (!/^https:\/\//.test(String(u || ''))) return '';
   try {
     const res = await net.fetch(u, { headers: { Accept: 'image/*' } });
     const ct = res.headers.get('content-type') || '';
@@ -112,7 +112,13 @@ async function fetchLink(url, onProgress) {
       const j = (st.jobs || []).find((x) => x.id === job.id);
       if (!j) continue;
       if (j.status === 'done') {
-        const files = (j.files || []).filter((f) => f && fs.existsSync(f));
+        // Only files Pluck put in the folder made for this job, nothing else on the computer
+        const root = await fsp.realpath(job.dir).catch(() => job.dir);
+        const files = [];
+        for (const f of j.files || []) {
+          const real = await fsp.realpath(String(f || '')).catch(() => null);
+          if (real && (real + '').startsWith(root + path.sep)) files.push(real);
+        }
         if (!files.length) throw new Friendly('Pluck finished but nothing came back.');
         tell({ ...base, phase: 'Adding to the board', pct: 100 });
         return { token, files, ...base };

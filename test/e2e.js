@@ -576,6 +576,40 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     return { ...st, hidden };
   })();
   expect('comments pin to a picture, take replies, move with it, and resolve', cm.text === 'Warmer grade, like this' && cm.msgs === 2 && cm.reply === 'Agreed' && cm.box === '' && cm.moved && cm.tool === 'select' && !cm.inLive && cm.hidden, cm);
+  // Loopholes found in review
+  const holes = await win.evaluate(async () => {
+    const out = {};
+    // A section's new height is saved, and survives undo and redo
+    const img = Board.live().find((x) => x.type === 'image');
+    Board.sel = new Set([img.id]); Board.render();
+    Board.sectionFromSelection();
+    await new Promise((r) => setTimeout(r, 50));
+    document.activeElement && document.activeElement.blur();
+    const sec = Board.sections()[Board.sections().length - 1];
+    const h0 = sec.h;
+    Board.sel = new Set([sec.id]); Board.render();
+    const hs = document.querySelector('#overlay .h[data-h="se"]');
+    const r = hs.getBoundingClientRect();
+    const ev = (t, x, y) => document.querySelector('#canvas').dispatchEvent(new PointerEvent(t, { bubbles: true, clientX: x, clientY: y, button: 0, buttons: 1, pointerId: 7 }));
+    hs.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: r.left + 3, clientY: r.top + 3, button: 0, buttons: 1, pointerId: 7 }));
+    ev('pointermove', r.left + 3, r.top + 83); ev('pointermove', r.left + 3, r.top + 123);
+    document.querySelector('#canvas').dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX: r.left + 3, clientY: r.top + 123, button: 0, pointerId: 7 }));
+    const h1 = Board.items.get(sec.id).h;
+    Board.undo(); const hu = Board.items.get(sec.id).h; Board.redo(); const hr = Board.items.get(sec.id).h;
+    // Picture only actions leave sections alone
+    Board.sel = new Set([sec.id, img.id]); Board.render();
+    Board.resetTransform && Board.resetTransform();
+    out.section = { h0, h1, hu, hr, wOk: Number.isFinite(Board.items.get(sec.id).w) };
+    Board.commit([{ id: sec.id, fields: { deleted: true } }]);
+    // Restoring a version clears a fade added after it was saved
+    const snap = Board.versionItems();
+    Board.commit([{ id: img.id, fields: { op: 0.25 } }]);
+    const n = Board.restoreVersion(snap);
+    out.version = { op: Board.items.get(img.id).op, changed: n, again: Board.restoreVersion(Board.versionItems()) };
+    return out;
+  });
+  expect('a section keeps its new height through undo and redo', holes.section.h1 > holes.section.h0 + 20 && Math.abs(holes.section.hu - holes.section.h0) < 0.5 && Math.abs(holes.section.hr - holes.section.h1) < 0.5 && holes.section.wOk, holes.section);
+  expect('a version clears changes made after it, and nothing changes when it already matches', holes.version.op == null && holes.version.changed === 1 && holes.version.again === 0, holes.version);
   // A message never sits on the pen bar
   await win.evaluate(() => Board.setTool('pen'));
   await win.waitForSelector('#penBar:not([hidden])');
@@ -729,10 +763,15 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   expect('teammate additions are announced on the board', told.some((t) => t === 'Nousaiba added a note and a line'), told);
   // She leaves a comment: you're told what she said
   await win.evaluate(() => { window.__toasts2 = []; });
-  sB.write([{ id: 'nb-c1', fields: { type: 'comment', root: null, on: null, x: 0, y: -400, text: 'Love the light here', by: 'Nousaiba', email: 'nousaiba@eyestudio.ae', at: Date.now(), created: Date.now(), deleted: false, resolved: false } }]);
+  sB.write([{ id: 'nb-c1', fields: { type: 'comment', root: null, on: null, x: 0, y: -400, text: 'Love the light here', author: 'Nousaiba', authorEmail: 'nousaiba@eyestudio.ae', by: 'Nousaiba', at: Date.now(), created: Date.now(), deleted: false, resolved: false } }]);
   await sB.flush(); await syncB.tick();
   await win.waitForFunction(() => (window.__toasts2 || []).some((t) => /commented/.test(t)), null, { timeout: 40000 }).catch(() => {});
   const told3 = await win.evaluate(() => ({ toasts: window.__toasts2, pin: !!document.querySelector('.cpin[data-id="nb-c1"]') }));
+  // You resolve her comment: it still says she wrote it
+  await win.evaluate(() => Board.commit([{ id: 'nb-c1', fields: { resolved: true } }]));
+  const author = await win.evaluate(() => { Board.setShowResolved(true); const t = document.querySelector('.cpin[data-id="nb-c1"]').title; Board.setShowResolved(false); return { by: Board.items.get('nb-c1').by, title: t }; });
+  await win.evaluate(() => Board.commit([{ id: 'nb-c1', fields: { resolved: false } }]));
+  expect('a comment keeps its writer when someone else resolves it', /^Nousaiba:/.test(author.title), author);
   expect('a teammate comment is announced and pinned', told3.toasts.includes('Nousaiba commented: "Love the light here"') && told3.pin, told3);
   // She shares a new board with you: you're told
   gas.call({ action: 'projects.create', token: tB, id: 'nousaiba-board-0001', name: 'Brunch Edit' });
