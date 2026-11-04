@@ -39,6 +39,8 @@ function createUpdater(notify) {
     const rel = await res.json();
     const version = String(rel.tag_name || '').replace(/^v/, '');
     if (!version || rel.prerelease || rel.draft || !newer(version, app.getVersion())) return;
+    // Already holding this one (or a newer one): nothing to do
+    if (ready && !newer(version, ready.version)) return;
     const want = process.arch === 'arm64' ? `Eye-Refs-${version}-arm64.pkg` : `Eye-Refs-${version}.pkg`;
     const asset = (rel.assets || []).find((a) => a.name === want);
     if (!asset) return;
@@ -84,7 +86,9 @@ function createUpdater(notify) {
   }
 
   async function check() {
-    if (busy || ready || !app.isPackaged) return;
+    // Keeps looking even with an update waiting, so a newer release replaces it and
+    // you always jump straight to the latest instead of going one by one
+    if (busy || !app.isPackaged) return;
     busy = true;
     lastCheck = Date.now();
     try {
