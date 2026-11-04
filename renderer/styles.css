@@ -204,8 +204,8 @@ body.has-sidebar #penBar { left: calc(50% + 144px); }
 #videoBar .speed:hover { background: var(--hover); color: var(--text); }
 
 /* Menus, modals, toasts */
-.menu { position: fixed; z-index: 50; min-width: 220px; padding: 6px; border-radius: 16px; background: var(--panel-solid); border: 1px solid var(--line-strong); display: flex; flex-direction: column; }
-.menu button { display: flex; align-items: center; justify-content: space-between; gap: 24px; height: 30px; padding: 0 10px; border-radius: 10px; border: 0; background: transparent; color: var(--text); cursor: pointer; text-align: left; white-space: nowrap; font-size: 13px; }
+.menu { position: fixed; z-index: 50; min-width: 220px; max-height: calc(100vh - 16px); overflow-y: auto; overscroll-behavior: contain; padding: 6px; border-radius: 16px; background: var(--panel-solid); border: 1px solid var(--line-strong); display: flex; flex-direction: column; }
+.menu button { display: flex; align-items: center; justify-content: space-between; gap: 24px; height: 30px; flex-shrink: 0; padding: 0 10px; border-radius: 10px; border: 0; background: transparent; color: var(--text); cursor: pointer; text-align: left; white-space: nowrap; font-size: 13px; }
 .menu button:hover, .menu button:focus-visible { background: var(--lime); color: var(--ink); outline: none; }
 .menu button:hover .k, .menu button:focus-visible .k { color: var(--ink); }
 .menu button:disabled { opacity: 0.4; background: transparent; color: var(--text); cursor: default; }

@@ -541,6 +541,7 @@
         '-',
         { label: 'Minimize', key: 'Mod+M', onClick: () => api.minimize() },
         { label: 'Maximize', key: 'Mod+F', onClick: () => api.maximize() },
+        { label: 'Close', key: 'Mod+Q', onClick: () => api.close() },
       ] },
       { label: 'File', sub: [
         { label: 'New board', key: 'Mod+K', onClick: () => newBoard() },
@@ -551,12 +552,12 @@
         { label: 'Save as one file', key: 'Mod+Shift+S', onClick: packCurrent },
         { label: 'Share', onClick: () => shareModal(), disabled: S.readOnly },
         { label: 'Show in folder', onClick: () => api.reveal(), disabled: cur && cur.scratch },
+        '-',
+        { label: `Bin (${B.binItems().length})`, onClick: () => B.onChange('bin') },
       ] },
-      { label: `Bin (${B.binItems().length})`, onClick: () => B.onChange('bin') },
       '-',
       { label: 'Settings', key: 'Mod+U', onClick: () => openSettings() },
       { label: 'Shortcuts', key: IS_MAC ? 'Ctrl+H' : 'Mod+H', onClick: shortcutsModal },
-      { label: 'Close', key: 'Mod+Q', onClick: () => api.close() },
     ];
   };
   function resetZoom() { const c = B.toWorld(innerWidth / 2, innerHeight / 2); B.view = { s: 1, x: innerWidth / 2 - c.x, y: innerHeight / 2 - c.y }; B.applyView(); }

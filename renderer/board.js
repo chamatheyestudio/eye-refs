@@ -1438,41 +1438,51 @@
     const at = toWorld(x, y);
     const ed = !B.readOnly;
     const items = [];
+    // Kept short like PureRef: the main actions on top, the rest in side menus
     if (one && one.type === 'video') {
       const v = videoEl(one.id);
       items.push(
         { label: v && !v.paused ? 'Pause' : 'Play', key: 'K', onClick: () => togglePlay(one.id) },
-        { label: 'Grab frame', key: 'F', onClick: grabFrame, disabled: !ed },
-        { label: 'Set start here', key: 'I', onClick: () => setInOut('in'), disabled: !ed },
-        { label: 'Set end here', key: 'O', onClick: () => setInOut('out'), disabled: !ed },
-        { label: 'Loop', checked: one.loop !== false, onClick: toggleLoop, disabled: !ed },
-        { label: v && !v.muted ? 'Mute' : 'Play sound', key: 'M', onClick: toggleMute },
-        '-');
+        { label: 'Video', sub: [
+          { label: 'Grab frame', key: 'F', onClick: grabFrame, disabled: !ed },
+          { label: 'Set start here', key: 'I', onClick: () => setInOut('in'), disabled: !ed },
+          { label: 'Set end here', key: 'O', onClick: () => setInOut('out'), disabled: !ed },
+          { label: 'Loop', checked: one.loop !== false, onClick: toggleLoop, disabled: !ed },
+          { label: v && !v.muted ? 'Mute' : 'Play sound', key: 'M', onClick: toggleMute },
+        ] });
     }
-    if (one && one.type === 'note') items.push({ label: 'Edit note', key: 'Enter', onClick: () => editNote(one.id), disabled: !ed }, '-');
+    if (one && one.type === 'note') items.push({ label: 'Edit note', key: 'Enter', onClick: () => editNote(one.id), disabled: !ed });
     if (ids.length) {
       items.push(
-        { label: 'Grayscale', key: 'Alt+G', checked: ids.every((id) => B.items.get(id).gray), onClick: () => toggleField('gray'), disabled: !ed },
-        { label: 'Flip horizontal', key: 'Alt+Shift+H', onClick: () => toggleField('flipX'), disabled: !ed },
-        { label: 'Flip vertical', key: 'Alt+Shift+V', onClick: () => toggleField('flipY'), disabled: !ed },
-        { label: 'Reset cropping', key: 'Mod+Shift+C', onClick: resetCrop, disabled: !ed },
-        { label: 'Reset transform', key: 'Mod+Shift+T', onClick: resetTransform, disabled: !ed },
+        { label: 'Image', sub: [
+          { label: 'Grayscale', key: 'Alt+G', checked: ids.every((id) => B.items.get(id).gray), onClick: () => toggleField('gray'), disabled: !ed },
+          { label: 'Flip horizontal', key: 'Alt+Shift+H', onClick: () => toggleField('flipX'), disabled: !ed },
+          { label: 'Flip vertical', key: 'Alt+Shift+V', onClick: () => toggleField('flipY'), disabled: !ed },
+          '-',
+          { label: 'Reset cropping', key: 'Mod+Shift+C', onClick: resetCrop, disabled: !ed },
+          { label: 'Reset transform', key: 'Mod+Shift+T', onClick: resetTransform, disabled: !ed },
+        ] },
+        { label: 'Order', sub: [
+          { label: 'Bring to front', key: 'Up', onClick: front, disabled: !ed },
+          { label: 'Send to back', key: 'Down', onClick: back, disabled: !ed },
+        ] },
+        { label: 'Edit', sub: [
+          { label: 'Copy', key: 'Mod+C', onClick: () => copySelection(false) },
+          { label: 'Cut', key: 'Mod+X', onClick: () => copySelection(true), disabled: !ed },
+          { label: 'Paste', key: 'Mod+V', onClick: () => pasteNative(at), disabled: !ed },
+          { label: 'Duplicate', onClick: duplicate, disabled: !ed },
+        ] },
         { label: 'Locked', key: 'Alt+L', checked: ids.every((id) => B.items.get(id).locked), onClick: () => toggleField('locked'), disabled: !ed },
-        '-',
-        { label: 'Bring to front', key: 'Up', onClick: front, disabled: !ed },
-        { label: 'Send to back', key: 'Down', onClick: back, disabled: !ed },
-        '-',
-        { label: 'Copy', key: 'Mod+C', onClick: () => copySelection(false) },
-        { label: 'Cut', key: 'Mod+X', onClick: () => copySelection(true), disabled: !ed },
-        { label: 'Duplicate', onClick: duplicate, disabled: !ed },
         { label: 'Delete', key: 'Delete', onClick: deleteSelection, disabled: !ed },
         '-');
     } else {
       items.push(
-        { label: 'Add images and videos', key: 'Mod+I', onClick: async () => addPaths(await api.openImagesDialog(), at), disabled: !ed },
-        { label: 'Import a folder of images', onClick: async () => addPaths(await api.importFolderDialog(), at), disabled: !ed },
-        { label: 'New note', key: 'Mod+N', onClick: () => addNote(at), disabled: !ed },
         { label: 'Paste', key: 'Mod+V', onClick: () => pasteNative(at), disabled: !ed },
+        { label: 'Add', sub: [
+          { label: 'Images and videos', key: 'Mod+I', onClick: async () => addPaths(await api.openImagesDialog(), at), disabled: !ed },
+          { label: 'A folder of images', onClick: async () => addPaths(await api.importFolderDialog(), at), disabled: !ed },
+          { label: 'Note', key: 'Mod+N', onClick: () => addNote(at), disabled: !ed },
+        ] },
         { label: 'Select all', key: 'Mod+A', onClick: selectAll },
         '-');
     }
