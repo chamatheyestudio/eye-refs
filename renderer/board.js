@@ -1173,10 +1173,8 @@
     B.sel = new Set(changes.map((c) => c.id));
     renderOverlay();
     const reused = ok.filter(({ r }) => r.reused).length;
-    const big = ok.filter(({ r }) => r.reason === 'size').length;
     const converted = ok.filter(({ r }) => r.reason === 'format' || r.converted).length;
-    if (big) toast(big === 1 ? 'Video was over 500MB, so a high quality copy was saved.' : `${big} videos over 500MB were saved as high quality copies.`);
-    else if (converted) toast(converted === 1 ? 'Converted so it plays on the board. Your original is untouched.' : `${converted} files converted so they play on the board.`);
+    if (converted) toast(converted === 1 ? 'Converted so it plays on the board. Your original is untouched.' : `${converted} files converted so they play on the board.`);
     else if (reused) toast(reused === 1 ? 'Already in this project, so the same file was reused.' : `${reused} files were already in this project and were reused.`);
     return changes.map((c) => c.id);
   }

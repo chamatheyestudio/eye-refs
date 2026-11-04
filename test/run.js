@@ -250,7 +250,7 @@ async function test(name, fn) {
     fs.rmSync(tmp, { recursive: true, force: true });
   });
 
-  await test('media import: unique names, reuse duplicates, compress big or unplayable video', async () => {
+  await test('media import: unique names, reuse duplicates, files kept byte for byte, only unplayable video converted', async () => {
     const media = require('../main/media');
     const { execFileSync } = require('child_process');
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'eyerefs-media-'));
@@ -268,6 +268,17 @@ async function test(name, fn) {
     const r3 = await media.importFile(md, img, me, new Map());
     assert.notEqual(r3.src, r1.src, 'same original name never overwrites');
     assert.ok(fs.existsSync(img), 'original untouched');
+    assert.ok(fs.readFileSync(path.join(md, r1.src)).equals(fs.readFileSync(img)), 'picture kept byte for byte');
+    // A playable video is kept exactly as it is, whatever its size
+    const mp4 = path.join(tmp, 'ok.mp4');
+    execFileSync(media.ffmpegPath(), ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc=s=320x240:d=1', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', mp4]);
+    const vk = await media.importFile(md, mp4, me, new Map());
+    assert.ok(fs.readFileSync(path.join(md, vk.src)).equals(fs.readFileSync(mp4)), 'playable video kept byte for byte');
+    // Full size links
+    assert.equal(media.fullSizeUrl('https://lh3.googleusercontent.com/abc123=w1600-h900'), 'https://lh3.googleusercontent.com/abc123=s0');
+    assert.equal(media.fullSizeUrl('https://pbs.twimg.com/media/X.jpg?name=small'), 'https://pbs.twimg.com/media/X.jpg?name=orig');
+    assert.equal(media.fullSizeUrl('https://i.pinimg.com/236x/aa/bb.jpg'), 'https://i.pinimg.com/originals/aa/bb.jpg');
+    assert.equal(media.fullSizeUrl('https://example.com/a.jpg?w=400'), 'https://example.com/a.jpg?w=400', 'other sites untouched');
 
     const mkv = path.join(tmp, 'clip.mkv');
     execFileSync(media.ffmpegPath(), ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc=s=320x240:d=1', '-c:v', 'mpeg4', mkv]);
@@ -276,6 +287,7 @@ async function test(name, fn) {
     assert.ok(v.src.endsWith('.mp4'));
     const info = await media.probeInfo(path.join(md, v.src));
     assert.equal(info.codec, 'h264');
+    assert.equal(info.width, 320, 'converted video keeps its full size');
     const frame = await media.grabFrame(md, v.src, 0.5, me);
     assert.ok(fs.existsSync(path.join(md, frame.src)) && frame.src.endsWith('.jpg'));
     assert.ok(!fs.readdirSync(md).some((f) => f.includes('.part')), 'no half written files left');

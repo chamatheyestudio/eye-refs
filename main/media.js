@@ -1,6 +1,7 @@
 // Bringing images and videos into a project's media folder.
 // Every file gets a new unique name, originals are never modified, and
-// videos over 500MB (or in formats the board can't play) get one good quality copy.
+// files keep their full size and quality. Only a video the board can't play, or an
+// iPhone HEIC photo, gets one copy at the highest quality so it can show.
 const fs = require('fs');
 const fsp = fs.promises;
 const path = require('path');
@@ -139,12 +140,12 @@ async function convertVideo(src, dest, mode, info, onProgress) {
   if (mode === 'remux') {
     args.push('-map', '0:v:0', '-map', '0:a:0?', '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k');
   } else {
-    // High quality H.264. Resolution kept up to 4K, frame rate unchanged.
+    // Only for videos the board can't play. Visually lossless H.264 at the full
+    // resolution and frame rate, so nothing gets smaller or softer.
     args.push(
       '-map', '0:v:0', '-map', '0:a:0?',
-      '-vf', "scale='if(gt(iw,3840),3840,iw)':-2",
-      '-c:v', 'libx264', '-preset', 'medium', '-crf', '20', '-pix_fmt', 'yuv420p',
-      '-c:a', 'aac', '-b:a', '160k'
+      '-c:v', 'libx264', '-preset', 'slow', '-crf', '12', '-pix_fmt', 'yuv420p',
+      '-c:a', 'aac', '-b:a', '320k'
     );
   }
   args.push('-movflags', '+faststart', part);
@@ -168,7 +169,7 @@ async function convertImage(src, dest) {
     if (process.platform === 'darwin') {
       try {
         await new Promise((resolve, reject) => {
-          const p = spawn('sips', ['-s', 'format', ext === '.png' ? 'png' : 'jpeg', src, '--out', part]);
+          const p = spawn('sips', ['-s', 'format', ext === '.png' ? 'png' : 'jpeg', '-s', 'formatOptions', 'best', src, '--out', part]);
           p.on('error', reject);
           p.on('close', (c) => (c === 0 ? resolve() : reject(new Error('sips failed'))));
         });
@@ -177,7 +178,7 @@ async function convertImage(src, dest) {
     }
     if (!done) {
       try {
-        await run(['-hide_banner', '-y', '-i', src, '-frames:v', '1', '-q:v', '2', part]);
+        await run(['-hide_banner', '-y', '-i', src, '-frames:v', '1', '-q:v', '1', part]);
       } catch (e) {
         if (/\.hei[cf]$/i.test(src)) throw new Error('HEIC photos open on Mac only. Export it as JPEG first.');
         throw e;
@@ -220,13 +221,13 @@ async function importFile(mediaDir, file, me, known, onProgress, asName) {
   // Video
   const st = await fsp.stat(file);
   const info = await probeInfo(file);
-  const big = st.size > COMPRESS_OVER_BYTES;
+  // Big files stay exactly as they are. Only a format the board can't play is changed.
   const codecOk = !info.codec || PLAYABLE_CODEC.has(info.codec);
   const containerOk = PLAYABLE_CONTAINER.has(ext);
   let mode = null;
-  if (big || !codecOk) mode = 'compress';
+  if (!codecOk) mode = 'compress';
   else if (!containerOk) mode = 'remux';
-  const reason = big ? 'size' : 'format';
+  const reason = 'format';
 
   if (!mode) {
     const { name, p } = await uniqueMediaPath(mediaDir, original, me.initials, ext);
@@ -261,8 +262,30 @@ const TYPE_EXT = {
   'image/svg+xml': 'svg', 'image/bmp': 'bmp', 'video/mp4': 'mp4', 'video/webm': 'webm', 'video/quicktime': 'mov',
 };
 
+// Many sites hand over a smaller preview of a picture. Ask for the full original
+// first, and fall back to the link as it was if that doesn't work.
+function fullSizeUrl(url) {
+  try {
+    const u = new URL(url);
+    const h = u.hostname;
+    if (/(^|\.)googleusercontent\.com$|(^|\.)ggpht\.com$/.test(h)) {
+      if (/=[a-z0-9-]+$/i.test(u.pathname)) u.pathname = u.pathname.replace(/=[a-z0-9-]+$/i, '=s0');
+      else u.pathname += '=s0';
+      for (const k of ['w', 'h', 'sz']) u.searchParams.delete(k);
+      return u.toString();
+    }
+    if (h === 'pbs.twimg.com') { u.searchParams.set('name', 'orig'); return u.toString(); }
+    if (h === 'i.pinimg.com') { u.pathname = u.pathname.replace(/^\/\d+x(\d+)?\//, '/originals/'); return u.toString(); }
+    if (/(^|\.)images\.unsplash\.com$/.test(h)) { for (const k of ['w', 'h', 'q', 'fit', 'crop', 'auto', 'fm']) u.searchParams.delete(k); return u.toString(); }
+  } catch (_) {}
+  return url;
+}
+
 async function importUrl(mediaDir, url, me, known, fetchImpl) {
-  const res = await fetchImpl(url);
+  const big = fullSizeUrl(url);
+  let res = null;
+  if (big !== url) { try { res = await fetchImpl(big); if (!res.ok) res = null; else url = big; } catch (_) { res = null; } }
+  if (!res) res = await fetchImpl(url);
   if (!res.ok) throw new Error(`Couldn't download that (${res.status}).`);
   const type = (res.headers.get('content-type') || '').split(';')[0].trim();
   if (type && !/^(image|video)\//.test(type) && type !== 'application/octet-stream') throw new Error("That link isn't an image or video.");
@@ -303,4 +326,5 @@ async function grabFrame(mediaDir, src, time, me) {
   return { kind: 'image', src: name, hash: await quickHash(p) };
 }
 
-module.exports = { safeSrc, inMedia, importFile, importBytes, importUrl, grabFrame, kindOf, quickHash, probeInfo, COMPRESS_OVER_BYTES, ffmpegPath };
+module.exports = {
+  fullSizeUrl, safeSrc, inMedia, importFile, importBytes, importUrl, grabFrame, kindOf, quickHash, probeInfo, COMPRESS_OVER_BYTES, ffmpegPath };
