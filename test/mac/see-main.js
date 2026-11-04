@@ -1,6 +1,6 @@
 // Runs on a real Mac in CI: a red window, then see through windows on top built
 // like Eye Refs builds them, then a screen capture to check red shows through.
-const { app, BrowserWindow, screen } = require('electron');
+const { app, BrowserWindow, screen, nativeImage } = require('electron');
 const { execFileSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
@@ -45,8 +45,17 @@ app.whenReady().then(async () => {
     try { execFileSync('screencapture', ['-x', file]); } catch (e) { results[name] = 'capture failed: ' + e.message; }
     w.destroy();
     await sleep(500);
-    results[name] = results[name] || file;
+    // Pixel in the middle of the see through window: red means it works
+    try {
+      const img = nativeImage.createFromPath(file);
+      const { width: iw } = img.getSize();
+      const bmp = img.toBitmap();
+      const scale = iw / screen.getPrimaryDisplay().size.width;
+      const px = (x, y) => { const i = (Math.round(y * scale) * iw + Math.round(x * scale)) * 4; return [bmp[i + 2], bmp[i + 1], bmp[i]]; };
+      results[name] = { middle: px(400, 300), blueBox: px(150, 150), outside: px(900, 700) };
+    } catch (e) { results[name] = 'read failed: ' + e.message; }
   }
   fs.writeFileSync(path.join(out, 'results.json'), JSON.stringify(results, null, 1));
+  console.log('SEE RESULTS ' + JSON.stringify(results));
   app.quit();
 });
