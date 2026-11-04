@@ -638,6 +638,13 @@ handle('media:state', async (projectId, src) => {
   return 'missing';
 });
 
+handle('media:palette', async (projectId, src, time) => {
+  if (!session || session.rec.id !== projectId) return { colors: [] };
+  const file = path.join(session.mediaDir, path.basename(String(src || '')));
+  if (!(await exists(file))) return { colors: [] };
+  return { colors: await media.palette(file, Number(time) || 0) };
+});
+
 handle('dialog:openImages', async () => {
   const r = await dialog.showOpenDialog(win, {
     title: 'Add images and videos',

@@ -865,6 +865,22 @@
 
   async function toggleWindowLock() { S.lockedWindow = !S.lockedWindow; await api.lockWindow(S.lockedWindow); toast(S.lockedWindow ? 'Window locked in place' : 'Window unlocked'); }
 
+  // Palette of a picture: click a colour to copy it, or add the strip to the board
+  B.onPalette = (it, colors) => {
+    openModal((close) => [
+      el('h2', { text: 'Palette' }),
+      el('div', { class: 'palette' }, ...colors.map((c) => {
+        const b = el('button', { class: 'pal', title: `Copy ${c.hex}`, 'aria-label': `Copy ${c.hex}` },
+          el('span', { class: 'chip', style: `background:${c.hex}` }), el('span', { class: 'hex', text: c.hex }));
+        b.onclick = async () => { try { await navigator.clipboard.writeText(c.hex); toast(`Copied ${c.hex}`); } catch (_) {} };
+        return b;
+      })),
+      el('div', { class: 'actions' },
+        el('button', { class: 'btn ghost', text: 'Copy all', onclick: async () => { try { await navigator.clipboard.writeText(colors.map((c) => c.hex).join(' ')); toast('Copied all colours'); } catch (_) {} } }),
+        el('button', { class: 'btn', text: 'Add to board', disabled: S.readOnly, onclick: () => { close(); B.addPaletteStrip(it, colors); } })),
+    ]);
+  };
+
   // "Neal added 2 pictures and a line"
   function addedText(by, a) {
     const word = { picture: ['a picture', 'pictures'], video: ['a video', 'videos'], line: ['a line', 'lines'], note: ['a note', 'notes'], text: ['some text', 'text'] };

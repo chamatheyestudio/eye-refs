@@ -382,6 +382,41 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   });
   const restyledR = restyled2; expect('selected text takes the new size and colour, undo puts it back', restyledR.bar && restyledR.grew && /F4F3EE/i.test(restyledR.c1 || '') && Math.abs(restyledR.backFs - restyledR.fs0) < 0.01 && restyledR.backC === restyledR.c0, restyledR);
   expect('tip size is three dots', sizeRes.count === 3 && sizeRes.size === 10 && sizeRes.on, sizeRes);
+  // Fade one picture on its own
+  const fade = await win.evaluate(() => {
+    const it = Board.live().find((x) => x.type === 'image');
+    Board.commit([{ id: it.id, fields: { op: 0.5 } }]);
+    const o = getComputedStyle(Board.els.get(it.id).querySelector('.clip')).opacity;
+    const sel = getComputedStyle(Board.els.get(it.id)).opacity;
+    Board.undo();
+    return { o, sel, back: getComputedStyle(Board.els.get(it.id).querySelector('.clip')).opacity };
+  });
+  expect('one picture can be faded on its own', fade.o === '0.5' && fade.back === '1', fade);
+  // Palette: the main colours of a picture, copy them or add the strip under it
+  await win.evaluate(async () => {
+    const it = Board.live().filter((x) => x.type === 'image').sort((a, b) => b.w - a.w)[0];
+    let shown = null;
+    const prev = Board.onPalette;
+    Board.onPalette = (i, c) => { shown = c; prev(i, c); };
+    await Board.getPalette(it.id);
+    Board.onPalette = prev;
+    await new Promise((r) => setTimeout(r, 200));
+    const modal = !!document.querySelector('.palette');
+    window.__pal = { it, shown, modal };
+    return null;
+  });
+  await win.screenshot({ path: `${OUT}/03j-palette.png` });
+  const pal = await win.evaluate(async () => {
+    const { it, shown, modal } = window.__pal;
+    const before = Board.live().filter((x) => x.type === 'image').length;
+    document.querySelector('#modalWrap .actions .btn:not(.ghost)').click();
+    for (let i = 0; i < 40 && Board.live().filter((x) => x.type === 'image').length === before; i++) await new Promise((r) => setTimeout(r, 100));
+    const strip = Board.live().filter((x) => x.type === 'image').sort((a, b) => b.created - a.created)[0];
+    const r = { colors: shown, modal, added: Board.live().filter((x) => x.type === 'image').length - before, below: strip.y >= it.y + 10, left: Math.abs(strip.x - it.x) < 1 };
+    Board.undo();
+    return r;
+  });
+  expect('palette gives five colours and adds the strip under the picture', pal.colors && pal.colors.length >= 3 && pal.colors.every((c) => /^#[0-9A-F]{6}$/.test(c.hex)) && pal.modal && pal.added === 1 && pal.below && pal.left, pal);
   // A message never sits on the pen bar
   await win.evaluate(() => Board.setTool('pen'));
   await win.waitForSelector('#penBar:not([hidden])');

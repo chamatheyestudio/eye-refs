@@ -74,6 +74,44 @@ async function quickHash(file) {
   return h.digest('hex').slice(0, 20);
 }
 
+// The main colours of a picture (or a video frame): shrink it, group similar
+// colours, and keep the five that cover the most, each clearly different.
+function palette(file, time, count = 5) {
+  return new Promise((resolve) => {
+    const args = ['-hide_banner', '-loglevel', 'error'];
+    if (time > 0) args.push('-ss', String(time));
+    args.push('-i', file, '-frames:v', '1', '-vf', 'scale=96:96:flags=area', '-f', 'rawvideo', '-pix_fmt', 'rgb24', 'pipe:1');
+    const p = spawn(ffmpegPath(), args, { windowsHide: true });
+    const chunks = [];
+    p.stdout.on('data', (d) => chunks.push(d));
+    p.on('error', () => resolve([]));
+    p.on('close', () => {
+      const px = Buffer.concat(chunks);
+      if (px.length < 3) return resolve([]);
+      const buckets = new Map();
+      for (let i = 0; i + 2 < px.length; i += 3) {
+        const r = px[i], g = px[i + 1], b = px[i + 2];
+        const key = ((r >> 3) << 10) | ((g >> 3) << 5) | (b >> 3);
+        const e = buckets.get(key) || { n: 0, r: 0, g: 0, b: 0 };
+        e.n++; e.r += r; e.g += g; e.b += b;
+        buckets.set(key, e);
+      }
+      const all = [...buckets.values()].map((e) => ({ n: e.n, c: [e.r / e.n, e.g / e.n, e.b / e.n] })).sort((a, b) => b.n - a.n);
+      const out = [];
+      for (const minD of [60, 40, 24, 0]) {
+        for (const e of all) {
+          if (out.length >= count) break;
+          if (out.includes(e) || out.some((o) => Math.hypot(o.c[0] - e.c[0], o.c[1] - e.c[1], o.c[2] - e.c[2]) < minD)) continue;
+          out.push(e);
+        }
+        if (out.length >= count) break;
+      }
+      const total = px.length / 3;
+      resolve(out.slice(0, count).map((e) => ({ hex: '#' + e.c.map((x) => Math.round(x).toString(16).padStart(2, '0')).join('').toUpperCase(), share: e.n / total })));
+    });
+  });
+}
+
 function run(args, onLine) {
   return new Promise((resolve, reject) => {
     const p = spawn(ffmpegPath(), args, { windowsHide: true });
@@ -327,4 +365,4 @@ async function grabFrame(mediaDir, src, time, me) {
 }
 
 module.exports = {
-  fullSizeUrl, safeSrc, inMedia, importFile, importBytes, importUrl, grabFrame, kindOf, quickHash, probeInfo, COMPRESS_OVER_BYTES, ffmpegPath };
+  palette, fullSizeUrl, safeSrc, inMedia, importFile, importBytes, importUrl, grabFrame, kindOf, quickHash, probeInfo, COMPRESS_OVER_BYTES, ffmpegPath };

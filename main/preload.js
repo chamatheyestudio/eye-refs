@@ -19,6 +19,7 @@ contextBridge.exposeInMainWorld('eyerefs', {
   discardBoard: call('projects:discard'),
   quitNow: call('app:quitNow'),
   notify: call('app:notify'),
+  palette: call('media:palette'),
   onNews: on('news'),
   onNewsOpen: on('news-open'),
   onAskSaveQuit: on('ask-save-quit'),

@@ -205,7 +205,7 @@
       node.classList.toggle('plain', !!it.plain);
       const t = node.firstChild;
       t.style.color = it.plain ? (it.color || '#D7F04A') : '';
-      t.style.opacity = it.plain && it.op != null ? String(it.op) : '';
+      t.style.opacity = it.op != null && it.op < 1 ? String(it.op) : '';
       if (B.editingId !== it.id && t.textContent !== (it.text || '')) t.textContent = it.text || '';
       node.style.transform = `translate(${it.x}px, ${it.y}px) rotate(${it.rot || 0}deg)`;
       return;
@@ -217,6 +217,8 @@
     node.style.transform = `translate(${it.x}px, ${it.y}px) rotate(${it.rot || 0}deg)`;
     const clip = node.querySelector('.clip');
     clip.style.transform = `scale(${it.flipX ? -1 : 1}, ${it.flipY ? -1 : 1})`;
+    // Each picture can be faded on its own; lines carry it on the stroke instead
+    clip.style.opacity = it.type !== 'draw' && it.op != null && it.op < 1 ? String(it.op) : '';
     const m = clip.querySelector('.media');
     if (m) {
       m.style.width = it.nw * d.k + 'px';
@@ -1191,7 +1193,7 @@
     await placeResults(results, p, { pid });
   }
 
-  async function addBytes(files, at) {
+  async function addBytes(files, at, place) {
     if (!canEdit()) return;
     const p = at || viewCenter();
     const pid = boardId();
@@ -1203,7 +1205,7 @@
       results.push(await api.importBytes(pid, buf, f.name && /\.[a-z0-9]+$/i.test(f.name) ? f.name : `pasted.${ext}`));
     }
     if (leftBoard(pid)) return;
-    await placeResults(results, p, { pid });
+    await placeResults(results, p, { pid, ...(place || {}) });
   }
 
   async function addUrl(url, at) {
@@ -1661,8 +1663,36 @@
     }, 0);
   }
 
+  // ---------- colour palette ----------
+  async function getPalette(id) {
+    const it = B.items.get(id);
+    if (!it || !B.project) return;
+    const v = it.type === 'video' ? videoEl(id) : null;
+    const r = await api.palette(B.project.id, it.src, v ? v.currentTime : 0);
+    if (!r || !r.colors || !r.colors.length) return toast("Couldn't read the colours of this one.", true);
+    if (B.onPalette) B.onPalette(it, r.colors);
+  }
+  // A strip of the colours, added under the picture as a normal reference
+  async function addPaletteStrip(it, colors) {
+    if (!canEdit()) return;
+    const S = 200, L = 56, cv = document.createElement('canvas');
+    cv.width = S * colors.length; cv.height = S + L;
+    const x = cv.getContext('2d');
+    x.fillStyle = '#1C1B1A'; x.fillRect(0, 0, cv.width, cv.height);
+    colors.forEach((c, i) => {
+      x.fillStyle = c.hex; x.fillRect(i * S, 0, S, S);
+      x.fillStyle = '#F4F3EE'; x.font = '600 26px Inter, system-ui, sans-serif'; x.textBaseline = 'middle';
+      x.fillText(c.hex, i * S + 18, S + L / 2);
+    });
+    const blob = await new Promise((res) => cv.toBlob(res, 'image/png'));
+    const file = new File([blob], 'palette.png', { type: 'image/png' });
+    const d = dims(it);
+    const w = Math.min(d.w, 1000);
+    await addBytes([file], { x: it.x, y: it.y + d.h + 24 }, { width: w, exact: true });
+  }
+
   // ---------- context menu ----------
-  const PEN_OPACITY = [1, 0.75, 0.5, 0.25];
+  const PEN_OPACITY = [1, 0.75, 0.5, 0.25, 0.1];
   function contextMenu(x, y) {
     if (!B.project) return;
     const hit = itemAt(x, y);
@@ -1685,15 +1715,15 @@
           { label: v && !v.muted ? 'Mute' : 'Play sound', key: 'M', onClick: toggleMute },
         ] });
     }
-    const lines = ids.filter((id) => B.items.get(id).type === 'draw');
-    if (lines.length) {
-      const cur = B.items.get(lines[0]).op == null ? 1 : B.items.get(lines[0]).op;
-      items.push({ label: 'Opacity', sub: PEN_OPACITY.map((o) => ({ label: Math.round(o * 100) + ' percent', checked: Math.abs(cur - o) < 0.01, disabled: !ed, onClick: () => commit(lines.map((id) => ({ id, fields: { op: o } }))) })) });
+    if (ids.length) {
+      const cur = B.items.get(ids[0]).op == null ? 1 : B.items.get(ids[0]).op;
+      items.push({ label: 'Opacity', sub: PEN_OPACITY.map((o) => ({ label: Math.round(o * 100) + ' percent', checked: Math.abs(cur - o) < 0.01, disabled: !ed, onClick: () => commit(ids.map((id) => ({ id, fields: { op: o } }))) })) });
     }
     if (one && one.type === 'note') items.push({ label: 'Edit note', key: 'Enter', onClick: () => editNote(one.id), disabled: !ed });
     if (ids.length) {
       items.push(
         { label: 'Image', sub: [
+          ...(one && (one.type === 'image' || one.type === 'video') ? [{ label: 'Get palette', onClick: () => getPalette(one.id) }, '-'] : []),
           { label: 'Grayscale', key: 'Alt+G', checked: ids.every((id) => B.items.get(id).gray), onClick: () => toggleField('gray'), disabled: !ed },
           { label: 'Flip horizontal', key: 'Alt+Shift+H', onClick: () => toggleField('flipX'), disabled: !ed },
           { label: 'Flip vertical', key: 'Alt+Shift+V', onClick: () => toggleField('flipY'), disabled: !ed },
@@ -1784,7 +1814,7 @@
   function restore(ids) { commit(ids.map((id) => ({ id, fields: { deleted: false } }))); B.sel = new Set(ids); renderOverlay(); }
 
   Object.assign(B, {
-    addText, restyle, restyleDone, load, unload, applyRemote, render, applyView, zoomAt, fitRect, toWorld, toScreen,
+    addText, restyle, restyleDone, getPalette, addPaletteStrip, load, unload, applyRemote, render, applyView, zoomAt, fitRect, toWorld, toScreen,
     commit, undo, redo, addPaths, addBytes, addUrl, addNote, editNote, stopEditing,
     copySelection, pasteInternal, pasteNative, pasteKey, deleteSelection, duplicate, toggleField, resetCrop, resetTransform, front, back,
     align, normalize, arrange, focusSelection, focusAll, focusStep, selectAll, clearSel, selIds,
