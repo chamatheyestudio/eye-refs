@@ -163,6 +163,16 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const dxL = afterDrag.l.x - line0.x, dxH = afterDrag.h.x - host.x;
   expect('line sticks to the picture it was drawn on', line0.on === host.id && Math.abs(dxL - dxH) < 0.5 && dxH > 10 && Math.abs(midDrag - line0.x) > 5 && Math.abs(afterScale - line0.w * 2) < 0.5 && afterDel && !afterUndo.l.deleted && Math.abs(afterUndo.l.x - line0.x) < 0.5 && Math.abs(afterUndo.h.x - host.x) < 0.5,
     { on: line0.on, host: host.id, dxL, dxH, midDrag, x0: line0.x, afterScale, w0: line0.w, afterDel, undoX: afterUndo.l.x });
+  // A line from an older version (never linked) is linked when the board opens
+  const adopt = await win.evaluate(async (hid) => {
+    const h = Board.items.get(hid);
+    const id = 'oldline';
+    Board.items.set(id, { id, type: 'draw', pts: '0 0 10 10', nw: 20, nh: 20, w: 20, x: h.x + 20, y: h.y + 20, sw: 4, z: 9999, rot: 0, deleted: false, created: Date.now() });
+    const items = Object.fromEntries([...Board.items.entries()]);
+    Board.applyRemote(items);
+    return Board.items.get(id).on;
+  }, host.id);
+  expect('old lines get linked to their picture', adopt === host.id, { adopt, host: host.id });
   // Scrolling always zooms, even a sideways swipe never moves the board
   const vz = await win.evaluate(() => ({ ...Board.view }));
   await win.mouse.move(720, 450);

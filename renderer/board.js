@@ -456,6 +456,18 @@
     }
     return best;
   }
+  // Lines from before 1.0.10, or from a teammate on an older version, were never
+  // linked to a picture. Link each one to the picture it sits on, once.
+  function adoptLines() {
+    if (!canEdit()) return;
+    const ch = [];
+    for (const it of live()) {
+      if (it.type !== 'draw' || 'on' in it) continue;
+      const d = dims(it);
+      ch.push({ id: it.id, fields: { on: hostForBox({ x: it.x, y: it.y, w: d.w, h: d.h }) || null } });
+    }
+    if (ch.length) { applyLocal(ch); send(ch); }
+  }
   const followBase = new Map(); // line id -> where it was when a gesture began
   const GEO = ['x', 'y', 'w', 'rot', 'flipX', 'flipY', 'crop', 'fs'];
   // Any change to a picture carries the lines on it along, in the same undo step
@@ -1540,6 +1552,7 @@
       for (const w of writes) merged[w.id] = { ...(merged[w.id] || { id: w.id }), ...w.fields };
     }
     B.items = new Map(Object.entries(merged));
+    adoptLines();
     render();
   }
 
@@ -1636,6 +1649,7 @@
     B.undoStack = []; B.redoStack = [];
     let v = null;
     try { v = JSON.parse(localStorage.getItem('view:' + p.record.id) || 'null'); } catch (_) {}
+    adoptLines();
     render();
     if (v && isFinite(v.s)) { B.view = v; applyView(); }
     else if (live().length) focusAll();
