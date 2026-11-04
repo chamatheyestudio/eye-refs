@@ -590,6 +590,26 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     return { labels, saved, after };
   });
   expect('pinned boards sit at the top and are remembered', pinRes.labels[0] === '#Pinned' && pinRes.labels[1] === 'Brunch Edit' && pinRes.labels[2] === '#Boards' && pinRes.saved.length === 1 && pinRes.after === 0, pinRes);
+  // Each board brings back its own window size and place
+  const boundsRes = await (async () => {
+    const setB = (b) => app.evaluate(({ BrowserWindow }, b) => BrowserWindow.getAllWindows()[0].setBounds(b), b);
+    const getB = () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getBounds());
+    const cur = await win.evaluate(() => document.querySelector('#tName').textContent);
+    await setB({ x: 40, y: 40, width: 1200, height: 760 });
+    await sleep(900);
+    await win.click('#tree >> text=Brunch Edit');
+    await win.waitForFunction(() => document.querySelector('#tName').textContent === 'Brunch Edit', null, { timeout: 20000 });
+    await setB({ x: 120, y: 90, width: 1000, height: 640 });
+    await sleep(900);
+    await win.click(`#tree >> text=${cur}`);
+    await win.waitForFunction((n) => document.querySelector('#tName').textContent === n, cur, { timeout: 20000 });
+    await sleep(500);
+    const back = await getB();
+    await setB({ x: 0, y: 0, width: 1440, height: 900 });
+    await sleep(900);
+    return { cur, back };
+  })();
+  expect('each board brings back its own window size and place', boundsRes.back.width === 1200 && boundsRes.back.height === 760 && boundsRes.back.x === 40, boundsRes);
   expect('sidebar lists the latest edited first', order.indexOf('Spring Campaign') > -1 && order.indexOf('Spring Campaign') < order.indexOf('Brunch Edit'), order);
   expect('a board shared with you is announced', told2.toasts.includes('Nousaiba shared "Brunch Edit" with you') && told2.row, told2);
 

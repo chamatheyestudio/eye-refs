@@ -177,6 +177,41 @@ async function recentBoards() {
 }
 
 let resumeProject = null;
+
+// ---------- each board remembers its window ----------
+// Size and place of the window per board, brought back when that board opens.
+let boundsTimer = null, settingBounds = false;
+function rememberBoardWindow() {
+  if (settingBounds || !win || win.isDestroyed() || !session) return;
+  const id = session.rec.id;
+  clearTimeout(boundsTimer);
+  boundsTimer = setTimeout(() => {
+    if (!win || win.isDestroyed() || !session || session.rec.id !== id || win.isFullScreen() || win.isMinimized()) return;
+    settings.boardWin = settings.boardWin || {};
+    settings.boardWin[id] = { ...(win.isMaximized() ? (settings.boardWin[id] || {}) : { bounds: win.getBounds() }), max: win.isMaximized(), at: Date.now() };
+    // Keep the list from growing forever
+    const ids = Object.keys(settings.boardWin);
+    if (ids.length > 200) for (const k of ids.sort((a, b) => settings.boardWin[a].at - settings.boardWin[b].at).slice(0, ids.length - 200)) delete settings.boardWin[k];
+    saveSettings();
+  }, 500);
+}
+function restoreBoardWindow(id) {
+  const saved = settings.boardWin && settings.boardWin[id];
+  if (!saved || !win || win.isDestroyed() || win.isFullScreen()) return;
+  settingBounds = true;
+  try {
+    if (saved.max) { if (!win.isMaximized()) win.maximize(); }
+    else if (saved.bounds) {
+      if (win.isMaximized()) win.unmaximize();
+      // Only if it still fits on a screen that's connected now
+      const b = saved.bounds;
+      const area = screen.getDisplayMatching(b).workArea;
+      const fits = b.x + 60 > area.x && b.y + 20 > area.y && b.x < area.x + area.width - 60 && b.y < area.y + area.height - 40;
+      if (fits) win.setBounds({ x: b.x, y: b.y, width: Math.min(b.width, area.width), height: Math.min(b.height, area.height) }, process.platform === 'darwin');
+    }
+  } catch (_) {}
+  setTimeout(() => { settingBounds = false; }, 400);
+}
 let quitAsked = false;
 
 // The answer to "Save this board?" when closing: close now, keeping or dropping it
@@ -300,6 +335,7 @@ async function openProject(rec) {
     presence: () => {},
   }, { onSaved: () => { if (sync) sync.kick(); } });
   session = s;
+  restoreBoardWindow(rec.id);
   if (rec.shared && settings.news) { settings.news.seen[rec.shared.id] = Date.now(); }
   const items = await s.open();
   if (rec.shared) startSync(rec, s);
@@ -787,7 +823,8 @@ function createWindow(bounds, opts = {}) {
   // Moving the window by its top bar: the page gets no pointer events while the
   // system drags, so tell it, and the bar stays put the whole time.
   const thisWin = win;
-  thisWin.on('move', () => { if (win === thisWin) send('win:moved'); });
+  thisWin.on('move', () => { if (win === thisWin) send('win:moved'); rememberBoardWindow(); });
+  thisWin.on('resize', () => rememberBoardWindow());
 
   let closing = false;
   win.on('close', async (e) => {
