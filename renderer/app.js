@@ -466,6 +466,7 @@
   function syncToolbar() {
     $$('#toolbar [data-tool]').forEach((b) => b.classList.toggle('on', b.dataset.tool === B.tool));
     $('#penBar').hidden = !['pen', 'eraser', 'text'].includes(B.tool) || !S.current;
+    if ($('#penBar').hidden && typeof closePicker === 'function') closePicker();
     $$('#toolbar [data-tool="pen"]').forEach((b) => b.classList.toggle('on', B.tool === 'pen' || B.tool === 'eraser'));
     $('#penEraser').classList.toggle('on', B.tool === 'eraser');
     $('#penText').classList.toggle('on', B.tool === 'text');
@@ -483,36 +484,111 @@
   const drawing = () => B.tool === 'pen' || B.tool === 'eraser' || B.tool === 'text';
   const toggleDraw = () => B.setTool(drawing() ? 'select' : 'pen');
   const penStyle = (st) => { B.pen.style = st; B.setTool('pen'); savePen(); };
-  const nextColor = () => { B.pen.color = PEN_COLORS[(PEN_COLORS.indexOf(B.pen.color) + 1) % PEN_COLORS.length]; savePen(); toast('Pen colour changed'); };
+  const nextColor = () => { const list = recent.length ? recent : PEN_COLORS.map((c) => ({ c, op: 1 })); const i = list.findIndex((r) => r.c.toUpperCase() === String(B.pen.color).toUpperCase()); const n = list[(i + 1) % list.length]; B.pen.color = n.c; B.pen.op = n.op == null ? 1 : n.op; savePen(); toast('Pen colour changed'); };
   $('#penEraser').addEventListener('click', () => B.setTool(B.tool === 'eraser' ? 'pen' : 'eraser'));
   $('#penText').addEventListener('click', () => B.setTool(B.tool === 'text' ? 'pen' : 'text'));
   function drawPenBar() {
-    const colors = $('#penColors'), sizes = $('#penSizes'), styles = $('#penStyles'), ops = $('#penOps');
-    colors.innerHTML = ''; sizes.innerHTML = ''; styles.innerHTML = ''; ops.innerHTML = '';
-    const op = B.pen.op == null ? 1 : B.pen.op;
-    for (const o of [1, 0.75, 0.5, 0.25]) {
-      const pct = Math.round(o * 100);
-      const b = el('button', { class: Math.abs(op - o) < 0.01 ? 'on' : '', 'aria-label': `Opacity ${pct} percent`, title: `Opacity ${pct} percent` }, el('span', { class: 'dot', style: `background:${B.pen.color};opacity:${o}` }));
-      b.onclick = () => { B.pen.op = o; if (B.tool === 'eraser') B.setTool('pen'); savePen(); };
-      ops.append(b);
-    }
+    const styles = $('#penStyles');
+    styles.innerHTML = '';
     for (const [st, label] of PEN_STYLES) {
       const b = el('button', { class: B.pen.style === st && B.tool === 'pen' ? 'on' : '', 'aria-label': label, title: label, html: ICONS[st] });
       b.onclick = () => penStyle(st);
       styles.append(b);
     }
-    for (const c of PEN_COLORS) {
-      const b = el('button', { class: B.pen.color === c ? 'on' : '', 'aria-label': 'Colour', title: 'Colour' }, el('span', { class: 'dot', style: `background:${c}` }));
-      b.onclick = () => { B.pen.color = c; if (B.tool === 'eraser') B.setTool('pen'); savePen(); };
-      colors.append(b);
-    }
-    PEN_SIZES.forEach((z, i) => {
-      const d = [4, 7, 11][i];
-      const b = el('button', { class: B.pen.size === z ? 'on' : '', 'aria-label': 'Size', title: ['Thin', 'Medium', 'Thick'][i] }, el('span', { class: 'dot', style: `width:${d}px;height:${d}px` }));
-      b.onclick = () => { B.pen.size = z; if (B.tool === 'eraser') B.setTool('pen'); savePen(); };
-      sizes.append(b);
-    });
+    const size = Math.max(1, Math.min(40, Math.round(B.pen.size || 4)));
+    const sz = $('#penSize');
+    if (document.activeElement !== sz) sz.value = String(size);
+    $('#penSizeVal').textContent = `${size} px`;
+    const c = penCss();
+    const d = Math.max(3, Math.min(20, size / 2 + 2));
+    Object.assign($('#tipDot').style, { width: d + 'px', height: d + 'px', background: c });
+    $('#penColorDot').style.background = c;
+    if (!$('#picker').hidden) paintPicker();
   }
+  $('#penSize').addEventListener('input', (e) => { B.pen.size = Number(e.target.value); if (B.tool === 'eraser') B.setTool('pen'); savePen(); });
+
+  // ---------- colour picker ----------
+  // A disc for the colour (around for the colour, inward for softer), sliders for
+  // brightness and opacity. Changes apply as you go; clicking away keeps the colour
+  // and adds it to Recent.
+  const HSV = { h: 0, s: 0, v: 1 };
+  const hsv2rgb = (h, s, v) => { const f = (n) => { const k = (n + h / 60) % 6; return v - v * s * Math.max(0, Math.min(k, 4 - k, 1)); }; return [f(5), f(3), f(1)].map((x) => Math.round(x * 255)); };
+  const rgb2hsv = (r, g, b) => { r /= 255; g /= 255; b /= 255; const M = Math.max(r, g, b), m = Math.min(r, g, b), d = M - m; let H = 0; if (d) { if (M === r) H = ((g - b) / d) % 6; else if (M === g) H = (b - r) / d + 2; else H = (r - g) / d + 4; H *= 60; if (H < 0) H += 360; } return [H, M ? d / M : 0, M]; };
+  const toHex = (rgb) => '#' + rgb.map((x) => x.toString(16).padStart(2, '0')).join('').toUpperCase();
+  const parseHex = (t) => { const m = String(t || '').replace('#', '').match(/^([0-9a-f]{6})$/i); return m ? m[1].match(/../g).map((x) => parseInt(x, 16)) : null; };
+  function penCss() { const rgb = parseHex(B.pen.color) || [215, 240, 74]; const op = B.pen.op == null ? 1 : B.pen.op; return `rgba(${rgb.join(',')},${op})`; }
+  function loadHsv() { const rgb = parseHex(B.pen.color) || [215, 240, 74]; const [h, s, v] = rgb2hsv(...rgb); if (s > 0.001) HSV.h = h; HSV.s = s; HSV.v = v; }
+  let recent = [];
+  try { recent = JSON.parse(localStorage.getItem('penRecent') || '[]').filter((r) => r && parseHex(r.c)); } catch (_) {}
+  if (!recent.length) recent = PEN_COLORS.map((c) => ({ c, op: 1 }));
+  function keepRecent() {
+    const op = B.pen.op == null ? 1 : B.pen.op;
+    recent = [{ c: B.pen.color, op }, ...recent.filter((r) => !(r.c.toUpperCase() === String(B.pen.color).toUpperCase() && Math.abs((r.op == null ? 1 : r.op) - op) < 0.01))].slice(0, 9);
+    try { localStorage.setItem('penRecent', JSON.stringify(recent)); } catch (_) {}
+  }
+  function setPen(fromField) {
+    B.pen.color = toHex(hsv2rgb(HSV.h, HSV.s, HSV.v));
+    if (B.tool === 'eraser') B.setTool('pen');
+    try { localStorage.setItem('pen', JSON.stringify(B.pen)); } catch (_) {}
+    drawPenBar();
+    paintPicker(fromField);
+  }
+  function paintPicker(fromField) {
+    const R = 84, ang = (HSV.h * Math.PI) / 180;
+    const hex = toHex(hsv2rgb(HSV.h, HSV.s, HSV.v));
+    const op = B.pen.op == null ? 1 : B.pen.op;
+    Object.assign($('#pkDiscK').style, { left: R + Math.cos(ang) * HSV.s * R + 'px', top: R + Math.sin(ang) * HSV.s * R + 'px', background: hex });
+    $('#pkDark').style.opacity = (1 - HSV.v).toFixed(3);
+    $('#pkBright').style.background = `linear-gradient(90deg, #000, rgb(${hsv2rgb(HSV.h, HSV.s, 1).join(',')}))`;
+    Object.assign($('#pkBrightK').style, { left: HSV.v * 100 + '%', background: hex });
+    $('#pkAlphaFill').style.background = `linear-gradient(90deg, transparent, ${hex})`;
+    Object.assign($('#pkAlphaK').style, { left: op * 100 + '%', background: penCss() });
+    if (fromField !== 'hex' && document.activeElement !== $('#pkHex')) $('#pkHex').value = hex.slice(1);
+    if (fromField !== 'pct' && document.activeElement !== $('#pkPct')) $('#pkPct').value = Math.round(op * 100) + '%';
+  }
+  function drawRecent() {
+    const box = $('#pkRecent');
+    box.innerHTML = '';
+    for (const r of recent) {
+      const op = r.op == null ? 1 : r.op;
+      const b = el('button', { 'aria-label': `Colour ${r.c}`, title: op < 1 ? `${r.c}  ${Math.round(op * 100)} percent` : r.c }, el('span', { style: `background:${r.c};opacity:${op}` }));
+      b.onclick = () => { B.pen.color = r.c.toUpperCase(); B.pen.op = op; loadHsv(); setPen(); };
+      box.append(b);
+    }
+  }
+  function openPicker() {
+    loadHsv(); drawRecent();
+    $('#picker').hidden = false;
+    $('#penColor').classList.add('open');
+    paintPicker();
+  }
+  function closePicker(keep) {
+    if ($('#picker').hidden) return;
+    $('#picker').hidden = true;
+    $('#penColor').classList.remove('open');
+    if (keep !== false) keepRecent();
+  }
+  $('#penColor').addEventListener('click', () => ($('#picker').hidden ? openPicker() : closePicker()));
+  document.addEventListener('pointerdown', (e) => { if (!$('#picker').hidden && !e.target.closest('#picker, #penColor')) closePicker(); }, true);
+  const dragOn = (node, fn) => node.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    node.setPointerCapture(e.pointerId);
+    const mv = (ev) => { fn(ev, node.getBoundingClientRect()); setPen(); };
+    mv(e);
+    node.onpointermove = mv;
+    node.onpointerup = () => { node.onpointermove = null; };
+  });
+  dragOn($('#pkDisc'), (e, r) => { const x = e.clientX - r.left - r.width / 2, y = e.clientY - r.top - r.height / 2; HSV.h = ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360; HSV.s = Math.min(1, Math.hypot(x, y) / (r.width / 2)); });
+  dragOn($('#pkBright'), (e, r) => { HSV.v = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)); });
+  dragOn($('#pkAlpha'), (e, r) => { B.pen.op = Math.round(Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * 100) / 100; });
+  $('#pkHex').addEventListener('input', (e) => { const rgb = parseHex(e.target.value); if (!rgb) return; const [h, s, v] = rgb2hsv(...rgb); if (s > 0.001) HSV.h = h; HSV.s = s; HSV.v = v; setPen('hex'); });
+  $('#pkPct').addEventListener('change', (e) => { const n = parseInt(e.target.value, 10); if (!isNaN(n)) B.pen.op = Math.max(0, Math.min(100, n)) / 100; setPen(); });
+  for (const f of ['#pkHex', '#pkPct']) $(f).addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === 'Escape') { e.preventDefault(); e.target.blur(); if (e.key === 'Escape') closePicker(); } });
+  $('#pkCopy').addEventListener('click', async () => { try { await navigator.clipboard.writeText(B.pen.color); toast(`Copied ${B.pen.color}`); } catch (_) {} });
+  if (!window.EyeDropper) $('#pkDrop').hidden = true;
+  $('#pkDrop').addEventListener('click', async () => { try { const r = await new window.EyeDropper().open(); const rgb = parseHex(r.sRGBHex); if (rgb) { const [h, s, v] = rgb2hsv(...rgb); if (s > 0.001) HSV.h = h; HSV.s = s; HSV.v = v; setPen(); } } catch (_) {} });
+  B.closePicker = closePicker;
+
   function savePen() { try { localStorage.setItem('pen', JSON.stringify(B.pen)); } catch (_) {} drawPenBar(); }
   drawPenBar();
   const addDialog = async () => B.addPaths(await api.openImagesDialog());

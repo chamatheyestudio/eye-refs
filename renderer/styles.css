@@ -178,7 +178,7 @@ body.no-sidebar #title { left: 16px; padding-left: 4px; }
 body.has-sidebar #toolbar { left: calc(50% + 144px); }
 #penBar { position: fixed; bottom: 72px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 4px; padding: 4px 6px; height: 36px; z-index: 15; }
 body.has-sidebar #penBar { left: calc(50% + 144px); }
-#penBar .swatches, #penBar .sizes, #penBar .ops, #penBar .styles { display: flex; align-items: center; gap: 2px; }
+#penBar .styles { display: flex; align-items: center; gap: 2px; }
 #penBar .styles button, #penBar .tool { color: var(--soft); }
 #penBar .styles button svg, #penBar .tool svg { width: 15px; height: 15px; }
 #penBar .styles button.on, #penBar .tool.on { background: var(--hover); color: var(--text); }
@@ -343,7 +343,8 @@ body.clickthrough #canvas { outline: 2px solid rgba(215, 240, 74, 0.5); outline-
   #title, :is(body.ui-hidden, body.ui-auto:not(.board-empty)) #title { max-width: calc(100vw - 250px); }
   #share { padding: 0 14px; }
   .setpill { display: none; }
-  #penBar .styles, #penBar .styles + .sep, #penBar .ops, #penBar .ops + .sep { display: none; }
+  #penBar .styles, #penBar .styles + .sep { display: none; }
+  #penBar .tipsize input { width: 64px; }
 }
 @media (max-width: 420px) {
   #share { display: none; }
@@ -407,3 +408,41 @@ body.is-opening #opening .opening-pill { transform: translate(-50%, -50%) scale(
 @keyframes openingSpin { to { transform: rotate(360deg); } }
 @keyframes openingSlide { from { left: -30%; } to { left: 100%; } }
 @media (prefers-reduced-motion: reduce) { .opening-spin, #opening .opening-bar::after { animation-duration: 2.4s; } #world { transition: none; } }
+
+/* Pen bar: tip size slider, and the colour wheel button at the right end */
+#penBar .tipsize { display: flex; align-items: center; gap: 8px; padding: 0 4px 0 2px; }
+#penBar .tip-prev { width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; }
+#penBar #tipDot { display: block; border-radius: 50%; }
+#penBar .tipsize input { width: 96px; accent-color: var(--lime); margin: 0; }
+#penBar #penSizeVal { font: 500 11px var(--mono); color: var(--soft); min-width: 34px; }
+#penBar .cwheel { position: relative; width: 30px; height: 30px; }
+#penBar .cwheel .rg { position: absolute; inset: 3px; border-radius: 50%; background: conic-gradient(from 90deg, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00); -webkit-mask: radial-gradient(circle, transparent 8px, #000 8.5px); mask: radial-gradient(circle, transparent 8px, #000 8.5px); transition: transform 300ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+#penBar .cwheel:hover .rg, #penBar .cwheel.open .rg { transform: rotate(120deg); }
+#penBar .cwheel .d { position: relative; width: 12px; height: 12px; border-radius: 50%; box-shadow: 0 0 0 1.5px var(--panel-solid); }
+
+/* Colour picker: a disc for the colour, sliders for brightness and opacity */
+.picker { position: absolute; right: -6px; bottom: calc(100% + 22px); width: 208px; padding: 14px 12px 12px; border-radius: 20px; background: var(--panel-solid); border: 1px solid var(--line-strong); display: flex; flex-direction: column; gap: 11px; box-sizing: border-box; transform-origin: calc(100% - 22px) 100%; animation: pickerIn 220ms cubic-bezier(0.2, 0.8, 0.2, 1); -webkit-app-region: no-drag; }
+.picker[hidden] { display: none; }
+@keyframes pickerIn { from { opacity: 0; transform: scale(0.9) translateY(8px); } }
+.picker .disc { position: relative; width: 168px; height: 168px; align-self: center; border-radius: 50%; touch-action: none; cursor: crosshair; background: conic-gradient(from 90deg, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00); }
+.picker .disc::before { content: ''; position: absolute; inset: 0; border-radius: 50%; background: radial-gradient(closest-side, #fff, rgba(255, 255, 255, 0)); }
+.picker .dark { position: absolute; inset: 0; border-radius: 50%; background: #000; pointer-events: none; }
+.picker .k { position: absolute; width: 14px; height: 14px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45); transform: translate(-50%, -50%); pointer-events: none; box-sizing: border-box; z-index: 2; }
+.picker .row { display: flex; align-items: center; gap: 6px; }
+.picker .sl { position: relative; flex: 1; height: 10px; border-radius: 999px; cursor: pointer; touch-action: none; }
+.picker .sl .k { top: 50%; width: 12px; height: 12px; }
+.picker > .sl { flex: none; width: 100%; }
+.picker .sl .fill { position: absolute; inset: 0; border-radius: 999px; }
+.picker .chk { background-color: #3a3936; background-image: linear-gradient(45deg, #555 25%, transparent 25%, transparent 75%, #555 75%), linear-gradient(45deg, #555 25%, transparent 25%, transparent 75%, #555 75%); background-size: 8px 8px; background-position: 0 0, 4px 4px; }
+#penBar .picker .ib { width: 26px; height: 26px; flex-shrink: 0; background: rgba(255, 255, 255, 0.06); color: var(--soft); }
+#penBar .picker .ib:hover { background: rgba(255, 255, 255, 0.12); color: var(--text); }
+.picker .ib svg { width: 14px; height: 14px; }
+.picker .fld { height: 26px; flex: 1; min-width: 0; border-radius: 999px; background: rgba(255, 255, 255, 0.06); border: 1px solid transparent; color: var(--text); font: 500 11px var(--mono); padding: 0 10px; outline: none; box-sizing: border-box; user-select: text; }
+.picker .fld.pct { flex: 0 0 48px; text-align: center; padding: 0 4px; }
+.picker .fld:focus { border-color: var(--lime); }
+.picker .rec { display: flex; gap: 6px; flex-wrap: wrap; }
+#penBar .picker .rec button { width: 18px; height: 18px; position: relative; overflow: hidden; transition: transform 120ms ease; }
+#penBar .picker .rec button:hover { transform: scale(1.15); background: transparent; }
+.picker .rec button span { position: absolute; inset: 0; border-radius: 50%; }
+#penBar .picker .rec button { background-color: #3a3936; background-image: linear-gradient(45deg, #555 25%, transparent 25%, transparent 75%, #555 75%), linear-gradient(45deg, #555 25%, transparent 25%, transparent 75%, #555 75%); background-size: 8px 8px; background-position: 0 0, 4px 4px; }
+@media (prefers-reduced-motion: reduce) { .picker { animation: none; } #penBar .cwheel .rg { transition: none; } }

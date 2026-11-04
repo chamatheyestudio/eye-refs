@@ -96,16 +96,21 @@
 </div>
 
 <div id="penBar" class="pill" hidden role="toolbar" aria-label="Pen">
-  <span class="swatches" id="penColors"></span>
-  <span class="sep"></span>
-  <span class="sizes" id="penSizes"></span>
-  <span class="sep"></span>
-  <span class="ops" id="penOps"></span>
+  <span class="tipsize" title="Tip size"><span class="tip-prev"><span id="tipDot"></span></span><input type="range" id="penSize" min="1" max="40" step="1" aria-label="Tip size"><span id="penSizeVal"></span></span>
   <span class="sep"></span>
   <span class="styles" id="penStyles"></span>
   <span class="sep"></span>
   <button class="tool" id="penText" aria-label="Text" title="Text (T)" data-i="text"></button>
   <button class="tool" id="penEraser" aria-label="Eraser" title="Eraser (E)" data-i="eraser"></button>
+  <span class="sep"></span>
+  <button class="cwheel" id="penColor" aria-label="Pen colour" title="Pen colour"><span class="rg"></span><span class="d" id="penColorDot"></span></button>
+  <div class="picker" id="picker" hidden>
+    <div class="disc" id="pkDisc"><div class="dark" id="pkDark"></div><div class="k" id="pkDiscK"></div></div>
+    <div class="sl" id="pkBright" aria-label="Brightness"><div class="k" id="pkBrightK"></div></div>
+    <div class="row"><div class="sl chk" id="pkAlpha" aria-label="Opacity"><div class="fill" id="pkAlphaFill"></div><div class="k" id="pkAlphaK"></div></div><button class="ib" id="pkDrop" aria-label="Pick a colour from the screen" title="Pick from the screen" data-i="dropper"></button></div>
+    <div class="row"><input class="fld" id="pkHex" maxlength="7" spellcheck="false" aria-label="Hex colour"><button class="ib" id="pkCopy" aria-label="Copy colour" title="Copy" data-i="copy"></button><input class="fld pct" id="pkPct" aria-label="Opacity percent"></div>
+    <div class="rec" id="pkRecent"></div>
+  </div>
 </div>
 
 <div id="zoom" class="pill">

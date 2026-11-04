@@ -19,6 +19,8 @@
     solid: s('<path d="M5 19L19 5"/>'),
     dotted: s('<path d="M5 19L19 5" stroke-dasharray="0 4.5"/>', 2.6),
     arrow: s('<path d="M5 19L19 5M10 5h9v9"/>'),
+    dropper: s('<path d="M11 7l6 6"/><path d="M4 20l1.5-4.5L15 6a2.1 2.1 0 0 1 3 3l-9.5 9.5z"/>'),
+    copy: s('<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>'),
     text: s('<path d="M5 6V5h14v1"/><path d="M12 5v14"/><path d="M9 19h6"/>'),
     eraser: s('<path d="M8 20h12"/><path d="M5.5 15.5l9-9a2 2 0 0 1 2.8 0l1.2 1.2a2 2 0 0 1 0 2.8L11 18H8z"/>'),
     settings: s('<path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/>'),

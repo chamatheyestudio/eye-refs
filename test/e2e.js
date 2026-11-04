@@ -101,14 +101,13 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     await win.mouse.up();
   };
   await circle(1110, 300, 95, 70);
-  await win.click('#penColors button:nth-child(2)');
-  await win.click('#penSizes button:nth-child(2)');
+  await win.evaluate(() => { Board.pen.color = '#F4F3EE'; Board.pen.size = 4; });
   await win.keyboard.press('3');
   await win.mouse.move(980, 470); await win.mouse.down();
   for (let i = 0; i <= 20; i++) await win.mouse.move(980 + i * 4.5, 470 - i * 6 + Math.sin(i / 3) * 4);
   await win.mouse.up();
   await win.keyboard.press('2');
-  await win.click('#penColors button:nth-child(3)');
+  await win.evaluate(() => { Board.pen.color = '#FF5A4E'; });
   await win.mouse.move(470, 560); await win.mouse.down();
   for (let i = 0; i <= 30; i++) await win.mouse.move(470 + i * 10, 560 + Math.sin(i / 4) * 20);
   await win.mouse.up();
@@ -144,7 +143,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   // Line opacity: set on the pen bar, kept on the line, changeable later
   await win.evaluate(() => Board.setTool('pen'));
   await win.waitForSelector('#penBar:not([hidden])');
-  await win.click('#penOps button:nth-child(3)');
+  await win.evaluate(() => { Board.pen.op = 0.5; });
   await win.mouse.move(600, 300); await win.mouse.down();
   for (let i = 0; i <= 10; i++) await win.mouse.move(600 + i * 8, 300 + i * 3);
   await win.mouse.up();
@@ -157,7 +156,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     Board.undo(); Board.undo();
     return { op, attr, attr2 };
   });
-  await win.click('#penOps button:nth-child(1)');
+  await win.evaluate(() => { Board.pen.op = 1; });
   await win.evaluate(() => Board.setTool('select'));
   expect('line opacity', opRes.op === 0.5 && opRes.attr === '0.5' && opRes.attr2 === '0.25', opRes);
   // A line drawn on a picture sticks to it: drag, scale, delete and undo carry it along
@@ -304,6 +303,31 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   // Top bar goes away when you switch to another app
   const topAway = await win.evaluate(async () => { document.body.classList.add('show-top', 'show-bottom'); window.dispatchEvent(new Event('blur')); await new Promise((r) => setTimeout(r, 700)); const r = !document.body.classList.contains('show-top') && !document.body.classList.contains('show-bottom'); window.dispatchEvent(new Event('focus')); return r; });
   expect('top and bottom bars hide when another app is in front', topAway, topAway);
+  // Colour picker: a disc above the colour button at the right end of the pen bar.
+  // Changes apply as you go, clicking away keeps it and adds it to Recent. Tip size is a slider.
+  await win.evaluate(() => Board.setTool('pen'));
+  await win.waitForSelector('#penBar:not([hidden])');
+  await win.click('#penColor');
+  await win.waitForSelector('#picker:not([hidden])');
+  const geo = await win.evaluate(() => { const p = document.querySelector('#picker').getBoundingClientRect(), b = document.querySelector('#penBar').getBoundingClientRect(), c = document.querySelector('#penColor').getBoundingClientRect(); return { pRight: p.right, bRight: b.right, pBottom: p.bottom, bTop: b.top, cRight: c.right, cx: c.left }; });
+  const disc = await win.evaluate(() => { const r = document.querySelector('#pkDisc').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, r: r.width / 2 }; });
+  // Pure blue sits at 240 degrees around the disc, right at the edge
+  await win.mouse.click(disc.x + Math.cos(240 * Math.PI / 180) * disc.r * 0.99, disc.y + Math.sin(240 * Math.PI / 180) * disc.r * 0.99);
+  await sleep(100);
+  const picked = await win.evaluate(() => ({ color: Board.pen.color, hex: document.querySelector('#pkHex').value, dot: document.querySelector('#penColorDot').style.background }));
+  await win.screenshot({ path: `${OUT}/03h-picker.png` });
+  await win.mouse.click(700, 300); // away: keeps it
+  await sleep(150);
+  const kept = await win.evaluate(() => ({ closed: document.querySelector('#picker').hidden, recent: JSON.parse(localStorage.getItem('penRecent') || '[]')[0] }));
+  await win.evaluate(() => Board.undo()); // the click away drew a dot
+  const sizeRes = await win.evaluate(() => { const sl = document.querySelector('#penSize'); sl.value = '18'; sl.dispatchEvent(new Event('input', { bubbles: true })); const r = { size: Board.pen.size, label: document.querySelector('#penSizeVal').textContent }; sl.value = '4'; sl.dispatchEvent(new Event('input', { bubbles: true })); return r; });
+  await win.evaluate(() => { Board.pen.color = '#D7F04A'; Board.setTool('select'); });
+  const rgb = /^#([0-9A-F]{2})([0-9A-F]{2})([0-9A-F]{2})$/.exec(picked.color || '') || [];
+  const blue = rgb.length && parseInt(rgb[3], 16) > 200 && parseInt(rgb[1], 16) < 40 && parseInt(rgb[2], 16) < 40;
+  expect('colour disc sits above the right end of the pen bar', Math.abs(geo.pRight - geo.bRight) < 12 && geo.pBottom < geo.bTop - 10, geo);
+  expect('colour disc picks the colour under the pointer', blue && picked.hex === picked.color.slice(1), picked);
+  expect('clicking away keeps the colour and adds it to Recent', kept.closed && kept.recent && kept.recent.c === picked.color, kept);
+  expect('tip size is a slider', sizeRes.size === 18 && sizeRes.label === '18 px', sizeRes);
   // A message never sits on the pen bar
   await win.evaluate(() => Board.setTool('pen'));
   await win.waitForSelector('#penBar:not([hidden])');
