@@ -147,6 +147,7 @@
     world.innerHTML = '';
     items.sort(function (a, b) { return (a.z || 0) - (b.z || 0); });
     items.forEach(function (it) {
+      if (it.type === 'comment') return;
       var node = el('div', 'item' + (it.gray ? ' gray' : ''));
       var d = dims(it);
       node.style.width = it.plain ? 'max-content' : d.w + 'px';

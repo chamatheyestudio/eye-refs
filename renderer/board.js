@@ -1,6 +1,6 @@
 // The canvas: items, selection, gestures, video playback, undo.
 (function () {
-  const { $, el, toast, openMenu, IS_MAC, fmtTime, modalOpen, menuOpen } = window.UI;
+  const { $, el, toast, openMenu, IS_MAC, fmtTime, modalOpen, menuOpen, initials } = window.UI;
   const api = window.eyerefs;
   const ZC = { l: 0, t: 0, r: 0, b: 0 };
   const SVGNS = 'http://www.w3.org/2000/svg';
@@ -78,7 +78,9 @@
     return isFinite(x0) ? { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } : null;
   }
 
-  const live = () => [...B.items.values()].filter((it) => !it.deleted && it.type);
+  // Comments live beside the board, not on it, so they're left out here
+  const live = () => [...B.items.values()].filter((it) => !it.deleted && it.type && it.type !== 'comment');
+  const comments = () => [...B.items.values()].filter((it) => !it.deleted && it.type === 'comment');
   const maxZ = () => live().reduce((m, it) => Math.max(m, it.z || 0), 0);
   const minZ = () => live().reduce((m, it) => Math.min(m, it.z || 0), 0);
   const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
@@ -307,7 +309,7 @@
     const seen = new Set();
     const mz = minZ();
     for (const it of B.items.values()) {
-      if (it.deleted || !it.type) continue;
+      if (it.deleted || !it.type || it.type === 'comment') continue;
       seen.add(it.id);
       const node = B.els.get(it.id) || makeEl(it);
       updateEl(node, it, mz);
@@ -322,6 +324,7 @@
       }
     }
     renderOverlay();
+    renderPins();
     B.onChange('items');
   }
 
@@ -369,6 +372,7 @@
     canvas.style.backgroundPosition = `${v.x}px ${v.y}px`;
     $('#zVal').textContent = Math.round(v.s * 100) + '%';
     if (B.onView) B.onView(v);
+    placeThread();
     renderOverlay();
     clearTimeout(viewTimer);
     viewTimer = setTimeout(() => {
@@ -602,6 +606,14 @@
     const hit = itemAt(e.clientX, e.clientY);
     if (B.tool === 'hand' || B.lockedCanvas || (e.altKey && !mod && !e.shiftKey) || (B.held.has(' ') && !hit)) {
       startGesture({ type: 'pan', v0: { ...B.view } }, e); canvas.classList.add('panning'); return;
+    }
+    if (B.tool === 'comment' && !B.held.has('z')) {
+      e.preventDefault();
+      if (!canEdit()) return;
+      const hit = itemAt(e.clientX, e.clientY);
+      const host = hit && B.items.get(hit);
+      startComment(host && host.type !== 'section' ? host : null, toWorld(e.clientX, e.clientY));
+      return;
     }
     if (B.tool === 'text' && !B.held.has('z')) {
       if (!canEdit()) return;
@@ -1743,9 +1755,10 @@
       const n = merged[id];
       if (B.items.has(id) || n.deleted || !n.type || !n.by || n.by === B.me.name || (n._dev && n._dev === B.me.deviceKey)) continue;
       if (!(n.created > B.openedAt - 5000)) continue;
-      const kind = n.type === 'image' ? 'picture' : n.type === 'video' ? 'video' : n.type === 'draw' ? 'line' : n.type === 'section' ? 'section' : n.plain ? 'text' : 'note';
+      const kind = n.type === 'image' ? 'picture' : n.type === 'video' ? 'video' : n.type === 'draw' ? 'line' : n.type === 'section' ? 'section' : n.type === 'comment' ? 'comment' : n.plain ? 'text' : 'note';
       const a = added[n.by] || (added[n.by] = {});
       a[kind] = (a[kind] || 0) + 1;
+      if (kind === 'comment') a._said = String(n.text || '').slice(0, 80);
     }
     B.items = new Map(Object.entries(merged));
     adoptLines();
@@ -1829,6 +1842,147 @@
     fitRect(bbox([id]), 40);
     renderOverlay();
   }
+
+  // ---------- comments ----------
+  // A comment is pinned to a spot on a picture and moves with it. Each message
+  // is its own record, so two people replying at once never lose a reply.
+  const pins = el('div', { id: 'pins' });
+  world.append(pins);
+  function toContent(host, p) {
+    const F = frameOf(host), dx = p.x - F.cx, dy = p.y - F.cy;
+    return { u: ((dx * Math.cos(F.a) + dy * Math.sin(F.a)) / F.W) * F.fx, v: ((-dx * Math.sin(F.a) + dy * Math.cos(F.a)) / F.W) * F.fy };
+  }
+  function fromContent(host, u, v) {
+    const F = frameOf(host), lx = u * F.W * F.fx, ly = v * F.W * F.fy;
+    return { x: F.cx + lx * Math.cos(F.a) - ly * Math.sin(F.a), y: F.cy + lx * Math.sin(F.a) + ly * Math.cos(F.a) };
+  }
+  function pinPoint(c) {
+    if (!c.on) return { x: c.x || 0, y: c.y || 0 };
+    const host = B.items.get(c.on);
+    if (!host || host.deleted) return null;
+    return fromContent(host, c.u || 0, c.v || 0);
+  }
+  const threadOf = (rootId) => comments().filter((c) => c.id === rootId || c.root === rootId).sort((a, b) => (a.at || 0) - (b.at || 0));
+  const roots = () => comments().filter((c) => !c.root);
+  let openRoot = null, draft = null;
+  function renderPins() {
+    pins.innerHTML = '';
+    if (!B.project) return;
+    for (const c of roots()) {
+      if (c.resolved && !B.showResolved && openRoot !== c.id) continue;
+      const p = pinPoint(c);
+      if (!p) continue;
+      const n = threadOf(c.id).length;
+      const pin = el('button', { class: 'cpin' + (c.resolved ? ' resolved' : '') + (openRoot === c.id ? ' open' : ''), 'data-id': c.id, title: `${c.by || 'Someone'}: ${String(c.text || '').slice(0, 80)}`, style: `transform: translate(${p.x}px, ${p.y}px) scale(var(--ls, 1))` },
+        el('span', { class: 'cpin-face', text: initials(c.by || '?') }), n > 1 ? el('span', { class: 'cpin-n', text: String(n) }) : null);
+      pin.addEventListener('pointerdown', (e) => e.stopPropagation());
+      pin.addEventListener('click', (e) => { e.stopPropagation(); openThread(c.id); });
+      pins.append(pin);
+    }
+    if (draft) {
+      const p = draft.on ? fromContent(B.items.get(draft.on), draft.u, draft.v) : { x: draft.x, y: draft.y };
+      pins.append(el('div', { class: 'cpin draft open', style: `transform: translate(${p.x}px, ${p.y}px) scale(var(--ls, 1))` }, el('span', { class: 'cpin-face', text: initials(B.me.name || '?') })));
+    }
+    drawThread();
+  }
+  function startComment(host, at) {
+    openRoot = null;
+    draft = host ? { on: host.id, ...toContent(host, at) } : { on: null, x: at.x, y: at.y };
+    renderPins();
+  }
+  function openThread(id) { draft = null; openRoot = id; renderPins(); }
+  function closeThread() { draft = null; openRoot = null; renderPins(); }
+  const thread = el('div', { id: 'thread', hidden: true });
+  document.body.append(thread);
+  thread.addEventListener('pointerdown', (e) => e.stopPropagation());
+  function placeThread() {
+    if (thread.hidden) return;
+    const c = draft || (openRoot && B.items.get(openRoot));
+    if (!c) return;
+    const p = draft ? (draft.on ? fromContent(B.items.get(draft.on), draft.u, draft.v) : { x: draft.x, y: draft.y }) : pinPoint(c);
+    if (!p) return;
+    const sp = toScreen(p.x, p.y);
+    const w = 300, h = thread.offsetHeight || 200;
+    let x = sp.x + 40, y = sp.y - 34;
+    if (x + w > innerWidth - 12) x = sp.x - w - 12;
+    y = Math.max(12, Math.min(innerHeight - h - 12, y));
+    thread.style.left = Math.max(12, x) + 'px';
+    thread.style.top = y + 'px';
+  }
+  function drawThread() {
+    if (!draft && !openRoot) { thread.hidden = true; thread.innerHTML = ''; return; }
+    const root = openRoot && B.items.get(openRoot);
+    if (openRoot && (!root || root.deleted)) { openRoot = null; thread.hidden = true; return; }
+    const keepText = thread.querySelector('textarea') ? thread.querySelector('textarea').value : '';
+    const hadFocus = thread.contains(document.activeElement);
+    thread.innerHTML = '';
+    thread.hidden = false;
+    const head = el('div', { class: 'th-head' });
+    if (root) {
+      const res = el('button', { class: 'th-btn', text: root.resolved ? 'Reopen' : 'Resolve', disabled: !canEdit(true) });
+      res.onclick = () => { const was = !!root.resolved; commit([{ id: root.id, fields: { resolved: !was } }]); if (!was) closeThread(); else renderPins(); };
+      head.append(el('span', { class: 'th-title', text: root.resolved ? 'Resolved' : 'Comment' }), res);
+    } else head.append(el('span', { class: 'th-title', text: 'New comment' }));
+    const x = el('button', { class: 'th-btn', 'aria-label': 'Close', text: 'Close' });
+    x.onclick = closeThread;
+    head.append(x);
+    thread.append(head);
+    if (root) {
+      const list = el('div', { class: 'th-list' });
+      for (const m of threadOf(root.id)) {
+        const mine = m.email && B.me.email ? m.email === B.me.email : m.by === B.me.name;
+        const row = el('div', { class: 'th-msg' },
+          el('span', { class: 'th-face', text: initials(m.by || '?') }),
+          el('div', { class: 'th-body' },
+            el('div', { class: 'th-meta' }, el('b', { text: m.by || 'Someone' }), el('span', { text: fmtAgo(m.at) })),
+            el('div', { class: 'th-text', text: m.text || '' })));
+        if (mine && canEdit(true)) {
+          const del = el('button', { class: 'th-del', text: 'Delete', 'aria-label': 'Delete this message' });
+          del.onclick = () => {
+            // Deleting the first message removes the whole thread
+            const ids = m.id === root.id ? threadOf(root.id).map((t) => t.id) : [m.id];
+            commit(ids.map((id) => ({ id, fields: { deleted: true } })));
+            if (m.id === root.id) closeThread();
+          };
+          row.append(del);
+        }
+        list.append(row);
+      }
+      thread.append(list);
+    }
+    if (canEdit(true)) {
+      const box = el('textarea', { class: 'th-input', rows: 2, placeholder: root ? 'Reply' : 'Say what you think', 'aria-label': root ? 'Reply' : 'Comment' });
+      box.value = keepText;
+      const send = el('button', { class: 'th-send', text: root ? 'Reply' : 'Comment' });
+      const post = () => {
+        const text = box.value.trim().slice(0, 2000);
+        if (!text) return;
+        box.value = '';
+        const id = uid();
+        const base = { type: 'comment', text, by: B.me.name || 'Someone', email: B.me.email || '', at: Date.now(), deleted: false, created: Date.now() };
+        if (root) commit([{ id, fields: { ...base, root: root.id } }]);
+        else { commit([{ id, fields: { ...base, root: null, on: draft.on, u: draft.u ?? null, v: draft.v ?? null, x: draft.x ?? null, y: draft.y ?? null, resolved: false } }]); draft = null; openRoot = id; if (B.tool === 'comment') setTool('select'); }
+        box.value = '';
+        renderPins();
+        const t = thread.querySelector('textarea'); if (t) t.focus();
+      };
+      send.onclick = post;
+      box.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); post(); } if (e.key === 'Escape') { e.preventDefault(); closeThread(); } });
+      thread.append(el('div', { class: 'th-compose' }, box, send));
+      if (hadFocus || !root) setTimeout(() => { if (document.activeElement !== box) box.focus(); }, 0);
+    }
+    placeThread();
+  }
+  function fmtAgo(t) {
+    const m = Math.floor((Date.now() - (t || 0)) / 60000);
+    if (m < 1) return 'now';
+    if (m < 60) return `${m}m`;
+    const h = Math.floor(m / 60);
+    if (h < 24) return `${h}h`;
+    return new Date(t).toLocaleDateString([], { day: 'numeric', month: 'short' });
+  }
+  function setShowResolved(on) { B.showResolved = !!on; renderPins(); }
+  function commentCount() { return roots().filter((c) => !c.resolved).length; }
 
   // ---------- saved versions ----------
   function versionItems() {
@@ -2049,6 +2203,7 @@
           { label: 'Export as picture', onClick: () => exportAs('png', true) },
           { label: 'Export as PDF', onClick: () => exportAs('pdf', true) },
         ] },
+        ...(one && one.type !== 'section' ? [{ label: 'Comment here', onClick: () => startComment(one, at), disabled: !ed }] : []),
         ...(one && one.type === 'section' ? [{ label: 'Rename section', onClick: () => editSectionTitle(one.id), disabled: !ed }] : [{ label: 'Make a section', onClick: sectionFromSelection, disabled: !ed }]),
         { label: 'Locked', key: 'Alt+L', checked: ids.every((id) => B.items.get(id).locked), onClick: () => toggleField('locked'), disabled: !ed },
         { label: 'Delete', key: 'Delete', onClick: deleteSelection, disabled: !ed },
@@ -2101,6 +2256,7 @@
     for (const node of B.els.values()) { const vv = node.querySelector('video'); if (vv) { vv.pause(); vv.removeAttribute('src'); vv.load(); } node.remove(); }
     B.els.clear(); B.items.clear(); B.sel.clear();
     B.project = null; B.editingId = null; B.gesture = null; B.pendingRemote = null; B.hoverId = null;
+    draft = null; openRoot = null; thread.hidden = true; thread.innerHTML = ''; pins.innerHTML = '';
     clearTimeout(pasteTimer);
     canvas.classList.remove('panning');
     marquee.hidden = true;
@@ -2113,18 +2269,19 @@
     canvas.classList.toggle('tool-pen', t === 'pen');
     canvas.classList.toggle('tool-eraser', t === 'eraser');
     canvas.classList.toggle('tool-text', t === 'text');
-    if (t === 'pen' || t === 'eraser' || t === 'text') { if (B.editingId) stopEditing(); clearSel(); }
+    canvas.classList.toggle('tool-comment', t === 'comment');
+    if (t === 'pen' || t === 'eraser' || t === 'text' || t === 'comment') { if (B.editingId) stopEditing(); clearSel(); }
     B.onChange('tool');
   }
   function setGrid(on) { B.grid = on; canvas.classList.toggle('grid', on); }
   function setGrayCanvas(on) { B.grayCanvas = on; world.classList.toggle('gray', on); }
   function setLockedCanvas(on) { B.lockedCanvas = on; B.onChange('lock'); }
 
-  function binItems() { return [...B.items.values()].filter((it) => it.deleted && it.type).sort((a, b) => (b._t || 0) - (a._t || 0)); }
+  function binItems() { return [...B.items.values()].filter((it) => it.deleted && it.type && it.type !== 'comment').sort((a, b) => (b._t || 0) - (a._t || 0)); }
   function restore(ids) { commit(ids.map((id) => ({ id, fields: { deleted: false } }))); B.sel = new Set(ids); renderOverlay(); }
 
   Object.assign(B, {
-    versionItems, restoreVersion, addSection, sectionFromSelection, sections, goToSection, editSectionTitle, addSocial, addText, restyle, restyleDone, getPalette, addPaletteStrip, renderExport, exportAs, load, unload, applyRemote, render, applyView, zoomAt, fitRect, toWorld, toScreen,
+    startComment, openThread, closeThread, setShowResolved, commentCount, comments, versionItems, restoreVersion, addSection, sectionFromSelection, sections, goToSection, editSectionTitle, addSocial, addText, restyle, restyleDone, getPalette, addPaletteStrip, renderExport, exportAs, load, unload, applyRemote, render, applyView, zoomAt, fitRect, toWorld, toScreen,
     commit, undo, redo, addPaths, addBytes, addUrl, addNote, editNote, stopEditing,
     copySelection, pasteInternal, pasteNative, pasteKey, deleteSelection, duplicate, toggleField, resetCrop, resetTransform, front, back,
     align, normalize, arrange, focusSelection, focusAll, focusStep, selectAll, clearSel, selIds,

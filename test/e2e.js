@@ -543,6 +543,39 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     return { snap, after, list, undone, opened };
   })();
   expect('a saved version brings the board back, and undo returns to before', Math.abs(verRes.after.x - verRes.snap.x) < 0.5 && !verRes.after.note && verRes.after.count === verRes.snap.count && verRes.list.includes('Before feedback') && verRes.list.some((n) => n.startsWith('Before restoring')) && verRes.undone.note && Math.abs(verRes.undone.x - verRes.snap.x - 500) < 0.5, verRes);
+  // Comments: pin one on a picture, reply, it moves with the picture, resolve hides it
+  const cm = await (async () => {
+    const host = await win.evaluate(() => { const it = Board.live().filter((x) => x.type === 'image').sort((a, b) => b.w - a.w)[0]; const r = Board.toScreen(it.x + it.w * 0.3, it.y + it.w * 0.2); return { id: it.id, sx: r.x, sy: r.y, x: it.x }; });
+    await win.click('#toolbar [data-tool="comment"]');
+    await win.mouse.click(host.sx, host.sy);
+    await win.waitForSelector('#thread:not([hidden]) textarea');
+    await win.keyboard.type('Warmer grade, like this');
+    await win.keyboard.press('Enter');
+    await sleep(200);
+    await win.keyboard.type('Agreed');
+    await win.keyboard.press('Enter');
+    await sleep(200);
+    await win.screenshot({ path: `${OUT}/03n-comment.png` });
+    const st = await win.evaluate((hid) => {
+      const roots = Board.comments().filter((c) => !c.root && c.on === hid);
+      const root = roots[roots.length - 1];
+      const pin = document.querySelector(`.cpin[data-id="${root.id}"]`);
+      const p0 = pin.style.transform;
+      const h = Board.items.get(hid);
+      Board.commit([{ id: hid, fields: { x: h.x + 300 } }]);
+      const p1 = document.querySelector(`.cpin[data-id="${root.id}"]`).style.transform;
+      Board.undo();
+      const msgs = document.querySelectorAll('#thread .th-msg').length;
+      const reply = [...document.querySelectorAll('#thread .th-text')].map((n) => n.textContent)[1];
+      const box = document.querySelector('#thread textarea').value;
+      return { root: root.id, text: root.text, msgs, reply, box, moved: p0 !== p1, tool: Board.tool, inLive: Board.live().some((x) => x.type === 'comment') };
+    }, host.id);
+    await win.click('#thread .th-btn:text("Resolve")');
+    await sleep(150);
+    const hidden = await win.evaluate((id) => !document.querySelector(`.cpin[data-id="${id}"]`) && document.querySelector('#thread').hidden, st.root);
+    return { ...st, hidden };
+  })();
+  expect('comments pin to a picture, take replies, move with it, and resolve', cm.text === 'Warmer grade, like this' && cm.msgs === 2 && cm.reply === 'Agreed' && cm.box === '' && cm.moved && cm.tool === 'select' && !cm.inLive && cm.hidden, cm);
   // A message never sits on the pen bar
   await win.evaluate(() => Board.setTool('pen'));
   await win.waitForSelector('#penBar:not([hidden])');
@@ -694,6 +727,13 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await win.waitForFunction(() => (window.__toasts2 || []).some((t) => /Nousaiba added/.test(t)), null, { timeout: 40000 }).catch(() => {});
   const told = await win.evaluate(() => window.__toasts2);
   expect('teammate additions are announced on the board', told.some((t) => t === 'Nousaiba added a note and a line'), told);
+  // She leaves a comment: you're told what she said
+  await win.evaluate(() => { window.__toasts2 = []; });
+  sB.write([{ id: 'nb-c1', fields: { type: 'comment', root: null, on: null, x: 0, y: -400, text: 'Love the light here', by: 'Nousaiba', email: 'nousaiba@eyestudio.ae', at: Date.now(), created: Date.now(), deleted: false, resolved: false } }]);
+  await sB.flush(); await syncB.tick();
+  await win.waitForFunction(() => (window.__toasts2 || []).some((t) => /commented/.test(t)), null, { timeout: 40000 }).catch(() => {});
+  const told3 = await win.evaluate(() => ({ toasts: window.__toasts2, pin: !!document.querySelector('.cpin[data-id="nb-c1"]') }));
+  expect('a teammate comment is announced and pinned', told3.toasts.includes('Nousaiba commented: "Love the light here"') && told3.pin, told3);
   // She shares a new board with you: you're told
   gas.call({ action: 'projects.create', token: tB, id: 'nousaiba-board-0001', name: 'Brunch Edit' });
   gas.call({ action: 'projects.invite', token: tB, id: 'nousaiba-board-0001', emails: ['chamath@eyestudio.ae'] });

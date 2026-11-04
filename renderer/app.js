@@ -708,6 +708,7 @@
       ] },
       { label: 'View', sub: [
         { label: 'Fit everything', key: 'Mod+Space', onClick: () => B.focusAll() },
+        { label: 'Show resolved comments', checked: !!B.showResolved, onClick: () => B.setShowResolved(!B.showResolved) },
         ...(B.sections().length ? [{ label: 'Sections', sub: B.sections().map((sec) => ({ label: sec.title || 'Section', onClick: () => B.goToSection(sec.id) })) }] : []),
         { label: 'Reset zoom', key: 'Mod+0', onClick: () => resetZoom() },
         { label: 'Zoom in', key: 'Mod+Equal', onClick: () => B.zoomAt(innerWidth / 2, innerHeight / 2, 1.25) },
@@ -956,8 +957,9 @@
 
   // "Neal added 2 pictures and a line"
   function addedText(by, a) {
-    const word = { section: ['a section', 'sections'], picture: ['a picture', 'pictures'], video: ['a video', 'videos'], line: ['a line', 'lines'], note: ['a note', 'notes'], text: ['some text', 'text'] };
-    const parts = Object.keys(a).map((k) => (a[k] === 1 ? word[k][0] : `${a[k]} ${word[k][1]}`));
+    if (a.comment && Object.keys(a).filter((k) => k !== '_said').length === 1) return a.comment === 1 && a._said ? `${by} commented: "${a._said}"` : `${by} left ${a.comment} comments`;
+    const word = { comment: ['a comment', 'comments'], section: ['a section', 'sections'], picture: ['a picture', 'pictures'], video: ['a video', 'videos'], line: ['a line', 'lines'], note: ['a note', 'notes'], text: ['some text', 'text'] };
+    const parts = Object.keys(a).filter((k) => k !== '_said').map((k) => (a[k] === 1 ? word[k][0] : `${a[k]} ${word[k][1]}`));
     const list = parts.length > 1 ? parts.slice(0, -1).join(', ') + ' and ' + parts[parts.length - 1] : parts[0];
     return `${by} added ${list}`;
   }
@@ -965,7 +967,7 @@
   B.onChange = (what, data) => {
     if (what === 'added') {
       // Gathered for a moment, so a big drop is one message, not twenty
-      for (const by in data) { const a = addedBuf[by] || (addedBuf[by] = {}); for (const k in data[by]) a[k] = (a[k] || 0) + data[by][k]; }
+      for (const by in data) { const a = addedBuf[by] || (addedBuf[by] = {}); for (const k in data[by]) { if (k === '_said') a._said = data[by][k]; else a[k] = (a[k] || 0) + data[by][k]; } }
       clearTimeout(addedTimer);
       addedTimer = setTimeout(() => {
         const name = S.current ? S.current.name : 'the board';
