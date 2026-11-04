@@ -4,6 +4,7 @@ const path = require('path');
 const fsp = require('fs').promises;
 const { pathToFileURL } = require('url');
 const { readJson, writeJson, exists } = require('./fsutil');
+const { mergeFiles } = require('../shared/merge');
 const lib = require('./library');
 const media = require('./media');
 const { Session } = require('./session');
@@ -113,24 +114,70 @@ function prefs() {
   };
 }
 
+// What is on a board, read straight from its files: live pieces, when it last
+// changed, and a small layout for the start screen thumbnail.
+async function boardSummary(dir) {
+  const files = [];
+  let modified = 0;
+  for (const f of await fsp.readdir(path.join(dir, 'changes')).catch(() => [])) {
+    if (!f.endsWith('.json')) continue;
+    const fp = path.join(dir, 'changes', f);
+    const data = await readJson(fp);
+    if (data) files.push(data);
+    try { modified = Math.max(modified, (await fsp.stat(fp)).mtimeMs); } catch (_) {}
+  }
+  const live = Object.values(mergeFiles(files)).filter((it) => !it.deleted && it.type && Number.isFinite(it.x) && Number.isFinite(it.w));
+  return { count: live.length, modified, live };
+}
+
 // Untitled boards left empty from earlier sessions are tidied away at start,
 // so the list never fills up with blank ones. Anything with content stays.
 async function clearEmptyUntitled() {
   for (const p of await lib.scanProjects(SCRATCH(), me)) {
     if (session && session.rec.id === p.id) continue;
+    if (importing.has(p.id)) continue;
     try {
-      if (!(await noMedia(p.dir))) continue;
-      let hasItems = false;
-      for (const f of await fsp.readdir(path.join(p.dir, 'changes'))) {
-        const data = await readJson(path.join(p.dir, 'changes', f));
-        if (data && data.items && Object.keys(data.items).length) { hasItems = true; break; }
-      }
-      if (!hasItems) await fsp.rm(p.dir, { recursive: true, force: true });
+      if ((await boardSummary(p.dir)).count === 0) await fsp.rm(p.dir, { recursive: true, force: true });
     } catch (_) {}
   }
 }
 
+// Start screen, like PureRef: the latest boards with a small picture of each
+async function recentBoards() {
+  const out = [];
+  const seen = new Set();
+  for (const p of [...await lib.scanProjects(ROOT(), me), ...(await lib.scanProjects(SCRATCH(), me)).map((p) => ({ ...p, scratch: true }))]) {
+    if (seen.has(p.id) || (session && session.rec.id === p.id)) continue;
+    seen.add(p.id);
+    const sum = await boardSummary(p.dir);
+    if (!sum.count) continue;
+    const media = pathToFileURL(path.join(p.dir, 'media')).href + '/';
+    const shapes = sum.live
+      .sort((a, b) => (a.z || 0) - (b.z || 0))
+      .slice(-40)
+      .map((it) => {
+        const c = it.crop || { l: 0, r: 0, t: 0, b: 0 };
+        const vw = Math.max(1, (it.nw || it.w) * (1 - c.l - c.r)), vh = Math.max(1, (it.nh || it.w) * (1 - c.t - c.b));
+        const h = it.type === 'note' ? (it.fs || 16) * 3 : it.w * vh / vw;
+        return { type: it.type, x: it.x, y: it.y, w: it.w, h, src: it.type === 'image' && it.src ? media + encodeURIComponent(it.src) : null, color: it.color || null };
+      });
+    out.push({ id: p.id, name: p.name, scratch: !!p.scratch, modified: sum.modified, shapes });
+  }
+  out.sort((a, b) => b.modified - a.modified);
+  return out.slice(0, 8);
+}
+
 let resumeProject = null;
+let quitAsked = false;
+
+// The answer to "Save this board?" when closing: close now, keeping or dropping it
+handle('app:quitNow', async (opts) => {
+  quitAsked = true;
+  const drop = opts && opts.discard && session && session.rec.scratch ? session.rec : null;
+  if (drop) { await serial(closeCurrent); try { await fsp.rm(drop.dir, { recursive: true, force: true }); } catch (_) {} }
+  if (win) win.close();
+  return { ok: true };
+});
 
 // Local projects plus shared boards not yet on this computer
 async function allProjects(online = true) {
@@ -308,6 +355,16 @@ handle('auth:signout', async () => {
 });
 
 handle('projects:scan', async () => ({ projects: await allProjects(true) }));
+handle('projects:recent', async () => ({ boards: await recentBoards() }));
+
+// Throw away an untitled board that isn't open (the "Don't save" choice)
+handle('projects:discard', (id) => serial(async () => {
+  if (session && session.rec.id === id) return { error: 'That board is open.' };
+  const p = (await lib.scanProjects(SCRATCH(), me)).find((x) => x.id === id);
+  if (!p || importing.has(id)) return { ok: false };
+  await fsp.rm(p.dir, { recursive: true, force: true });
+  return { ok: true };
+}));
 
 handle('projects:create', (name) => serial(async () => {
   if (!name || !name.trim()) return { error: 'Give the project a name.' };
@@ -676,6 +733,11 @@ function createWindow(bounds, opts = {}) {
     if (thisWin.__rebuilding || win !== thisWin) return;
     if (closing || (!session && !sync)) return;
     e.preventDefault();
+    // An untitled board with something on it: ask first, like PureRef
+    if (!quitAsked && session && session.rec.scratch && !isEmpty(session) && !importing.has(session.rec.id)) {
+      send('ask-save-quit');
+      return;
+    }
     closing = true;
     await closeCurrent();
     win.close();

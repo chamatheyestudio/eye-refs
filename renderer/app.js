@@ -161,6 +161,7 @@
     B.load(res);
     syncChrome();
     renderSidebar();
+    renderStart();
   }
 
   // Only the newest refresh counts. An older one that comes back late (the server
@@ -216,7 +217,7 @@
         pr.addEventListener('click', () => {
           if (pr.querySelector('[contenteditable]')) return;
           clearTimeout(clickTimer);
-          clickTimer = setTimeout(async () => { if (!S.current || S.current.id !== p.id) openResult(await api.openProject(p.id)); }, 230);
+          clickTimer = setTimeout(() => { if (!S.current || S.current.id !== p.id) switchTo(p.id); }, 230);
         });
         pr.addEventListener('dblclick', (e) => {
           clearTimeout(clickTimer);
@@ -687,21 +688,91 @@
   });
 
   // ---------- dialogs ----------
-  // PureRef style: start on a blank untitled board, name it when saving
-  async function newBoard() {
-    if (S.current && S.current.scratch && B.live().length) {
-      return openModal((close) => [
-        el('h2', { text: 'Save this board?' }),
-        el('p', { text: "It isn't saved yet. If you don't save it, it's gone." }),
-        el('div', { class: 'actions' },
-          el('button', { class: 'btn ghost', text: "Don't save", onclick: async () => { close(); openResult(await api.newBoard({ discard: true })); rescan(); } }),
-          el('button', { class: 'btn ghost', text: 'Cancel', onclick: close }),
-          el('button', { class: 'btn', text: 'Save', onclick: () => { close(); saveModal(async () => { openResult(await api.newBoard()); rescan(); }); } })),
-      ]);
-    }
-    openResult(await api.newBoard());
-    rescan();
+  // PureRef style: start on a blank untitled board, name it when saving.
+  // Leaving an untitled board with something on it always asks first, so
+  // unsaved boards never pile up.
+  function confirmLeave(go) {
+    const cur = S.current;
+    if (!(cur && cur.scratch && B.live().length && !S.readOnly)) return go();
+    openModal((close) => [
+      el('h2', { text: 'Save this board?' }),
+      el('p', { text: "It isn't saved yet. If you don't save it, it's gone." }),
+      el('div', { class: 'actions' },
+        el('button', { class: 'btn ghost', text: "Don't save", onclick: async () => { close(); await go(true); await api.discardBoard(cur.id); rescan(); renderStart(); } }),
+        el('button', { class: 'btn ghost', text: 'Cancel', onclick: close }),
+        el('button', { class: 'btn', text: 'Save', onclick: () => { close(); saveModal(() => go()); } })),
+    ]);
   }
+
+  function switchTo(id) {
+    return confirmLeave(async () => { openResult(await api.openProject(id)); });
+  }
+
+  async function newBoard() {
+    if (S.current && S.current.scratch && !B.live().length) return; // already on a fresh board
+    return confirmLeave(async () => { openResult(await api.newBoard()); rescan(); });
+  }
+
+  // Closing the app with an untitled board that has something on it
+  api.onAskSaveQuit(() => {
+    if (modalOpen()) closeModal();
+    openModal((close) => [
+      el('h2', { text: 'Save this board before closing?' }),
+      el('p', { text: "It isn't saved yet. If you don't save it, it's gone." }),
+      el('div', { class: 'actions' },
+        el('button', { class: 'btn ghost', text: "Don't save", onclick: () => { close(); api.quitNow({ discard: true }); } }),
+        el('button', { class: 'btn ghost', text: 'Cancel', onclick: close }),
+        el('button', { class: 'btn', text: 'Save', onclick: () => { close(); saveModal(() => api.quitNow()); } })),
+    ]);
+  });
+
+  // ---------- start screen ----------
+  function ago(t) {
+    const m = Math.round((Date.now() - t) / 60000);
+    if (m < 1) return 'Edited just now';
+    if (m < 60) return `Edited ${m} min ago`;
+    const h = Math.round(m / 60);
+    if (h < 24) return `Edited ${h} hour${h === 1 ? '' : 's'} ago`;
+    const d = Math.round(h / 24);
+    return `Edited ${d} day${d === 1 ? '' : 's'} ago`;
+  }
+  function miniBoard(shapes) {
+    const box = el('div', { class: 'thumb' });
+    if (!shapes.length) return box;
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const q of shapes) { x0 = Math.min(x0, q.x); y0 = Math.min(y0, q.y); x1 = Math.max(x1, q.x + q.w); y1 = Math.max(y1, q.y + q.h); }
+    const W = 160, H = 120, pad = 10;
+    const k = Math.min((W - pad * 2) / Math.max(1, x1 - x0), (H - pad * 2) / Math.max(1, y1 - y0));
+    const ox = (W - (x1 - x0) * k) / 2, oy = (H - (y1 - y0) * k) / 2;
+    for (const q of shapes) {
+      const st = `left:${((q.x - x0) * k + ox) / W * 100}%;top:${((q.y - y0) * k + oy) / H * 100}%;width:${Math.max(2, q.w * k) / W * 100}%;height:${Math.max(2, q.h * k) / H * 100}%`;
+      if (q.src) box.append(el('img', { src: q.src, alt: '', loading: 'lazy', style: st }));
+      else if (q.type !== 'draw') box.append(el('span', { class: 'blk', style: st }));
+    }
+    return box;
+  }
+  let startGen = 0;
+  async function renderStart() {
+    const show = !!(S.current && S.current.scratch && !S.readOnly);
+    $('#start').hidden = !show;
+    if (!show) return;
+    const g = ++startGen;
+    const r = await api.recent();
+    if (g !== startGen || !r || r.error) return;
+    const cards = $('#startCards');
+    cards.innerHTML = '';
+    for (const b of r.boards) {
+      const c = el('button', { class: 'start-card', title: b.name },
+        miniBoard(b.shapes),
+        el('span', { class: 'nm', text: b.name }),
+        el('span', { class: 'when', text: b.scratch ? 'Not saved' : ago(b.modified) }));
+      c.onclick = () => switchTo(b.id);
+      cards.append(c);
+    }
+    $('#startRecent').hidden = !r.boards.length;
+  }
+  $('#startBrowse').onclick = () => setSidebar(true);
+  $('#startOpen').onclick = async () => { const f = await api.openFileDialog(); if (f) confirmLeave(async () => openResult(await api.openProjectFile(f))); };
 
   function saveModal(then) {
     if (!S.current || !S.current.scratch) return;
@@ -986,7 +1057,7 @@
     'Mod+I': addDialog,
     'Mod+K': () => newBoard(),
     'Mod+L': () => openFile(),
-    'Mod+Shift+L': async () => { const last = S.projects.find((p) => !p.scratch && (!S.current || p.id !== S.current.id)); if (last) openResult(await api.openProject(last.id)); },
+    'Mod+Shift+L': () => { const last = S.projects.find((p) => !p.scratch && (!S.current || p.id !== S.current.id)); if (last) switchTo(last.id); },
     'Mod+Shift+S': () => packCurrent(),
     'Mod+U': () => openSettings(),
     'Mod+Shift+P': focusSearch,

@@ -37,6 +37,17 @@
     const t = $('#toast');
     t.textContent = msg;
     t.classList.toggle('error', !!isError);
+    // Sit just above whichever bars are showing at the bottom, never on top of them
+    let top = window.innerHeight - 16;
+    for (const id of ['toolbar', 'penBar', 'videoBar', 'zoom']) {
+      const b = document.getElementById(id);
+      if (!b || b.hidden) continue;
+      const cs = getComputedStyle(b);
+      if (cs.visibility === 'hidden' || cs.display === 'none' || Number(cs.opacity) < 0.5) continue;
+      const r = b.getBoundingClientRect();
+      if (r.height && r.top > window.innerHeight / 2) top = Math.min(top, r.top);
+    }
+    t.style.bottom = Math.max(16, window.innerHeight - top + 12) + 'px';
     t.classList.add('show');
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => t.classList.remove('show'), isError ? 5000 : 2600);
