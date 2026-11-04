@@ -1229,6 +1229,9 @@
     if (paths.length) await addPaths(paths, at);
     if (blobs.length) await addBytes(blobs, at);
     if (!files.length) {
+      // A link dragged from the browser's address bar or a post
+      const link = (e.dataTransfer.getData('text/uri-list') || '').split('\n').map((l) => l.trim()).find((l) => /^https?:/.test(l)) || (e.dataTransfer.getData('text/plain') || '').trim();
+      if (isSocial(link)) return addSocial(link, at);
       const html = e.dataTransfer.getData('text/html');
       const m = html && /<img[^>]+src="([^"]+)"/i.exec(html);
       const url = (m && m[1]) || (e.dataTransfer.getData('text/uri-list') || '').split('\n').find((l) => /^https?:/.test(l));
@@ -1311,6 +1314,77 @@
     }
   }
   const IMAGE_LINK = /^https?:\/\/\S+\.(png|jpe?g|gif|webp|avif|heic|mp4|webm|mov)(\?\S*)?$/i;
+  // Social posts and videos: Pluck fetches these
+  const SOCIAL_LINK = /^https?:\/\/(?:[a-z0-9-]+\.)*(?:instagram\.com|instagr\.am|tiktok\.com|youtube\.com|youtu\.be|x\.com|twitter\.com|facebook\.com|fb\.watch|vimeo\.com|reddit\.com|redd\.it|pinterest\.[a-z.]+|pin\.it|threads\.net|threads\.com|linkedin\.com|snapchat\.com|twitch\.tv|dailymotion\.com|dai\.ly|tumblr\.com|bsky\.app|imgur\.com|flickr\.com)\/\S*$/i;
+
+  // ---------- links through Pluck ----------
+  // A card sits where the video will land, with a preview and progress, until
+  // Pluck hands the files over. Then they go on the board like a normal drop.
+  const fetchCards = new Map();
+  api.onPluck((p) => {
+    const c = fetchCards.get(p.key);
+    if (!c) return;
+    c.token = p.token || c.token;
+    if (p.title) c.node.querySelector('.fc-title').textContent = p.title;
+    if (p.platform) c.node.querySelector('.fc-from').textContent = p.platform;
+    if (p.thumb && !c.node.querySelector('.fc-thumb img')) c.node.querySelector('.fc-thumb').append(el('img', { src: p.thumb, alt: '' }));
+    const many = p.items > 1 ? ` (${p.item || 1} of ${p.items})` : '';
+    c.node.querySelector('.fc-phase').textContent = (p.phase || 'Getting it') + many;
+    const bar = c.node.querySelector('.fc-bar i');
+    bar.style.width = Math.max(4, Math.min(100, p.pct || 0)) + '%';
+    c.node.classList.toggle('waiting', !(p.pct > 0));
+  });
+  async function addSocial(url, at) {
+    if (!canEdit()) return;
+    const p = at || viewCenter();
+    const pid = boardId();
+    const key = uid();
+    const s = 1 / B.view.s;
+    const node = el('div', { class: 'fetch-card waiting', style: `transform: translate(${p.x}px, ${p.y}px) scale(${s}) translate(-50%, -50%)` },
+      el('div', { class: 'fc-thumb' }),
+      el('div', { class: 'fc-body' },
+        el('div', { class: 'fc-from', text: 'Pluck' }),
+        el('div', { class: 'fc-title', text: url.replace(/^https?:\/\/(www\.)?/, '').slice(0, 60) }),
+        el('div', { class: 'fc-phase', text: 'Looking at the link' }),
+        el('div', { class: 'fc-bar' }, el('i')),
+        el('div', { class: 'fc-actions' })));
+    world.append(node);
+    const card = { node, token: null };
+    fetchCards.set(key, card);
+    const actions = node.querySelector('.fc-actions');
+    const close = () => { fetchCards.delete(key); node.remove(); };
+    const cancelBtn = el('button', { class: 'fc-btn', text: 'Cancel' });
+    cancelBtn.onclick = () => { if (card.token) api.pluckCancel(card.token); close(); };
+    actions.append(cancelBtn);
+    const r = await api.pluckFetch(pid, url, key);
+    if (!fetchCards.has(key)) { if (r && r.token) api.pluckCleanup(r.token); return; }
+    if (r && r.files && r.files.length && !leftBoard(pid)) {
+      close();
+      await addPaths(r.files, p);
+      api.pluckCleanup(r.token);
+      return;
+    }
+    if (r && r.token) api.pluckCleanup(r.token);
+    if (r && r.canceled) return close();
+    node.classList.remove('waiting');
+    node.classList.add('failed');
+    actions.innerHTML = '';
+    if (r && r.missing) {
+      node.querySelector('.fc-phase').textContent = "Pluck isn't on this computer yet. Get it once, then paste the link again.";
+      const get = el('button', { class: 'fc-btn primary', text: 'Get Pluck' });
+      get.onclick = () => api.pluckGet();
+      actions.append(get);
+    } else {
+      node.querySelector('.fc-phase').textContent = (r && r.error) || "Couldn't get that one.";
+      const again = el('button', { class: 'fc-btn primary', text: 'Try again' });
+      again.onclick = () => { close(); addSocial(url, p); };
+      actions.append(again);
+    }
+    const x = el('button', { class: 'fc-btn', text: 'Close' });
+    x.onclick = close;
+    actions.append(x);
+  }
+  const isSocial = (t) => SOCIAL_LINK.test(String(t || '').trim()) && !IMAGE_LINK.test(String(t || '').trim());
   let pasteTimer = null;
   async function pasteNative(at) {
     if (!B.project || !canEdit()) return;
@@ -1318,10 +1392,12 @@
     if (!c || c.error) return;
     if (B.clipMarker && c.text === B.clipMarker) return pasteInternal(at);
     if (c.files && c.files.length) return addPaths(c.files, at);
+    if (isSocial((c.text || '').trim())) return addSocial(c.text.trim(), at);
     const srcs = imgSources(c.html);
     if (srcs.length) return pasteSources(srcs, at);
     if (c.png) return addBytes([new File([c.png], 'pasted.png', { type: 'image/png' })], at);
     const text = (c.text || '').trim();
+    if (isSocial(text)) return addSocial(text, at);
     if (IMAGE_LINK.test(text)) return addUrl(text, at);
     if (text) addNote(at, text);
   }
@@ -1349,6 +1425,7 @@
       if (blobs.length) await addBytes(blobs, at);
       return;
     }
+    if (isSocial(text)) return addSocial(text.trim(), at);
     const srcs = imgSources(cd.getData('text/html'));
     if (srcs.length) return pasteSources(srcs, at);
     // Nothing the page can read (a picture from another app, a copied file): ask the system
@@ -1923,7 +2000,7 @@
   function restore(ids) { commit(ids.map((id) => ({ id, fields: { deleted: false } }))); B.sel = new Set(ids); renderOverlay(); }
 
   Object.assign(B, {
-    addText, restyle, restyleDone, getPalette, addPaletteStrip, renderExport, exportAs, load, unload, applyRemote, render, applyView, zoomAt, fitRect, toWorld, toScreen,
+    addSocial, addText, restyle, restyleDone, getPalette, addPaletteStrip, renderExport, exportAs, load, unload, applyRemote, render, applyView, zoomAt, fitRect, toWorld, toScreen,
     commit, undo, redo, addPaths, addBytes, addUrl, addNote, editNote, stopEditing,
     copySelection, pasteInternal, pasteNative, pasteKey, deleteSelection, duplicate, toggleField, resetCrop, resetTransform, front, back,
     align, normalize, arrange, focusSelection, focusAll, focusStep, selectAll, clearSel, selIds,

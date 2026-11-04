@@ -7,6 +7,7 @@ const { readJson, writeJson, exists } = require('./fsutil');
 const { mergeFiles } = require('../shared/merge');
 const lib = require('./library');
 const media = require('./media');
+const pluck = require('./pluck');
 const { Session } = require('./session');
 const { Cloud } = require('./cloud');
 const { Sync } = require('./sync');
@@ -673,6 +674,15 @@ handle('media:state', async (projectId, src) => {
   if (sync && sync.isDownloading(name)) return 'downloading';
   return 'missing';
 });
+
+// Social links through Pluck: progress goes to the page as it comes in
+handle('pluck:fetch', async (projectId, url, key) => {
+  if (!session || session.rec.id !== projectId) return { error: 'Open the board first.' };
+  return pluck.fetchLink(String(url || ''), (p) => send('pluck:progress', { ...p, key }));
+});
+handle('pluck:cancel', (token) => { pluck.cancel(String(token || '')); return true; });
+handle('pluck:cleanup', async (token) => { await pluck.cleanup(String(token || '')); return true; });
+handle('pluck:get', () => { shell.openExternal(pluck.GET_PLUCK); return true; });
 
 // Media as bytes for an export (a video gives the frame showing now)
 handle('media:bytes', async (projectId, src, time, kind) => {

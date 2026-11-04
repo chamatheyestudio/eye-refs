@@ -432,6 +432,69 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     return { ...info, files, pngBytes: png ? fs.statSync(path.join(dir, png)).size : 0, pdfHead };
   })();
   expect('export makes a sharp picture and a PDF of the board', exp.w > exp.screenW && exp.pngBytes > 50000 && exp.pdfHead.startsWith('%PDF-1.4'), exp);
+  // Social links through Pluck: a stand in for Pluck's engine answers on its port
+  const pluckRes = await (async () => {
+    const http = require('http');
+    const { execFileSync } = require('child_process');
+    const jobsP = new Map();
+    let mode = 'ok';
+    const srv = http.createServer((req, res) => {
+      let body = '';
+      req.on('data', (d) => (body += d));
+      req.on('end', () => {
+        const send = (o, st = 200) => { res.writeHead(st, { 'content-type': 'application/json' }); res.end(JSON.stringify(o)); };
+        if (req.headers.host !== '127.0.0.1:47821') return send({ error: 'no' }, 403);
+        if (req.url === '/api/state') return send({ jobs: [...jobsP.values()] });
+        if (req.headers['x-pluck'] !== '1') return send({ error: 'no' }, 403);
+        const b = JSON.parse(body || '{}');
+        if (req.url === '/api/probe') {
+          if (mode === 'private') return send({ error: "This post is private, so Pluck can't see it." }, 400);
+          return send({ kind: 'video', title: 'Brunch reel', thumb: '', platform: { name: 'Instagram' }, items: [{ i: 0, type: 'video' }] });
+        }
+        if (req.url === '/api/download') {
+          const id = 'j' + jobsP.size;
+          const out = require('path').join(b.dir, 'Brunch reel.mp4');
+          const j = { id, status: 'running', pct: 30, files: [] };
+          jobsP.set(id, j);
+          setTimeout(() => {
+            execFileSync(require('ffmpeg-static') || 'ffmpeg', ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc=s=320x240:d=1', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-y', out]);
+            j.pct = 100; j.status = 'done'; j.files = [out];
+          }, 1500);
+          return send(j);
+        }
+        if (req.url === '/api/cancel') return send({ ok: true });
+        send({ error: 'Unknown request' }, 404);
+      });
+    });
+    await new Promise((r) => srv.listen(47821, '127.0.0.1', r));
+    const before = await win.evaluate(() => Board.live().filter((x) => x.type === 'video').length);
+    await win.evaluate(() => { Board.addSocial('https://www.instagram.com/reel/abc123/', Board.toWorld(720, 300)); });
+    await sleep(700);
+    let cardSeen = await win.evaluate(() => !!document.querySelector('.fetch-card'));
+    await win.screenshot({ path: `${OUT}/03k-pluck.png` });
+    await win.waitForFunction((n) => Board.live().filter((x) => x.type === 'video').length > n, before, { timeout: 30000 }).catch(() => {});
+    const added = await win.evaluate((n) => Board.live().filter((x) => x.type === 'video').length - n, before);
+    const cardGone = await win.evaluate(() => !document.querySelector('.fetch-card'));
+    await sleep(300);
+    const tmpLeft = fs.existsSync(require('os').tmpdir() + '/eye-refs-pluck') ? fs.readdirSync(require('os').tmpdir() + '/eye-refs-pluck').length : 0;
+    await win.evaluate(() => Board.undo());
+    // Pluck says no: the card says why, in its words
+    mode = 'private';
+    await win.evaluate(() => { Board.addSocial('https://www.instagram.com/p/private1/', Board.toWorld(720, 300)); });
+    await win.waitForFunction(() => document.querySelector('.fetch-card.failed'), null, { timeout: 15000 }).catch(() => {});
+    const errText = await win.evaluate(() => { const c = document.querySelector('.fetch-card.failed'); const t = c && c.querySelector('.fc-phase').textContent; if (c) c.querySelector('.fc-btn:last-child').click(); return t; });
+    // No Pluck on this computer: a button to get it
+    await new Promise((r) => srv.close(r));
+    await win.evaluate(() => { Board.addSocial('https://youtu.be/xyz', Board.toWorld(720, 300)); });
+    await win.waitForFunction(() => document.querySelector('.fetch-card.failed'), null, { timeout: 15000 }).catch(() => {});
+    const missing = await win.evaluate(() => { const c = document.querySelector('.fetch-card.failed'); const r = c && { text: c.querySelector('.fc-phase').textContent, get: [...c.querySelectorAll('.fc-btn')].map((b) => b.textContent) }; if (c) c.querySelector('.fc-btn:last-child').click(); return r; });
+    // A pasted social link goes to Pluck, not into a note
+    const routed = await win.evaluate(() => { const notes = Board.live().filter((x) => x.type === 'note').length; return notes; });
+    return { cardSeen, added, cardGone, tmpLeft, errText, missing, routed };
+  })();
+  expect('a social link comes in as a video through Pluck', pluckRes.cardSeen && pluckRes.added === 1 && pluckRes.cardGone && pluckRes.tmpLeft === 0, pluckRes);
+  expect('when Pluck says no, the card says why', /private/.test(pluckRes.errText || ''), pluckRes.errText);
+  expect('without Pluck, the card offers to get it', pluckRes.missing && pluckRes.missing.get.includes('Get Pluck'), pluckRes.missing);
   // A message never sits on the pen bar
   await win.evaluate(() => Board.setTool('pen'));
   await win.waitForSelector('#penBar:not([hidden])');
