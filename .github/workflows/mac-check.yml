@@ -12,8 +12,9 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
       - run: npm ci
-      - name: Run see through windows and capture the screen
-        run: OUT=$RUNNER_TEMP/see npx electron test/mac/see-main.js || true
+      - run: npm install --no-save playwright@1.48.2
+      - name: The real app in see through mode
+        run: OUT=$RUNNER_TEMP/see node test/mac/see-app.js || true
       - name: Read pixels
         run: |
           cd $RUNNER_TEMP/see && ls -la && cat results.json || true
