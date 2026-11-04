@@ -371,7 +371,7 @@
   // The part of the window not covered by the sidebar and floating bars
   function viewport() {
     const b = document.body.classList;
-    if (b.contains('clean') && !b.contains('board-empty')) return { left: 16, top: 16, right: window.innerWidth - 16, bottom: window.innerHeight - 16 };
+    if (b.contains('ui-hidden') || (b.contains('ui-auto') && !b.contains('board-empty'))) return { left: 16, top: 16, right: window.innerWidth - 16, bottom: window.innerHeight - 16 };
     const side = b.contains('has-sidebar') ? 304 : 16;
     return { left: side, top: 76, right: window.innerWidth - 16, bottom: window.innerHeight - 76 };
   }
@@ -1349,9 +1349,11 @@
     // Inside the part of the window the sidebar and bars leave free
     const vp = viewport();
     let x = r.left + r.width / 2 - bw / 2;
+    // Just under the video when there's room. Otherwise inside it, along the
+    // bottom of the part you can see, like a video player. Never above it.
     let y = r.bottom + 8;
-    if (y + bh > vp.bottom) y = Math.max(vp.top, r.top - bh - 8);
-    if (y + bh > vp.bottom || y < vp.top) y = vp.bottom - bh;
+    if (y + bh > vp.bottom) y = Math.min(r.bottom, vp.bottom) - bh - 12;
+    y = Math.max(Math.max(vp.top, r.top + 8), Math.min(vp.bottom - bh, y));
     x = Math.max(vp.left, Math.min(vp.right - bw, x));
     vbar.style.left = x + 'px';
     vbar.style.top = y + 'px';
@@ -1457,11 +1459,13 @@
         { label: 'Reset transform', key: 'Mod+Shift+T', onClick: resetTransform, disabled: !ed },
         { label: 'Locked', key: 'Alt+L', checked: ids.every((id) => B.items.get(id).locked), onClick: () => toggleField('locked'), disabled: !ed },
         '-',
-        { label: 'Bring to front', key: '↑', onClick: front, disabled: !ed },
-        { label: 'Send to back', key: '↓', onClick: back, disabled: !ed },
-        { label: 'Duplicate', onClick: duplicate, disabled: !ed },
+        { label: 'Bring to front', key: 'Up', onClick: front, disabled: !ed },
+        { label: 'Send to back', key: 'Down', onClick: back, disabled: !ed },
+        '-',
         { label: 'Copy', key: 'Mod+C', onClick: () => copySelection(false) },
-        { label: 'Delete', key: 'Del', onClick: deleteSelection, disabled: !ed },
+        { label: 'Cut', key: 'Mod+X', onClick: () => copySelection(true), disabled: !ed },
+        { label: 'Duplicate', onClick: duplicate, disabled: !ed },
+        { label: 'Delete', key: 'Delete', onClick: deleteSelection, disabled: !ed },
         '-');
     } else {
       items.push(
@@ -1469,13 +1473,10 @@
         { label: 'Import a folder of images', onClick: async () => addPaths(await api.importFolderDialog(), at), disabled: !ed },
         { label: 'New note', key: 'Mod+N', onClick: () => addNote(at), disabled: !ed },
         { label: 'Paste', key: 'Mod+V', onClick: () => pasteNative(at), disabled: !ed },
+        { label: 'Select all', key: 'Mod+A', onClick: selectAll },
         '-');
     }
-    items.push(
-      { label: 'Arrange optimal', key: 'Mod+P', onClick: arrange, disabled: !ed },
-      { label: `Bin (${binItems().length})`, onClick: () => B.onChange('bin') },
-      '-');
-    for (const x of B.extraMenu ? B.extraMenu() : []) items.push(x);
+    for (const x of B.extraMenu ? B.extraMenu({ ed, at }) : []) items.push(x);
     openMenu(items, x, y);
   }
 

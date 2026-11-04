@@ -127,6 +127,11 @@
     $('#meAvatar').textContent = r.me.initials;
     $('#meAvatar').style.background = avatarColor(r.me.email);
     S.alwaysOnTop = r.prefs.alwaysOnTop;
+    S.opacity = r.prefs.opacity || 1;
+    S.startWith = r.prefs.startWith || 'new';
+    S.transparent = !!r.prefs.transparent;
+    document.body.classList.toggle('see', S.transparent);
+    setBg(S.bg, true);
     setSidebar(r.prefs.sidebar, true);
     syncToolbar();
     renderSidebar();
@@ -156,9 +161,13 @@
     renderSidebar();
   }
 
+  // Only the newest refresh counts. An older one that comes back late (the server
+  // can take a few seconds) would bring back a board that was just removed.
+  let scanGen = 0;
   async function rescan() {
+    const g = ++scanGen;
     const r = await api.scan();
-    if (!r || r.error) return;
+    if (g !== scanGen || !r || r.error) return;
     S.projects = r.projects;
     if (S.current) {
       const cur = S.projects.find((p) => p.id === S.current.id);
@@ -200,7 +209,19 @@
         else if (p.shared) meta = el('span', { class: 'meta', html: ICONS.people });
         const pr = el('button', { class: 'row project' + (S.current && S.current.id === p.id ? ' current' : ''), role: 'treeitem', title: p.mine ? p.name : `${p.name}, owned by ${p.owner ? p.owner.name : 'someone else'}` },
           el('span', { class: 'name', text: p.name }), meta);
-        pr.addEventListener('click', async () => { if (!S.current || S.current.id !== p.id) openResult(await api.openProject(p.id)); });
+        // One click opens, a double click renames in place
+        let clickTimer = null;
+        pr.addEventListener('click', () => {
+          if (pr.querySelector('[contenteditable]')) return;
+          clearTimeout(clickTimer);
+          clickTimer = setTimeout(async () => { if (!S.current || S.current.id !== p.id) openResult(await api.openProject(p.id)); }, 230);
+        });
+        pr.addEventListener('dblclick', (e) => {
+          clearTimeout(clickTimer);
+          e.preventDefault();
+          if (p.cloudOnly || (!p.mine && !p.scratch)) return toast('Only the owner can rename this board.', true);
+          renameInline(pr.querySelector('.name'), p);
+        });
         tree.append(pr);
       }
     }
@@ -216,7 +237,7 @@
   $('#newProject').addEventListener('click', () => newBoard());
   $('#joinBoard').addEventListener('click', () => joinModal());
   $('#hideSidebar').addEventListener('click', () => setSidebar(false));
-  $('#showSidebar').addEventListener('click', () => { if (document.body.classList.contains('clean') && !document.body.classList.contains('board-empty')) { setClean(false); setSidebar(true); } else setSidebar(true); });
+  $('#showSidebar').addEventListener('click', () => { if (isClean()) setUi('shown'); setSidebar(true); });
   $('#account').addEventListener('click', (e) => {
     const r = e.currentTarget.getBoundingClientRect();
     openMenu([
@@ -300,42 +321,101 @@
     box.hidden = false;
   }
 
-  $('#tName').addEventListener('dblclick', () => { if (S.current && S.current.scratch) saveModal(); else if (S.current && S.current.mine) renameModal(); });
+  $('#tName').addEventListener('dblclick', () => {
+    if (!S.current) return;
+    if (!S.current.scratch && !S.current.mine) return toast('Only the owner can rename this board.', true);
+    renameInline($('#tName'), S.current);
+  });
+
+  // Edit a board name where it is. Enter or clicking away saves, Esc cancels.
+  // Naming an untitled board saves it into Documents / Eye Refs.
+  function renameInline(node, p) {
+    if (!node || node.isContentEditable) return;
+    const before = node.textContent;
+    node.contentEditable = 'plaintext-only';
+    node.classList.add('editing-name');
+    node.spellcheck = false;
+    if (p.scratch) node.textContent = '';
+    node.focus();
+    const sel = window.getSelection(); const range = document.createRange(); range.selectNodeContents(node); sel.removeAllRanges(); sel.addRange(range);
+    let done = false;
+    const finish = async (save) => {
+      if (done) return;
+      done = true;
+      node.removeAttribute('contenteditable');
+      node.classList.remove('editing-name');
+      const name = node.textContent.replace(/\s+/g, ' ').trim();
+      node.removeEventListener('keydown', onKey); node.removeEventListener('blur', onBlur);
+      if (!save || !name || name === before) { node.textContent = before; return; }
+      node.textContent = name;
+      const r = await api.renameBoard(p.id, name);
+      if (!r || r.error) { node.textContent = before; return toast((r && r.error) || "Couldn't rename that.", true); }
+      if (r.reopened) openResult(r.reopened);
+      else if (S.current && S.current.id === p.id) { S.current.name = r.name; syncChrome(); }
+      if (p.scratch) toast(`Saved in Documents / Eye Refs / ${r.name}`);
+      rescan();
+    };
+    const onKey = (e) => {
+      e.stopPropagation();
+      if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+      if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+    };
+    const onBlur = () => finish(true);
+    node.addEventListener('keydown', onKey);
+    node.addEventListener('blur', onBlur);
+  }
   $('#share').addEventListener('click', () => shareModal());
   $('#wMin').addEventListener('click', () => api.minimize());
   $('#wMax').addEventListener('click', () => api.maximize());
   $('#wClose').addEventListener('click', () => api.close());
 
   // ---------- clean view (PureRef style: just the board) ----------
-  // Controls hide while you work and come back when the pointer reaches their edge.
-  // Tab turns this on or off. An empty board always shows its controls.
-  let clean = true;
-  try { clean = localStorage.getItem('clean') !== '0'; } catch (_) {}
+  // Controls: 'auto' hides them once a board has something on it, 'hidden' always
+  // hides them (even on an empty board), 'shown' always shows them. Tab flips
+  // between hidden and shown. The top edge always brings back the bar for moving
+  // the window.
   const body = document.body;
-  function setClean(on, quiet) {
-    clean = on;
-    body.classList.toggle('clean', on);
-    try { localStorage.setItem('clean', on ? '1' : '0'); } catch (_) {}
-    if (!quiet) toast(on ? 'Only the board. Tab brings the controls back.' : 'Controls shown');
+  let uiMode = 'auto';
+  try {
+    uiMode = localStorage.getItem('ui') || (localStorage.getItem('clean') === '0' ? 'shown' : 'auto');
+    if (!['auto', 'hidden', 'shown'].includes(uiMode)) uiMode = 'auto';
+  } catch (_) {}
+  const isClean = () => uiMode === 'hidden' || (uiMode === 'auto' && !body.classList.contains('board-empty'));
+  function setUi(mode, quiet) {
+    uiMode = mode;
+    body.classList.toggle('ui-auto', mode === 'auto');
+    body.classList.toggle('ui-hidden', mode === 'hidden');
+    try { localStorage.setItem('ui', mode); } catch (_) {}
+    if (!quiet) toast(isClean() ? 'Only the board. Tab brings the controls back.' : 'Controls shown');
+    if (!isClean()) body.classList.remove('show-top');
     try { B.applyView(); } catch (_) {}
+    if (typeof drawSettings === 'function') drawSettings();
   }
-  setClean(clean, true);
-  // Top edge: one bar for moving the window, like PureRef. It waits a moment
-  // before leaving, so passing the pointer over it never flickers.
+  const toggleUi = () => setUi(isClean() ? 'shown' : 'hidden');
+  const setClean = (on) => setUi(on ? 'hidden' : 'shown');
+  setUi(uiMode, true);
+
+  // Top edge: one bar for moving the window. It waits a moment before leaving, so
+  // passing over it never flickers, and it stays while the window is being moved
+  // (the system takes over the pointer then, so the page only hears about moves).
   const inTop = (t) => t && t.closest && t.closest('#topbar, #title, #topRight');
-  let busy = false, leaveTimer = null;
+  let busy = false, leaveTimer = null, movingUntil = 0;
   const showTop = (on) => {
     clearTimeout(leaveTimer);
     if (on) body.classList.add('show-top');
-    else leaveTimer = setTimeout(() => body.classList.remove('show-top'), 350);
+    else leaveTimer = setTimeout(() => { if (Date.now() > movingUntil) body.classList.remove('show-top'); }, 450);
   };
+  api.onMoved(() => {
+    if (!isClean() || !body.classList.contains('show-top')) return;
+    movingUntil = Date.now() + 900;
+    showTop(true);
+  });
   window.addEventListener('pointermove', (e) => {
-    if (!clean || busy || modalOpen() || menuOpen()) return;
-    showTop(e.clientY < 28 || (body.classList.contains('show-top') && (e.clientY < 60 || !!inTop(e.target))));
+    if (!isClean() || busy || modalOpen() || menuOpen() || Date.now() < movingUntil) return;
+    showTop(e.clientY < 28 || (body.classList.contains('show-top') && (e.clientY < 72 || !!inTop(e.target))));
   }, { passive: true });
-  $('#canvas').addEventListener('pointerdown', () => { if (clean) { busy = true; clearTimeout(leaveTimer); body.classList.remove('show-top'); } });
+  $('#canvas').addEventListener('pointerdown', () => { if (isClean()) { busy = true; clearTimeout(leaveTimer); body.classList.remove('show-top'); } });
   window.addEventListener('pointerup', () => { busy = false; });
-  document.addEventListener('mouseleave', () => { if (clean) showTop(false); });
 
   // ---------- toolbar ----------
   function syncToolbar() {
@@ -407,27 +487,126 @@
     toast(`Window ${Math.round(o * 100)} percent visible`);
   }
 
-  // Menu items the board adds to its right click menu
-  B.extraMenu = () => [
-    { label: 'Show controls', key: 'Tab', checked: !clean, onClick: () => setClean(!clean) },
-    { label: 'Always on top', key: 'Mod+Shift+A', checked: S.alwaysOnTop, onClick: toggleTop },
-    { label: 'Click through', key: 'Mod+T', onClick: () => setThrough(true) },
-    { label: 'Lock canvas', key: 'Mod+R', checked: B.lockedCanvas, onClick: () => B.setLockedCanvas(!B.lockedCanvas) },
-    { label: 'Lock window', key: 'Mod+W', checked: S.lockedWindow, onClick: toggleWindowLock },
-    { label: 'More see through', key: 'Mod+Shift+-', onClick: () => opacity(-0.1) },
-    { label: 'Less see through', key: 'Mod+Shift+=', onClick: () => opacity(0.1) },
-    '-',
-    { label: 'Share', onClick: () => shareModal(), disabled: S.readOnly },
-    { label: 'Save as one file', onClick: packCurrent },
-    S.current && S.current.scratch
-      ? { label: 'Save', key: 'Mod+S', onClick: () => saveModal() }
-      : { label: 'Rename project', onClick: renameModal, disabled: !S.current || !S.current.mine },
-    { label: 'Show in folder', onClick: () => api.reveal(), disabled: S.current && S.current.scratch },
-    '-',
-    { label: 'Minimize', key: 'Mod+M', onClick: () => api.minimize() },
-    { label: 'Maximize', key: 'Mod+F', onClick: () => api.maximize() },
-    { label: 'Close', key: 'Mod+Q', onClick: () => api.close() },
-  ];
+  // Right click menu, grouped like PureRef's, with the shortcut on every action
+  B.extraMenu = ({ ed } = {}) => {
+    const cur = S.current;
+    const drawing = B.tool === 'pen' || B.tool === 'eraser';
+    return [
+      { label: 'Draw', key: 'Mod+D', checked: drawing, onClick: () => B.setTool(drawing ? 'select' : 'pen'), disabled: !ed },
+      { label: 'Arrange', sub: [
+        { label: 'Arrange optimal', key: 'Mod+P', onClick: () => B.arrange(), disabled: !ed },
+        '-',
+        { label: 'Align top', key: 'Mod+Up', onClick: () => B.align('top'), disabled: !ed },
+        { label: 'Align bottom', key: 'Mod+Down', onClick: () => B.align('bottom'), disabled: !ed },
+        { label: 'Align left', key: 'Mod+Left', onClick: () => B.align('left'), disabled: !ed },
+        { label: 'Align right', key: 'Mod+Right', onClick: () => B.align('right'), disabled: !ed },
+        '-',
+        { label: 'Same height', key: 'Mod+Alt+Left', onClick: () => B.normalize('height'), disabled: !ed },
+        { label: 'Same width', key: 'Mod+Alt+Right', onClick: () => B.normalize('width'), disabled: !ed },
+        { label: 'Same size', key: 'Mod+Alt+Up', onClick: () => B.normalize('size'), disabled: !ed },
+        { label: 'Same scale', key: 'Mod+Alt+Down', onClick: () => B.normalize('scale'), disabled: !ed },
+      ] },
+      { label: 'View', sub: [
+        { label: 'Fit everything', key: 'Mod+Space', onClick: () => B.focusAll() },
+        { label: 'Reset zoom', key: 'Mod+0', onClick: () => resetZoom() },
+        { label: 'Zoom in', key: 'Mod+Equal', onClick: () => B.zoomAt(innerWidth / 2, innerHeight / 2, 1.25) },
+        { label: 'Zoom out', key: 'Mod+Minus', onClick: () => B.zoomAt(innerWidth / 2, innerHeight / 2, 0.8) },
+        '-',
+        { label: 'Dots', checked: S.bg === 'dots', onClick: () => setBg('dots') },
+        { label: 'Grid', checked: S.bg === 'grid', onClick: () => setBg('grid') },
+        { label: 'Plain', checked: S.bg === 'plain', onClick: () => setBg('plain') },
+        { label: 'See through', checked: S.transparent, onClick: () => setTransparent(!S.transparent) },
+        '-',
+        { label: 'Grayscale canvas', key: 'Mod+Alt+G', checked: B.grayCanvas, onClick: () => B.setGrayCanvas(!B.grayCanvas) },
+        { label: 'Lock canvas', key: 'Mod+R', checked: B.lockedCanvas, onClick: () => B.setLockedCanvas(!B.lockedCanvas) },
+        { label: 'Show controls', key: 'Tab', checked: !isClean(), onClick: toggleUi },
+      ] },
+      { label: 'Window', sub: [
+        { label: 'Always on top', key: 'Mod+Shift+A', checked: S.alwaysOnTop, onClick: toggleTop },
+        { label: 'Transparent to mouse', key: 'Mod+T', onClick: () => setThrough(true) },
+        { label: 'Lock window', key: 'Mod+W', checked: S.lockedWindow, onClick: toggleWindowLock },
+        { label: 'Less opacity', key: 'Mod+Shift+Minus', onClick: () => opacity(-0.1) },
+        { label: 'More opacity', key: 'Mod+Shift+Equal', onClick: () => opacity(0.1) },
+        '-',
+        { label: 'Minimize', key: 'Mod+M', onClick: () => api.minimize() },
+        { label: 'Maximize', key: 'Mod+F', onClick: () => api.maximize() },
+      ] },
+      { label: 'File', sub: [
+        { label: 'New board', key: 'Mod+K', onClick: () => newBoard() },
+        { label: 'Open', key: 'Mod+L', onClick: () => openFile() },
+        cur && cur.scratch
+          ? { label: 'Save', key: 'Mod+S', onClick: () => saveModal() }
+          : { label: 'Rename', onClick: renameModal, disabled: !cur || !cur.mine },
+        { label: 'Save as one file', key: 'Mod+Shift+S', onClick: packCurrent },
+        { label: 'Share', onClick: () => shareModal(), disabled: S.readOnly },
+        { label: 'Show in folder', onClick: () => api.reveal(), disabled: cur && cur.scratch },
+      ] },
+      { label: `Bin (${B.binItems().length})`, onClick: () => B.onChange('bin') },
+      '-',
+      { label: 'Settings', key: 'Mod+U', onClick: () => openSettings() },
+      { label: 'Shortcuts', key: IS_MAC ? 'Ctrl+H' : 'Mod+H', onClick: shortcutsModal },
+      { label: 'Close', key: 'Mod+Q', onClick: () => api.close() },
+    ];
+  };
+  function resetZoom() { const c = B.toWorld(innerWidth / 2, innerHeight / 2); B.view = { s: 1, x: innerWidth / 2 - c.x, y: innerHeight / 2 - c.y }; B.applyView(); }
+
+  // ---------- background and see through ----------
+  S.bg = 'dots';
+  try { S.bg = localStorage.getItem('bg') || 'dots'; } catch (_) {}
+  function setBg(bg, quiet) {
+    S.bg = ['dots', 'grid', 'plain'].includes(bg) ? bg : 'dots';
+    const c = $('#canvas');
+    c.classList.toggle('bg-dots', S.bg === 'dots');
+    c.classList.toggle('bg-grid', S.bg === 'grid');
+    c.classList.remove('grid');
+    try { localStorage.setItem('bg', S.bg); } catch (_) {}
+    if (S.transparent && !quiet) setTransparent(false);
+    drawSettings();
+  }
+  async function setTransparent(on) {
+    // The window is rebuilt see through and comes straight back to this board
+    if (S.current) await api.flush();
+    await api.setTransparent(on);
+  }
+
+  // ---------- settings: everything on one panel, one click away ----------
+  function openSettings() {
+    const p = $('#settings');
+    if (!p.hidden) { p.hidden = true; return; }
+    drawSettings();
+    p.hidden = false;
+  }
+  function drawSettings() {
+    const p = $('#settings');
+    if (!p) return;
+    const seg = (label, opts, value, pick) => el('div', { class: 'set-row' },
+      el('span', { class: 'set-label', text: label }),
+      el('div', { class: 'seg small' }, opts.map(([v, t]) => el('button', { class: v === value ? 'on' : '', text: t, onclick: () => pick(v) }))));
+    const toggle = (label, on, flip, key) => el('button', { class: 'set-row set-toggle', onclick: flip },
+      el('span', { class: 'set-label', text: label }),
+      key ? el('span', { class: 'k', text: keyLabel(key) }) : null,
+      el('span', { class: 'switch' + (on ? ' on' : '') }));
+    const opacityIn = el('input', { type: 'range', min: '20', max: '100', step: '5', value: String(Math.round((S.opacity || 1) * 100)), 'aria-label': 'Opacity' });
+    opacityIn.addEventListener('input', async () => { S.opacity = await api.setOpacity(Number(opacityIn.value) / 100); });
+    p.innerHTML = '';
+    p.append(
+      el('div', { class: 'set-head' }, el('b', { text: 'Settings' }), el('span', { class: 'k', text: keyLabel('Mod+U') })),
+      seg('Background', [['dots', 'Dots'], ['grid', 'Grid'], ['plain', 'Plain'], ['see', 'See through']], S.transparent ? 'see' : S.bg, (v) => (v === 'see' ? setTransparent(true) : setBg(v))),
+      seg('Controls', [['auto', 'Auto hide'], ['shown', 'Always'], ['hidden', 'Hidden']], uiMode, (v) => setUi(v, true)),
+      seg('Opens with', [['new', 'New board'], ['last', 'Last board']], S.startWith || 'new', async (v) => { const r = await api.setPrefs({ startWith: v }); S.startWith = r.startWith; drawSettings(); }),
+      el('div', { class: 'set-row' }, el('span', { class: 'set-label', text: 'Opacity' }), opacityIn),
+      toggle('Always on top', S.alwaysOnTop, async () => { await toggleTop(); drawSettings(); }, 'Mod+Shift+A'),
+      toggle('Grayscale canvas', B.grayCanvas, () => { B.setGrayCanvas(!B.grayCanvas); drawSettings(); }, 'Mod+Alt+G'),
+      toggle('Lock window', S.lockedWindow, async () => { await toggleWindowLock(); drawSettings(); }, 'Mod+W'),
+      el('button', { class: 'set-row set-link', onclick: () => { $('#settings').hidden = true; setThrough(true); } },
+        el('span', { class: 'set-label', text: 'Transparent to mouse' }), el('span', { class: 'k', text: keyLabel('Mod+T') })),
+    );
+  }
+  document.addEventListener('pointerdown', (e) => {
+    const p = $('#settings');
+    if (p && !p.hidden && !e.target.closest('#settings, #settingsBtn')) p.hidden = true;
+  }, true);
+  $('#settingsBtn').addEventListener('click', openSettings);
 
   async function toggleWindowLock() { S.lockedWindow = !S.lockedWindow; await api.lockWindow(S.lockedWindow); toast(S.lockedWindow ? 'Window locked in place' : 'Window unlocked'); }
 
@@ -455,7 +634,7 @@
     const b = $('#update');
     b.hidden = false;
     b.title = `Eye Refs ${u.version} is ready`;
-    if (clean && !b.dataset.told) { b.dataset.told = '1'; toast(`Eye Refs ${u.version} is ready. Move to the top to restart.`); }
+    if (isClean() && !b.dataset.told) { b.dataset.told = '1'; toast(`Eye Refs ${u.version} is ready. Move to the top to restart.`); }
   };
   api.onUpdate(showUpdate);
   api.updateState().then(showUpdate);
@@ -722,7 +901,7 @@
 
   // Search lives in the sidebar, which clean view hides: show the controls first
   function focusSearch() {
-    if (clean && !body.classList.contains('board-empty')) setClean(false);
+    if (isClean()) setUi('shown');
     setSidebar(true);
     $('#search').focus();
     $('#search').select();
@@ -764,6 +943,7 @@
     'Mod+L': () => openFile(),
     'Mod+Shift+L': async () => { const last = S.projects.find((p) => !p.scratch && (!S.current || p.id !== S.current.id)); if (last) openResult(await api.openProject(last.id)); },
     'Mod+Shift+S': () => packCurrent(),
+    'Mod+U': () => openSettings(),
     'Mod+Shift+P': focusSearch,
     'Mod+S': async () => { if (S.current && S.current.scratch) return saveModal(); await api.flush(); toast('Saved'); },
     'Mod+Q': () => api.close(),
@@ -773,7 +953,7 @@
     'Mod+Equal': () => B.zoomAt(innerWidth / 2, innerHeight / 2, 1.25),
     'Mod+Minus': () => B.zoomAt(innerWidth / 2, innerHeight / 2, 0.8),
     'Mod+Space': () => B.focusAll(),
-    'Tab': () => setClean(!clean),
+    'Tab': toggleUi,
     'Left': () => B.focusStep(-1),
     'Right': () => B.focusStep(1),
     'Up': () => B.front(),

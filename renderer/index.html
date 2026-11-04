@@ -8,7 +8,7 @@
 </head>
 <body class="has-sidebar">
 
-<div id="canvas" class="grid" tabindex="-1">
+<div id="canvas" class="bg-dots" tabindex="-1">
   <div id="world"></div>
   <div id="overlay"></div>
   <div id="marquee" hidden></div>
@@ -61,6 +61,7 @@
     <span class="p-text" id="pText"></span>
   </div>
   <button class="btn update-btn" id="update" hidden>Restart to update</button>
+  <div class="pill setpill"><button class="icon-btn" id="settingsBtn" aria-label="Settings" title="Settings" data-i="settings"></button></div>
   <button class="btn" id="share" hidden>Share</button>
   <div class="pill winctl" id="winctl">
     <button class="icon-btn" id="wMin" aria-label="Minimize" data-i="min"></button>
@@ -116,6 +117,7 @@
 
 <div id="jobs" class="pill" hidden><span class="ring"></span><span id="jobText"></span></div>
 <div id="menu" class="menu" hidden role="menu"></div>
+<div id="settings" class="settings" hidden role="dialog" aria-label="Settings"></div>
 <div id="modalWrap" hidden></div>
 <div id="toast" role="status" aria-live="polite"></div>
 <div id="screen" hidden></div>

@@ -21,6 +21,7 @@ contextBridge.exposeInMainWorld('eyerefs', {
   openProject: call('projects:open'),
   openProjectFile: call('projects:openFile'),
   renameProject: call('projects:rename'),
+  renameBoard: call('projects:renameAny'),
   share: call('projects:share'),
   members: call('projects:members'),
   invite: call('projects:invite'),
@@ -43,6 +44,9 @@ contextBridge.exposeInMainWorld('eyerefs', {
   openExternal: call('shell:open'),
   setAlwaysOnTop: call('win:alwaysOnTop'),
   changeOpacity: call('win:opacity'),
+  setOpacity: call('win:setOpacity'),
+  setTransparent: call('win:transparent'),
+  setPrefs: call('prefs:set'),
   setClickThrough: call('win:clickThrough'),
   moveWindowBy: call('win:moveBy'),
   lockWindow: call('win:lock'),
@@ -64,4 +68,5 @@ contextBridge.exposeInMainWorld('eyerefs', {
   onImportProgress: on('import:progress'),
   onOpenFile: on('open-file'),
   onClickThrough: on('win:clickThrough'),
+  onMoved: on('win:moved'),
 });

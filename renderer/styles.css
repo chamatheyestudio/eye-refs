@@ -44,9 +44,15 @@ svg { display: block; }
 
 /* ---------- Canvas ---------- */
 #canvas { position: fixed; inset: 0; overflow: hidden; background-color: var(--bg); cursor: default; outline: none; }
-#canvas.grid { background-image: radial-gradient(var(--dot) 1px, transparent 1.2px); }
+#canvas.bg-dots { background-image: radial-gradient(var(--dot) 1px, transparent 1.2px); }
+#canvas.bg-grid { background-image: linear-gradient(var(--dot) 1px, transparent 1px), linear-gradient(90deg, var(--dot) 1px, transparent 1px); }
+/* See through: only the references show, so the board can sit over other apps */
+body.see, body.see #canvas { background-color: transparent !important; background-image: none !important; }
+html:has(body.see) { background: transparent; }
+body.see #canvas::after { content: ''; position: fixed; inset: 0; pointer-events: none; border-radius: 10px; box-shadow: inset 0 0 0 1px rgba(215, 240, 74, 0); transition: box-shadow 160ms ease; }
+body.see:hover #canvas::after { box-shadow: inset 0 0 0 1px rgba(215, 240, 74, 0.35); }
 #canvas.panning, #canvas.tool-hand { cursor: grab; }
-#canvas.tool-pen { cursor: crosshair; }
+#canvas.tool-pen { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath d='M4 20l1.2-4.2L16 5a2.1 2.1 0 0 1 3 3L8.2 18.8z' fill='%23F4F3EE' stroke='%23141413' stroke-width='1.4' stroke-linejoin='round'/%3E%3Cpath d='M14 7l3 3' stroke='%23141413' stroke-width='1.4'/%3E%3C/svg%3E") 3 21, crosshair; }
 #canvas.panning:active { cursor: grabbing; }
 #canvas.crop-mode { cursor: crosshair; }
 #world { position: absolute; left: 0; top: 0; transform-origin: 0 0; will-change: transform; }
@@ -164,7 +170,7 @@ body.has-sidebar #penBar { left: calc(50% + 144px); }
 #penBar .styles button, #penBar .tool { color: var(--soft); }
 #penBar .styles button svg, #penBar .tool svg { width: 15px; height: 15px; }
 #penBar .styles button.on, #penBar .tool.on { background: var(--hover); color: var(--text); }
-#canvas.tool-eraser { cursor: cell; }
+#canvas.tool-eraser { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath d='M5.5 15.5l9-9a2 2 0 0 1 2.8 0l1.2 1.2a2 2 0 0 1 0 2.8L11 18H8z' fill='%23F4F3EE' stroke='%23141413' stroke-width='1.4' stroke-linejoin='round'/%3E%3Cpath d='M8 20h12' stroke='%23F4F3EE' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E") 6 17, cell; }
 #penBar button { width: 28px; height: 28px; border-radius: 50%; border: 0; background: transparent; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
 #penBar button:hover { background: var(--hover); }
 #penBar .dot { display: block; border-radius: 50%; }
@@ -204,6 +210,8 @@ body.has-sidebar #penBar { left: calc(50% + 144px); }
 .menu button:hover .k, .menu button:focus-visible .k { color: var(--ink); }
 .menu button:disabled { opacity: 0.4; background: transparent; color: var(--text); cursor: default; }
 .menu .k { font: 500 11px var(--mono); color: var(--faint); }
+.menu .k.sub { font: 500 14px var(--font, inherit); line-height: 1; }
+.submenu { z-index: 51; }
 .menu .check { color: var(--lime); }
 .menu button:hover .check { color: var(--ink); }
 .menu hr { border: 0; height: 1px; background: rgba(255,255,255,0.07); margin: 5px 4px; }
@@ -261,14 +269,38 @@ body.clickthrough #canvas { outline: 2px solid rgba(215, 240, 74, 0.5); outline-
    edge shows one bar for moving the window, with the board name, Share and the
    window buttons. Nothing changes position, it only fades, so nothing jumps. */
 #topbar { display: none; }
-body.clean:not(.board-empty) #topbar { display: block; position: fixed; left: 0; right: 0; top: 0; height: 60px; z-index: 14; background: var(--panel-solid); border-bottom: 1px solid var(--line); opacity: 0; pointer-events: none; -webkit-app-region: no-drag; transition: opacity 140ms ease; }
-body.clean:not(.board-empty) :is(#sidebar, #toolbar, #zoom) { display: none; }
-body.clean:not(.board-empty) :is(#title, #topRight) { opacity: 0; pointer-events: none; transition: opacity 140ms ease; }
-body.clean:not(.board-empty) #title { top: 8px; left: 8px; padding-left: 4px; background: transparent; border-color: transparent; -webkit-backdrop-filter: none; backdrop-filter: none; -webkit-app-region: no-drag; max-width: calc(100vw - 560px); }
-body.clean:not(.board-empty) #topRight { top: 8px; right: 8px; }
-body.clean:not(.board-empty) #topRight .pill { background: transparent; border-color: transparent; -webkit-backdrop-filter: none; backdrop-filter: none; }
-body.clean:not(.board-empty).show-top #topbar { opacity: 1; pointer-events: auto; -webkit-app-region: drag; }
-body.clean:not(.board-empty).show-top :is(#title, #topRight) { opacity: 1; pointer-events: auto; }
-body.clean:not(.board-empty).show-top #title { -webkit-app-region: drag; }
-body.clean:not(.board-empty) #penBar { left: 50%; bottom: 16px; }
-body.clean:not(.board-empty) #showSidebar { display: inline-flex !important; }
+:is(body.ui-hidden, body.ui-auto:not(.board-empty)) #topbar { display: block; position: fixed; left: 0; right: 0; top: 0; height: 60px; z-index: 14; background: var(--panel-solid); border-bottom: 1px solid var(--line); opacity: 0; pointer-events: none; -webkit-app-region: no-drag; transition: opacity 140ms ease; }
+:is(body.ui-hidden, body.ui-auto:not(.board-empty)) :is(#sidebar, #toolbar, #zoom) { display: none; }
+:is(body.ui-hidden, body.ui-auto:not(.board-empty)) :is(#title, #topRight) { opacity: 0; pointer-events: none; transition: opacity 140ms ease; }
+:is(body.ui-hidden, body.ui-auto:not(.board-empty)) #title { top: 8px; left: 8px; padding-left: 4px; background: transparent; border-color: transparent; -webkit-backdrop-filter: none; backdrop-filter: none; -webkit-app-region: no-drag; max-width: calc(100vw - 560px); }
+:is(body.ui-hidden, body.ui-auto:not(.board-empty)) #topRight { top: 8px; right: 8px; }
+:is(body.ui-hidden, body.ui-auto:not(.board-empty)) #topRight .pill { background: transparent; border-color: transparent; -webkit-backdrop-filter: none; backdrop-filter: none; }
+:is(body.ui-hidden, body.ui-auto:not(.board-empty)).show-top #topbar { opacity: 1; pointer-events: auto; -webkit-app-region: drag; }
+:is(body.ui-hidden, body.ui-auto:not(.board-empty)).show-top :is(#title, #topRight) { opacity: 1; pointer-events: auto; }
+:is(body.ui-hidden, body.ui-auto:not(.board-empty)).show-top #title { -webkit-app-region: drag; }
+:is(body.ui-hidden, body.ui-auto:not(.board-empty)) #penBar { left: 50%; bottom: 16px; }
+:is(body.ui-hidden, body.ui-auto:not(.board-empty)) #showSidebar { display: inline-flex !important; }
+
+/* Settings: one panel, everything one click away */
+.settings { position: fixed; top: 68px; right: 16px; z-index: 45; width: 400px; max-width: calc(100vw - 32px); padding: 10px; border-radius: 20px; background: var(--panel-solid); border: 1px solid var(--line-strong); display: flex; flex-direction: column; gap: 2px; -webkit-app-region: no-drag; }
+.settings .set-head { display: flex; align-items: center; justify-content: space-between; padding: 4px 8px 8px; }
+.settings .set-row { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 4px 8px; border-radius: 14px; border: 0; background: transparent; color: var(--text); text-align: left; width: 100%; font-size: 13px; }
+.settings .set-label { flex: 1; color: var(--soft); }
+.settings .set-toggle, .settings .set-link { cursor: pointer; }
+.settings .set-toggle:hover, .settings .set-link:hover { background: var(--hover); }
+.settings .k { font: 500 11px var(--mono); color: var(--faint); }
+.settings .seg.small { display: flex; gap: 2px; padding: 2px; border-radius: 999px; background: rgba(255,255,255,0.05); }
+.settings .seg.small button { height: 28px; padding: 0 10px; border-radius: 999px; border: 0; background: transparent; color: var(--soft); font-size: 12px; cursor: pointer; white-space: nowrap; }
+.settings .seg.small button.on { background: var(--text); color: var(--ink); }
+.settings input[type=range] { width: 150px; accent-color: var(--lime); }
+.switch { width: 34px; height: 20px; border-radius: 999px; background: rgba(255,255,255,0.14); position: relative; flex-shrink: 0; transition: background 140ms ease; }
+.switch::after { content: ''; position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: var(--text); transition: transform 140ms ease; }
+.switch.on { background: var(--lime); }
+.switch.on::after { transform: translateX(14px); background: var(--ink); }
+.setpill { display: flex; padding: 2px; }
+.setpill .icon-btn { width: 40px; height: 40px; }
+#settingsBtn, .setpill { -webkit-app-region: no-drag; }
+
+/* Renaming a board in place */
+.editing-name { outline: none; background: rgba(255,255,255,0.08); border-radius: 8px; padding: 2px 6px; margin: -2px -6px; cursor: text; white-space: nowrap; overflow: hidden; -webkit-app-region: no-drag; user-select: text; min-width: 60px; }
+.editing-name:empty::before { content: 'Board name'; color: var(--faint); }

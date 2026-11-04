@@ -27,7 +27,8 @@
       if (p === 'Mod') return IS_MAC ? '⌘' : 'Ctrl';
       if (p === 'Alt') return IS_MAC ? '⌥' : 'Alt';
       if (p === 'Shift') return IS_MAC ? '⇧' : 'Shift';
-      return p;
+      const names = { Up: '↑', Down: '↓', Left: '←', Right: '→', Equal: '=', Minus: '-', Space: 'Space', Delete: IS_MAC ? '⌫' : 'Del', Escape: 'Esc', Enter: '↩', Tab: 'Tab' };
+      return names[p] || p;
     }).join(IS_MAC ? '' : '+');
   }
 
@@ -41,34 +42,65 @@
     toastTimer = setTimeout(() => t.classList.remove('show'), isError ? 5000 : 2600);
   }
 
-  // items: [{ label, key, onClick, disabled, checked } | '-']
-  function openMenu(items, x, y) {
-    const m = $('#menu');
+  // items: [{ label, key, onClick, disabled, checked, sub: [items] } | '-']
+  // An item with `sub` opens a side menu on hover, like PureRef's menu.
+  function fill(m, items, depth) {
     m.innerHTML = '';
     for (const it of items) {
       if (!it) continue;
       if (it === '-') { if (m.lastChild && m.lastChild.tagName !== 'HR') m.append(el('hr')); continue; }
-      const b = el('button', { role: 'menuitem', disabled: it.disabled },
+      const b = el('button', { role: 'menuitem', disabled: it.disabled, 'aria-haspopup': it.sub ? 'menu' : null },
         el('span', null, it.checked ? el('span', { class: 'check', text: '✓ ' }) : null, it.label),
-        it.key ? el('span', { class: 'k', text: keyLabel(it.key) }) : null);
-      b.addEventListener('click', () => { closeMenu(); if (!it.disabled) it.onClick && it.onClick(); });
+        it.sub ? el('span', { class: 'k sub', text: '›' }) : it.key ? el('span', { class: 'k', text: keyLabel(it.key) }) : null);
+      if (it.sub) {
+        const open = () => openSub(b, it.sub, depth + 1);
+        b.addEventListener('mouseenter', open);
+        b.addEventListener('click', open);
+        b.addEventListener('keydown', (e) => { if (e.key === 'ArrowRight') { open(); const f = subEl(depth + 1).querySelector('button:not(:disabled)'); if (f) f.focus(); e.preventDefault(); } });
+      } else {
+        b.addEventListener('mouseenter', () => closeSubs(depth + 1));
+        b.addEventListener('click', () => { closeMenu(); if (!it.disabled) it.onClick && it.onClick(); });
+      }
       m.append(b);
     }
     if (m.lastChild && m.lastChild.tagName === 'HR') m.lastChild.remove();
+  }
+  const subs = [];
+  function subEl(depth) {
+    let m = subs[depth];
+    if (!m) { m = el('div', { class: 'menu submenu', role: 'menu', hidden: true }); document.body.append(m); subs[depth] = m; }
+    return m;
+  }
+  function closeSubs(from) { for (let d = from; d < subs.length; d++) if (subs[d]) subs[d].hidden = true; }
+  function place(m, x, y, alt) {
     m.hidden = false;
     const r = m.getBoundingClientRect();
-    const px = Math.min(x, window.innerWidth - r.width - 8);
+    let px = x;
+    if (px + r.width > window.innerWidth - 8) px = alt != null ? alt - r.width : window.innerWidth - r.width - 8;
     const py = Math.min(y, window.innerHeight - r.height - 8);
     m.style.left = Math.max(8, px) + 'px';
     m.style.top = Math.max(8, py) + 'px';
+  }
+  function openSub(btn, items, depth) {
+    closeSubs(depth);
+    const m = subEl(depth);
+    fill(m, items, depth);
+    const r = btn.getBoundingClientRect();
+    place(m, r.right + 4, r.top - 6, r.left - 4);
+  }
+  function openMenu(items, x, y) {
+    const m = $('#menu');
+    closeSubs(1);
+    fill(m, items, 0);
+    place(m, x, y);
     const first = m.querySelector('button:not(:disabled)');
     if (first) first.focus({ preventScroll: true });
   }
-  function closeMenu() { $('#menu').hidden = true; }
+  function closeMenu() { $('#menu').hidden = true; closeSubs(1); }
   function menuOpen() { return !$('#menu').hidden; }
 
   document.addEventListener('pointerdown', (e) => {
-    if (menuOpen() && !e.target.closest('#menu')) closeMenu();
+    if (menuOpen() && !e.target.closest('.menu')) closeMenu();
   }, true);
 
   // Modal: build(close) returns the modal content element

@@ -90,18 +90,46 @@ async function boot() {
     identity = { admin: false, team: true };
   }
   me = makeMe(settings.email, settings.name);
+  await clearEmptyUntitled();
   const projects = await allProjects(online);
   const open = pendingOpenFile;
   pendingOpenFile = null;
+  // Like PureRef, start on a fresh board, unless set to reopen the last one.
+  // A window rebuilt for transparent mode goes straight back to its board.
+  const resume = resumeProject;
+  resumeProject = null;
+  const last = resume || (settings.startWith === 'last' ? settings.lastProject : null);
   return {
     screen: 'app', me, online, admin: identity.admin, team: identity.team,
-    projects, lastProject: settings.lastProject || null, openFile: open, prefs: prefs(), version: app.getVersion(), root: ROOT(),
+    projects, lastProject: last || null, openFile: open, prefs: prefs(), version: app.getVersion(), root: ROOT(),
   };
 }
 
 function prefs() {
-  return { alwaysOnTop: !!settings.alwaysOnTop, opacity: settings.opacity || 1, sidebar: settings.sidebar !== false };
+  return {
+    alwaysOnTop: !!settings.alwaysOnTop, opacity: settings.opacity || 1, sidebar: settings.sidebar !== false,
+    transparent: !!settings.transparent, startWith: settings.startWith === 'last' ? 'last' : 'new',
+  };
 }
+
+// Untitled boards left empty from earlier sessions are tidied away at start,
+// so the list never fills up with blank ones. Anything with content stays.
+async function clearEmptyUntitled() {
+  for (const p of await lib.scanProjects(SCRATCH(), me)) {
+    if (session && session.rec.id === p.id) continue;
+    try {
+      if (!(await noMedia(p.dir))) continue;
+      let hasItems = false;
+      for (const f of await fsp.readdir(path.join(p.dir, 'changes'))) {
+        const data = await readJson(path.join(p.dir, 'changes', f));
+        if (data && data.items && Object.keys(data.items).length) { hasItems = true; break; }
+      }
+      if (!hasItems) await fsp.rm(p.dir, { recursive: true, force: true });
+    } catch (_) {}
+  }
+}
+
+let resumeProject = null;
 
 // Local projects plus shared boards not yet on this computer
 async function allProjects(online = true) {
@@ -353,6 +381,33 @@ handle('projects:rename', async (newName) => {
   return { name: data.name };
 });
 
+// Rename any board from the sidebar or the top bar. An untitled board gets saved
+// into Documents under the new name; an open one is renamed in place.
+handle('projects:renameAny', (id, newName) => serial(async () => {
+  const name = cleanFolderName(newName);
+  if (!String(newName || '').trim()) return { error: 'Give the board a name.' };
+  const open = session && session.rec.id === id ? session : null;
+  const rec = open ? open.rec : await findLocal(id);
+  if (!rec) return { error: "That board isn't on this computer yet. Open it first." };
+  if (rec.scratch) {
+    if (importing.has(rec.id)) return { error: 'Wait for the files to finish coming in, then save.' };
+    if (open) await closeCurrent();
+    let saved;
+    try { saved = await lib.saveScratch(rec, ROOT(), name); } catch (e) {
+      if (open) await openProject(rec);
+      return { error: "Couldn't save the board there. Close anything using its files and try again." };
+    }
+    saved.mine = true;
+    if (open) { const res = await openProject(saved); return { name: saved.name, reopened: res }; }
+    return { name: saved.name };
+  }
+  if (rec.owner && me && rec.owner.email && rec.owner.email !== me.email) return { error: 'Only the owner can rename this board.' };
+  const data = await lib.updateProject(rec, { name });
+  rec.name = data.name;
+  if (rec.shared) { try { await cloud.call('projects.rename', { id: rec.shared.id, name: data.name }); } catch (_) {} }
+  return { name: data.name };
+}));
+
 // Share: upload this board to the EyeStudio Drive, then invite people
 handle('projects:share', async (projectId, emails) => {
   const s = sessionFor(projectId);
@@ -507,6 +562,36 @@ handle('win:opacity', async (delta) => {
   return settings.opacity;
 });
 
+handle('win:setOpacity', async (value) => {
+  settings.opacity = Math.max(0.2, Math.min(1, Math.round(Number(value) * 20) / 20 || 1));
+  win.setOpacity(settings.opacity);
+  saveSettings();
+  return settings.opacity;
+});
+
+handle('prefs:set', async (patch) => {
+  if (patch && 'startWith' in patch) settings.startWith = patch.startWith === 'last' ? 'last' : 'new';
+  saveSettings();
+  return prefs();
+});
+
+// Transparent mode needs a window made see through from the start, so the window
+// is rebuilt in place (same size and spot) and goes straight back to the board.
+handle('win:transparent', async (on) => {
+  on = !!on;
+  if (on === !!settings.transparent) return on;
+  settings.transparent = on;
+  await saveSettings();
+  if (session) await session.flush();
+  resumeProject = session ? session.rec.id : null;
+  const old = win;
+  const bounds = old.getBounds();
+  createWindow(bounds);
+  old.__rebuilding = true;
+  old.destroy();
+  return on;
+});
+
 function setClickThrough(on) {
   clickThrough = !!on;
   if (!win) return;
@@ -524,15 +609,19 @@ handle('win:maximize', async () => (win.isMaximized() ? win.unmaximize() : win.m
 handle('win:close', async () => win.close());
 handle('prefs:sidebar', async (on) => { settings.sidebar = !!on; saveSettings(); return on; });
 
-function createWindow() {
+function createWindow(bounds) {
   const area = screen.getPrimaryDisplay().workAreaSize;
+  const see = !!settings.transparent;
   win = new BrowserWindow({
-    width: Math.min(1360, area.width - 80),
-    height: Math.min(860, area.height - 80),
+    width: bounds ? bounds.width : Math.min(1360, area.width - 80),
+    height: bounds ? bounds.height : Math.min(860, area.height - 80),
+    ...(bounds ? { x: bounds.x, y: bounds.y } : {}),
     minWidth: 360,
     minHeight: 260,
     frame: false,
-    backgroundColor: '#1C1B1A',
+    transparent: see,
+    hasShadow: !see,
+    backgroundColor: see ? '#00000000' : '#1C1B1A',
     show: false,
     title: 'Eye Refs',
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true, spellcheck: false },
@@ -548,9 +637,14 @@ function createWindow() {
     return { action: 'deny' };
   });
   win.webContents.on('will-navigate', (e) => e.preventDefault());
+  // Moving the window by its top bar: the page gets no pointer events while the
+  // system drags, so tell it, and the bar stays put the whole time.
+  const thisWin = win;
+  thisWin.on('move', () => { if (win === thisWin) send('win:moved'); });
 
   let closing = false;
   win.on('close', async (e) => {
+    if (thisWin.__rebuilding || win !== thisWin) return;
     if (closing || (!session && !sync)) return;
     e.preventDefault();
     closing = true;
