@@ -174,6 +174,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const vz2 = await win.evaluate(() => ({ ...Board.view }));
   await win.evaluate((v) => { Object.assign(Board.view, v); Board.applyView(); }, vz);
   expect('scroll zooms, swipes never pan', vz1.s > vz.s && vz2.x === vz1.x && vz2.y === vz1.y && vz2.s === vz1.s, { vz, vz1, vz2 });
+  // See through: the colour goes clear, the dots stay
+  const seeRes = await win.evaluate(() => { document.body.classList.add('see'); const cs = getComputedStyle(document.querySelector('#canvas')); const r = { bg: cs.backgroundColor, img: cs.backgroundImage }; document.body.classList.remove('see'); return r; });
+  expect('see through keeps dots and grid', seeRes.bg === 'rgba(0, 0, 0, 0)' && seeRes.img !== 'none', seeRes);
   // A message never sits on the pen bar
   await win.evaluate(() => Board.setTool('pen'));
   await win.waitForSelector('#penBar:not([hidden])');
@@ -364,15 +367,17 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   expect('pending remote cleared on board switch', switchRes.pendingBefore && switchRes.pending === null && !switchRes.ghost, switchRes);
   // Start screen on a fresh board, like PureRef: drop zone plus recent boards
   await win.waitForFunction(() => document.querySelectorAll('#startCards .start-card').length > 0, null, { timeout: 8000 });
-  const startRes = await win.evaluate(() => ({ shown: getComputedStyle(document.querySelector('#start')).display !== 'none' && !document.querySelector('#start').hidden, cards: [...document.querySelectorAll('#startCards .start-card .nm')].map((n) => n.textContent), pics: document.querySelectorAll('#startCards img').length }));
+  const startRes = await win.evaluate(() => ({ shown: getComputedStyle(document.querySelector('#start')).display !== 'none' && !document.querySelector('#start').hidden, cards: [...document.querySelectorAll('#startCards .start-card .nm')].map((n) => n.textContent), pics: document.querySelectorAll('#startCards img').length, sidebar: !document.querySelector('#sidebar').hidden }));
   await win.screenshot({ path: `${OUT}/09-new.png` });
-  expect('start screen shows recent boards', startRes.shown && startRes.cards.includes('Spring Campaign') && startRes.pics > 0, startRes);
+  expect('start screen shows recent boards', startRes.shown && startRes.cards.includes('Spring Campaign') && startRes.pics > 0 && !startRes.sidebar, startRes);
   const fresh = await win.evaluate(() => Board.live().length);
   // Something on the untitled board: leaving it asks first, and "Don't save" throws it away
   await win.evaluate(() => Board.addNote());
   await win.keyboard.press('Escape');
   await sleep(500);
   const startGone = await win.evaluate(() => getComputedStyle(document.querySelector('#start')).display === 'none');
+  const sideTimes = await win.evaluate(() => ({ sidebar: !document.querySelector('#sidebar').hidden, times: [...document.querySelectorAll('#tree .row .when')].map((n) => n.textContent) }));
+  expect('sidebar back with edit times once the board has something', sideTimes.sidebar && sideTimes.times.length > 0 && sideTimes.times.every((t) => /^(Now|\d+[mhd]|\d+ \w+|\w+ \d+)$/.test(t)), sideTimes);
   await win.click('#tree >> text=Spring Campaign');
   await win.waitForSelector('#modal >> text=Save this board?', { timeout: 5000 }).catch(() => {});
   const asked = await win.evaluate(() => !!document.querySelector('.modal, #modal') && document.body.textContent.includes('Save this board?'));

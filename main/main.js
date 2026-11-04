@@ -773,6 +773,8 @@ if (!app.requestSingleInstanceLock()) {
   });
   app.whenReady().then(async () => {
     await loadSettings();
+    // Always open in the normal view. See through is for the moment you need it.
+    settings.transparent = false;
     if (process.platform === 'darwin') {
       Menu.setApplicationMenu(Menu.buildFromTemplate([
         { role: 'appMenu' },

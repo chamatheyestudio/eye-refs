@@ -132,7 +132,7 @@
     S.transparent = !!r.prefs.transparent;
     document.body.classList.toggle('see', S.transparent);
     setBg(S.bg, true);
-    setSidebar(r.prefs.sidebar, true);
+    S.sidebar = r.prefs.sidebar; S.browse = false; applySide();
     syncToolbar();
     renderSidebar();
     if (!S.online) toast("Working offline. Shared boards will catch up when you're back online.");
@@ -151,6 +151,7 @@
     if (!res || res.error) { toast((res && res.error) || 'Could not open that project.', true); return; }
     const leftScratch = S.current && S.current.scratch && S.current.id !== res.record.id;
     S.current = res.record;
+    S.browse = false;
     if (leftScratch) setTimeout(rescan, 50);
     S.status = res.status;
     S.readOnly = res.readOnly;
@@ -206,6 +207,7 @@
         const isCurrent = S.current && S.current.id === p.id;
         const n = isCurrent ? others(S.here).length : 0;
         let meta = null;
+        const when = !p.scratch && p.modified ? el('span', { class: 'meta when', text: shortAgo(p.modified), title: new Date(p.modified).toLocaleString() }) : null;
         if (p.scratch) meta = el('span', { class: 'meta', text: 'Not saved' });
         else if (n) meta = el('span', { class: 'meta here', html: ICONS.people + `<span>${n} here</span>` });
         else if (p.requests) meta = el('span', { class: 'meta here', text: p.requests === 1 ? '1 request' : `${p.requests} requests` });
@@ -213,7 +215,7 @@
         else if (!p.mine && p.owner) meta = el('span', { class: 'meta', text: `${p.owner.name}'s` });
         else if (p.shared) meta = el('span', { class: 'meta', html: ICONS.people });
         const pr = el('button', { class: 'row project' + (S.current && S.current.id === p.id ? ' current' : ''), role: 'treeitem', title: p.mine ? p.name : `${p.name}, owned by ${p.owner ? p.owner.name : 'someone else'}` },
-          el('span', { class: 'name', text: p.name }), meta);
+          el('span', { class: 'name', text: p.name }), meta, when);
         // One click opens, a double click renames in place
         let clickTimer = null;
         pr.addEventListener('click', () => {
@@ -265,14 +267,29 @@
     return `Version ${m[1]}${m[2] ? ` ${m[2]}${m[3] ? ' ' + m[3] : ''}` : ''}`;
   }
 
-  function setSidebar(on, quiet) {
-    S.sidebar = on;
+  // The start screen already lists the boards, so the sidebar stays out of the
+  // way there until you ask for it (All boards, or the logo).
+  const onStart = () => !!(S.current && S.current.scratch && !S.readOnly && document.body.classList.contains('board-empty'));
+  function applySide() {
+    const starting = onStart() && !S.browse;
+    const on = S.sidebar && !starting;
     $('#sidebar').hidden = !on;
     $('#showSidebar').hidden = on;
     document.body.classList.toggle('has-sidebar', on);
     document.body.classList.toggle('no-sidebar', !on);
+    document.body.classList.toggle('browse', onStart() && !!S.browse);
+  }
+  function setSidebar(on, quiet) {
+    S.sidebar = on;
+    if (on) S.browse = true;
+    else S.browse = false;
+    applySide();
     if (!quiet) api.setSidebarPref(on);
   }
+  new MutationObserver(() => {
+    const st = onStart();
+    if (st !== S.wasStart) { S.wasStart = st; if (!st) S.browse = false; applySide(); }
+  }).observe(document.body, { attributes: true, attributeFilter: ['class'] });
 
   // ---------- top bar ----------
   function syncChrome() {
@@ -733,6 +750,18 @@
     ]);
   });
 
+  // Sidebar times: short, so names keep their room
+  function shortAgo(t) {
+    const m = Math.floor((Date.now() - t) / 60000);
+    if (m < 1) return 'Now';
+    if (m < 60) return `${m}m`;
+    const h = Math.floor(m / 60);
+    if (h < 24) return `${h}h`;
+    const d = Math.floor(h / 24);
+    if (d < 7) return `${d}d`;
+    return new Date(t).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+  }
+
   // ---------- start screen ----------
   function ago(t) {
     const m = Math.round((Date.now() - t) / 60000);
@@ -762,6 +791,7 @@
   async function renderStart() {
     const show = !!(S.current && S.current.scratch && !S.readOnly);
     $('#start').hidden = !show;
+    applySide();
     if (!show) return;
     const g = ++startGen;
     const r = await api.recent();
@@ -778,7 +808,7 @@
     }
     $('#startRecent').hidden = !r.boards.length;
   }
-  $('#startBrowse').onclick = () => setSidebar(true);
+  $('#startBrowse').onclick = () => { S.sidebar = true; S.browse = true; applySide(); api.setSidebarPref(true); };
   $('#startOpen').onclick = async () => { const f = await api.openFileDialog(); if (f) confirmLeave(async () => openResult(await api.openProjectFile(f))); };
 
   function saveModal(then) {
