@@ -1,0 +1,24 @@
+name: Mac see through check
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['test/mac/**', '.github/workflows/mac-check.yml']
+jobs:
+  check:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm ci
+      - name: Run see through windows and capture the screen
+        run: OUT=$RUNNER_TEMP/see npx electron test/mac/see-main.js || true
+      - name: Read pixels
+        run: |
+          cd $RUNNER_TEMP/see && ls -la && cat results.json || true
+          for f in *.png; do echo "$f: $(sips -g pixelWidth -g pixelHeight $f | tail -2 | tr '\n' ' ')"; done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: see-check
+          path: ${{ runner.temp }}/see
