@@ -142,6 +142,8 @@
     if (last) openResult(await api.openProject(last.id));
     else openResult(await api.newBoard());
     syncChrome();
+    // Let the pictures paint before a rebuilt window is shown
+    setTimeout(() => api.ready(), 350);
   }
 
   // ---------- projects ----------
@@ -575,10 +577,15 @@
     if (S.transparent && !quiet) setTransparent(false);
     drawSettings();
   }
+  // Only the board background goes clear; references, notes and drawings stay solid
   async function setTransparent(on) {
-    // The window is rebuilt see through and comes straight back to this board
     if (S.current) await api.flush();
-    await api.setTransparent(on);
+    const r = await api.setTransparent(on);
+    if (r && r.rebuilt) return; // Windows: a new window takes over once it's ready
+    S.transparent = !!on;
+    document.body.classList.toggle('see', S.transparent);
+    drawSettings();
+    toast(S.transparent ? 'See through. Only your references show.' : 'Background back');
   }
 
   // ---------- settings: everything on one panel, one click away ----------

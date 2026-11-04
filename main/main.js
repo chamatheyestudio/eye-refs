@@ -585,20 +585,38 @@ handle('prefs:set', async (patch) => {
 
 // Transparent mode needs a window made see through from the start, so the window
 // is rebuilt in place (same size and spot) and goes straight back to the board.
+// On a Mac the window is always made able to see through, so switching is instant
+// and only the page background changes. Windows can only resize a normal window,
+// so there the window is rebuilt: the new one stays hidden until its board has
+// loaded, then takes the old one's place, with nothing closing on screen.
+const SEE_ALWAYS = process.platform === 'darwin';
+let swapFrom = null;
 handle('win:transparent', async (on) => {
   on = !!on;
-  if (on === !!settings.transparent) return on;
+  if (on === !!settings.transparent) return { on, rebuilt: false };
   settings.transparent = on;
   await saveSettings();
+  if (SEE_ALWAYS) return { on, rebuilt: false };
   if (session) await session.flush();
   resumeProject = session ? session.rec.id : null;
   const old = win;
-  const bounds = old.getBounds();
-  createWindow(bounds);
-  old.__rebuilding = true;
-  old.destroy();
-  return on;
+  swapFrom = old;
+  createWindow(old.getBounds(), { swap: true });
+  setTimeout(finishSwap, 6000); // never leave the old one hanging
+  return { on, rebuilt: true };
 });
+function finishSwap() {
+  const old = swapFrom;
+  if (!old) return;
+  swapFrom = null;
+  if (settings.opacity) win.setOpacity(settings.opacity);
+  applyAlwaysOnTop();
+  win.show();
+  win.focus();
+  old.__rebuilding = true;
+  if (!old.isDestroyed()) old.destroy();
+}
+ipcMain.on('app:ready', (e) => { if (swapFrom && win && e.sender === win.webContents) finishSwap(); });
 
 function setClickThrough(on) {
   clickThrough = !!on;
@@ -617,9 +635,9 @@ handle('win:maximize', async () => (win.isMaximized() ? win.unmaximize() : win.m
 handle('win:close', async () => win.close());
 handle('prefs:sidebar', async (on) => { settings.sidebar = !!on; saveSettings(); return on; });
 
-function createWindow(bounds) {
+function createWindow(bounds, opts = {}) {
   const area = screen.getPrimaryDisplay().workAreaSize;
-  const see = !!settings.transparent;
+  const see = process.platform === 'darwin' || !!settings.transparent;
   win = new BrowserWindow({
     width: bounds ? bounds.width : Math.min(1360, area.width - 80),
     height: bounds ? bounds.height : Math.min(860, area.height - 80),
@@ -636,6 +654,7 @@ function createWindow(bounds) {
   });
   win.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
   win.once('ready-to-show', () => {
+    if (opts.swap) return; // shown once its board is on screen
     if (settings.opacity) win.setOpacity(settings.opacity);
     applyAlwaysOnTop();
     win.show();

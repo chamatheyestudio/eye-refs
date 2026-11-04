@@ -70,4 +70,5 @@ contextBridge.exposeInMainWorld('eyerefs', {
   onOpenFile: on('open-file'),
   onClickThrough: on('win:clickThrough'),
   onMoved: on('win:moved'),
+  ready: () => ipcRenderer.send('app:ready'),
 });
