@@ -417,6 +417,21 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     return r;
   });
   expect('palette gives five colours and adds the strip under the picture', pal.colors && pal.colors.length >= 3 && pal.colors.every((c) => /^#[0-9A-F]{6}$/.test(c.hex)) && pal.modal && pal.added === 1 && pal.below && pal.left, pal);
+  // Export: the board as a sharp picture or a PDF, drawn from the original files
+  const exp = await (async () => {
+    const dir = path.join(OUT, 'exports');
+    fs.mkdirSync(dir, { recursive: true });
+    await app.evaluate(({ dialog }, dir) => { dialog.showSaveDialog = async (w, o) => ({ canceled: false, filePath: dir + '/' + String(o.defaultPath).split(/[\\/]/).pop() }); }, dir);
+    const info = await win.evaluate(async () => { const r = await Board.renderExport(null); const px = r.canvas.getContext('2d').getImageData(Math.round(r.w / 2), Math.round(r.h / 2), 1, 1).data; return { w: r.w, h: r.h, screenW: innerWidth, px: [...px] }; });
+    await win.evaluate(() => Board.exportAs('png', false));
+    await win.evaluate(() => Board.exportAs('pdf', false));
+    await sleep(500);
+    const files = fs.readdirSync(dir);
+    const png = files.find((f) => f.endsWith('.png')), pdf = files.find((f) => f.endsWith('.pdf'));
+    const pdfHead = pdf ? fs.readFileSync(path.join(dir, pdf)).slice(0, 8).toString() : '';
+    return { ...info, files, pngBytes: png ? fs.statSync(path.join(dir, png)).size : 0, pdfHead };
+  })();
+  expect('export makes a sharp picture and a PDF of the board', exp.w > exp.screenW && exp.pngBytes > 50000 && exp.pdfHead.startsWith('%PDF-1.4'), exp);
   // A message never sits on the pen bar
   await win.evaluate(() => Board.setTool('pen'));
   await win.waitForSelector('#penBar:not([hidden])');

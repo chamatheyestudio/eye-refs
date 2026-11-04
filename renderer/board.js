@@ -1663,6 +1663,112 @@
     }, 0);
   }
 
+  // ---------- export ----------
+  // Draws the board (or the chosen pieces) into one big picture at full quality:
+  // each picture is drawn from its own file, so nothing is limited to screen size.
+  async function renderExport(ids, opts = {}) {
+    const list = (ids && ids.length ? ids.map((id) => B.items.get(id)) : live()).filter((it) => it && !it.deleted && it.type);
+    if (!list.length) return null;
+    list.sort((a, b) => (a.z || 0) - (b.z || 0));
+    const box = bbox(list.map((it) => it.id));
+    const pad = Math.max(24, Math.min(box.w, box.h) * 0.03);
+    // As sharp as the sharpest picture, within a size a computer can handle
+    let k = 1;
+    for (const it of list) if ((it.type === 'image' || it.type === 'video') && it.nw && it.w) k = Math.max(k, Math.min(4, it.nw / it.w));
+    const W0 = box.w + pad * 2, H0 = box.h + pad * 2;
+    k = Math.min(k, 12000 / Math.max(W0, H0), Math.sqrt(120e6 / (W0 * H0)));
+    const W = Math.max(1, Math.round(W0 * k)), H = Math.max(1, Math.round(H0 * k));
+    const cv = document.createElement('canvas');
+    cv.width = W; cv.height = H;
+    const x = cv.getContext('2d');
+    x.imageSmoothingQuality = 'high';
+    if (!opts.clear) { x.fillStyle = '#1C1B1A'; x.fillRect(0, 0, W, H); }
+    x.scale(k, k);
+    x.translate(pad - box.x, pad - box.y);
+    const loadImg = async (it) => {
+      const v = it.type === 'video' ? videoEl(it.id) : null;
+      const bytes = await api.mediaBytes(B.project.id, it.src, v ? v.currentTime : (it.vin || 0), it.type);
+      if (!bytes) return null;
+      const type = it.type === 'video' ? 'image/png' : /\.svg$/i.test(it.src) ? 'image/svg+xml' : '';
+      const url = URL.createObjectURL(new Blob([bytes], type ? { type } : {}));
+      try {
+        const img = new Image();
+        img.src = url;
+        await img.decode();
+        return img;
+      } catch (_) { return null; } finally { setTimeout(() => URL.revokeObjectURL(url), 1000); }
+    };
+    for (const it of list) {
+      const d = dims(it);
+      x.save();
+      x.translate(it.x + d.w / 2, it.y + d.h / 2);
+      x.rotate(((it.rot || 0) * Math.PI) / 180);
+      x.translate(-d.w / 2, -d.h / 2);
+      const op = it.op == null ? 1 : it.op;
+      if (it.type === 'image' || it.type === 'video') {
+        const img = await loadImg(it);
+        x.globalAlpha = op;
+        if (it.gray) x.filter = 'grayscale(1)';
+        if (img) {
+          const c = { ...ZC, ...(it.crop || {}) };
+          const iw = img.naturalWidth || it.nw, ih = img.naturalHeight || it.nh;
+          x.save();
+          x.translate(d.w / 2, d.h / 2); x.scale(it.flipX ? -1 : 1, it.flipY ? -1 : 1); x.translate(-d.w / 2, -d.h / 2);
+          x.drawImage(img, c.l * iw, c.t * ih, iw * (1 - c.l - c.r), ih * (1 - c.t - c.b), 0, 0, d.w, d.h);
+          x.restore();
+        } else { x.fillStyle = '#2A2927'; x.fillRect(0, 0, d.w, d.h); }
+      } else if (it.type === 'draw') {
+        const kk = d.k || (it.nw ? it.w / it.nw : 1);
+        x.scale(kk, kk);
+        x.translate(-((it.crop || ZC).l || 0) * it.nw, -((it.crop || ZC).t || 0) * it.nh);
+        x.strokeStyle = it.color || '#D7F04A'; x.globalAlpha = op;
+        x.lineWidth = it.sw || 4; x.lineCap = 'round'; x.lineJoin = 'round';
+        if (it.style === 'dotted') x.setLineDash([0, (it.sw || 4) * 2]);
+        x.stroke(new Path2D(strokePath(parsePts(it.pts), it.style === 'arrow' ? (it.sw || 4) : 0)));
+      } else if (it.type === 'note') {
+        const fs = it.fs || 16;
+        const node = B.els.get(it.id);
+        const t = node && node.querySelector('.note-text');
+        const cs = t ? getComputedStyle(t) : null;
+        x.globalAlpha = op;
+        if (!it.plain) { x.fillStyle = '#2A2927'; x.fillRect(0, 0, d.w, d.h); }
+        x.fillStyle = it.plain ? (it.color || '#D7F04A') : (cs ? cs.color : '#F4F3EE');
+        x.font = `${it.plain ? 600 : 400} ${fs}px Inter, system-ui, sans-serif`;
+        x.textBaseline = 'top';
+        const padX = it.plain ? fs * 0.15 : fs * 0.95, padY = it.plain ? fs * 0.1 : fs * 0.8;
+        const lh = fs * (it.plain ? 1.25 : 1.45);
+        const maxW = d.w - padX * 2;
+        let yy = padY;
+        for (const para of String(it.text || '').split('\n')) {
+          if (it.plain) { x.fillText(para, padX, yy + (lh - fs) / 2); yy += lh; continue; }
+          let line = '';
+          for (const word of para.split(/(\s+)/)) {
+            const test = line + word;
+            if (line && x.measureText(test).width > maxW) { x.fillText(line.trimEnd(), padX, yy + (lh - fs) / 2); yy += lh; line = word.trimStart(); }
+            else line = test;
+          }
+          x.fillText(line, padX, yy + (lh - fs) / 2); yy += lh;
+        }
+      }
+      x.restore();
+    }
+    return { canvas: cv, w: W, h: H };
+  }
+
+  async function exportAs(kind, onlySelection) {
+    if (!B.project) return;
+    const ids = onlySelection ? selIds() : null;
+    toast('Getting the export ready');
+    const r = await renderExport(ids);
+    if (!r) return toast('Nothing to export yet.', true);
+    const blob = await new Promise((res) => r.canvas.toBlob(res, kind === 'pdf' ? 'image/jpeg' : 'image/png', 0.95));
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    const name = (B.project.name || 'Eye Refs') + (onlySelection ? ' selection' : '');
+    const res = await api.exportSave({ kind, bytes, w: r.w, h: r.h, name });
+    if (res && res.saved) toast(`Saved ${res.name}`);
+    else if (res && res.error) toast(res.error, true);
+  }
+
   // ---------- colour palette ----------
   async function getPalette(id) {
     const it = B.items.get(id);
@@ -1740,6 +1846,9 @@
           { label: 'Cut', key: 'Mod+X', onClick: () => copySelection(true), disabled: !ed },
           { label: 'Paste', key: 'Mod+V', onClick: () => pasteNative(at), disabled: !ed },
           { label: 'Duplicate', onClick: duplicate, disabled: !ed },
+          '-',
+          { label: 'Export as picture', onClick: () => exportAs('png', true) },
+          { label: 'Export as PDF', onClick: () => exportAs('pdf', true) },
         ] },
         { label: 'Locked', key: 'Alt+L', checked: ids.every((id) => B.items.get(id).locked), onClick: () => toggleField('locked'), disabled: !ed },
         { label: 'Delete', key: 'Delete', onClick: deleteSelection, disabled: !ed },
@@ -1814,7 +1923,7 @@
   function restore(ids) { commit(ids.map((id) => ({ id, fields: { deleted: false } }))); B.sel = new Set(ids); renderOverlay(); }
 
   Object.assign(B, {
-    addText, restyle, restyleDone, getPalette, addPaletteStrip, load, unload, applyRemote, render, applyView, zoomAt, fitRect, toWorld, toScreen,
+    addText, restyle, restyleDone, getPalette, addPaletteStrip, renderExport, exportAs, load, unload, applyRemote, render, applyView, zoomAt, fitRect, toWorld, toScreen,
     commit, undo, redo, addPaths, addBytes, addUrl, addNote, editNote, stopEditing,
     copySelection, pasteInternal, pasteNative, pasteKey, deleteSelection, duplicate, toggleField, resetCrop, resetTransform, front, back,
     align, normalize, arrange, focusSelection, focusAll, focusStep, selectAll, clearSel, selIds,

@@ -674,6 +674,51 @@ handle('media:state', async (projectId, src) => {
   return 'missing';
 });
 
+// Media as bytes for an export (a video gives the frame showing now)
+handle('media:bytes', async (projectId, src, time, kind) => {
+  if (!session || session.rec.id !== projectId) return null;
+  const file = path.join(session.mediaDir, path.basename(String(src || '')));
+  if (!(await exists(file))) return null;
+  if (kind === 'video') return media.frameBytes(file, Number(time) || 0);
+  return fsp.readFile(file);
+});
+
+// A one page PDF holding a JPEG, sized so the longest side is about A3
+function jpegPdf(jpg, w, h) {
+  const k = 1190 / Math.max(w, h);
+  const pw = Math.round(w * k * 100) / 100, ph = Math.round(h * k * 100) / 100;
+  const parts = [];
+  const offsets = [];
+  let len = 0;
+  const add = (b) => { const buf = Buffer.isBuffer(b) ? b : Buffer.from(b, 'binary'); parts.push(buf); len += buf.length; };
+  const obj = (n, body) => { offsets[n] = len; add(`${n} 0 obj\n`); for (const b of [].concat(body)) add(b); add('\nendobj\n'); };
+  add('%PDF-1.4\n%\xE2\xE3\xCF\xD3\n');
+  obj(1, '<< /Type /Catalog /Pages 2 0 R >>');
+  obj(2, '<< /Type /Pages /Kids [3 0 R] /Count 1 >>');
+  obj(3, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pw} ${ph}] /Resources << /XObject << /Im0 4 0 R >> >> /Contents 5 0 R >>`);
+  obj(4, [`<< /Type /XObject /Subtype /Image /Width ${w} /Height ${h} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpg.length} >>\nstream\n`, jpg, '\nendstream']);
+  const content = `q ${pw} 0 0 ${ph} 0 0 cm /Im0 Do Q`;
+  obj(5, `<< /Length ${content.length} >>\nstream\n${content}\nendstream`);
+  const xref = len;
+  add(`xref\n0 6\n0000000000 65535 f \n${[1, 2, 3, 4, 5].map((n) => String(offsets[n]).padStart(10, '0') + ' 00000 n \n').join('')}trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`);
+  return Buffer.concat(parts);
+}
+
+handle('export:save', async (o) => {
+  const kind = o && o.kind === 'pdf' ? 'pdf' : 'png';
+  const safe = String((o && o.name) || 'Eye Refs').replace(/[\\/:*?"<>|]+/g, ' ').trim().slice(0, 80) || 'Eye Refs';
+  const r = await dialog.showSaveDialog(win, {
+    title: kind === 'pdf' ? 'Export as PDF' : 'Export as picture',
+    defaultPath: path.join(app.getPath('downloads'), `${safe}.${kind}`),
+    filters: kind === 'pdf' ? [{ name: 'PDF', extensions: ['pdf'] }] : [{ name: 'PNG picture', extensions: ['png'] }],
+  });
+  if (r.canceled || !r.filePath) return { canceled: true };
+  const bytes = Buffer.from(o.bytes);
+  await fsp.writeFile(r.filePath, kind === 'pdf' ? jpegPdf(bytes, o.w, o.h) : bytes);
+  return { saved: r.filePath, name: path.basename(r.filePath) };
+});
+handle('export:reveal', (p) => { if (p) shell.showItemInFolder(String(p)); return true; });
+
 handle('media:palette', async (projectId, src, time) => {
   if (!session || session.rec.id !== projectId) return { colors: [] };
   const file = path.join(session.mediaDir, path.basename(String(src || '')));

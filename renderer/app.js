@@ -741,6 +741,11 @@
           ? { label: 'Save', key: 'Mod+S', onClick: () => saveModal() }
           : { label: 'Rename', onClick: renameModal, disabled: !cur || !cur.mine },
         { label: 'Save as one file', key: 'Mod+Shift+S', onClick: packCurrent },
+        { label: 'Export', sub: [
+          { label: 'Board as picture', onClick: () => B.exportAs('png', false), disabled: !B.live().length },
+          { label: 'Board as PDF', onClick: () => B.exportAs('pdf', false), disabled: !B.live().length },
+          ...(B.selIds().length ? ['-', { label: 'Selection as picture', onClick: () => B.exportAs('png', true) }, { label: 'Selection as PDF', onClick: () => B.exportAs('pdf', true) }] : []),
+        ] },
         { label: 'Share', onClick: () => shareModal(), disabled: S.readOnly },
         { label: 'Show in folder', onClick: () => api.reveal(), disabled: cur && cur.scratch },
         '-',

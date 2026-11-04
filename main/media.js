@@ -112,6 +112,20 @@ function palette(file, time, count = 5) {
   });
 }
 
+// One frame of a video as PNG bytes, for exports
+function frameBytes(file, time) {
+  return new Promise((resolve) => {
+    const args = ['-hide_banner', '-loglevel', 'error'];
+    if (time > 0) args.push('-ss', String(time));
+    args.push('-i', file, '-frames:v', '1', '-f', 'image2pipe', '-vcodec', 'png', 'pipe:1');
+    const p = spawn(ffmpegPath(), args, { windowsHide: true });
+    const chunks = [];
+    p.stdout.on('data', (d) => chunks.push(d));
+    p.on('error', () => resolve(null));
+    p.on('close', () => resolve(chunks.length ? Buffer.concat(chunks) : null));
+  });
+}
+
 function run(args, onLine) {
   return new Promise((resolve, reject) => {
     const p = spawn(ffmpegPath(), args, { windowsHide: true });
@@ -365,4 +379,4 @@ async function grabFrame(mediaDir, src, time, me) {
 }
 
 module.exports = {
-  palette, fullSizeUrl, safeSrc, inMedia, importFile, importBytes, importUrl, grabFrame, kindOf, quickHash, probeInfo, COMPRESS_OVER_BYTES, ffmpegPath };
+  palette, frameBytes, fullSizeUrl, safeSrc, inMedia, importFile, importBytes, importUrl, grabFrame, kindOf, quickHash, probeInfo, COMPRESS_OVER_BYTES, ffmpegPath };
