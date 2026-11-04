@@ -203,6 +203,7 @@
       node.classList.toggle('plain', !!it.plain);
       const t = node.firstChild;
       t.style.color = it.plain ? (it.color || '#D7F04A') : '';
+      t.style.opacity = it.plain && it.op != null ? String(it.op) : '';
       if (B.editingId !== it.id && t.textContent !== (it.text || '')) t.textContent = it.text || '';
       node.style.transform = `translate(${it.x}px, ${it.y}px) rotate(${it.rot || 0}deg)`;
       return;
@@ -307,6 +308,7 @@
   }
 
   function renderOverlay() {
+    if (B.onSel) B.onSel();
     overlay.innerHTML = '';
     const ids = [...B.sel].filter((id) => B.items.get(id) && !B.items.get(id).deleted);
     if (!ids.length || (B.gesture && B.gesture.type === 'pan')) { syncVideoBar(); return; }
@@ -939,6 +941,35 @@
     t.oninput = () => renderOverlay();
     t.onblur = () => setTimeout(() => { if (B.editingId === id) stopEditing(); }, 0);
     renderOverlay();
+  }
+
+  // Restyle selected lines and text live (size, colour, opacity) and make it one
+  // undo step when the change is done
+  let styleBefore = null, styleKey = '';
+  function restyle(ids, fieldsFor, final) {
+    if (!canEdit() || !ids.length) return;
+    const key = ids.join(',');
+    if (styleBefore && styleKey !== key) restyleDone();
+    if (!styleBefore) {
+      styleKey = key;
+      styleBefore = ids.map((id) => { const it = B.items.get(id); return { id, fields: pick(it, it.type === 'draw' ? ['sw', 'color', 'op'] : ['fs', 'w', 'color', 'op']) }; });
+    }
+    for (const id of ids) {
+      const it = B.items.get(id);
+      if (!it) continue;
+      Object.assign(it, fieldsFor(it));
+      const node = B.els.get(id);
+      if (node) updateEl(node, it);
+    }
+    renderOverlay();
+    if (final) restyleDone();
+  }
+  function restyleDone() {
+    if (!styleBefore) return;
+    const before = styleBefore;
+    styleBefore = null; styleKey = '';
+    const changes = before.map((b) => ({ id: b.id, fields: pick(B.items.get(b.id), Object.keys(b.fields)) }));
+    if (changes.some((c, i) => JSON.stringify(c.fields) !== JSON.stringify(before[i].fields))) commit(changes, before);
   }
 
   let lastStopAt = 0;
@@ -1753,7 +1784,7 @@
   function restore(ids) { commit(ids.map((id) => ({ id, fields: { deleted: false } }))); B.sel = new Set(ids); renderOverlay(); }
 
   Object.assign(B, {
-    addText, load, unload, applyRemote, render, applyView, zoomAt, fitRect, toWorld, toScreen,
+    addText, restyle, restyleDone, load, unload, applyRemote, render, applyView, zoomAt, fitRect, toWorld, toScreen,
     commit, undo, redo, addPaths, addBytes, addUrl, addNote, editNote, stopEditing,
     copySelection, pasteInternal, pasteNative, pasteKey, deleteSelection, duplicate, toggleField, resetCrop, resetTransform, front, back,
     align, normalize, arrange, focusSelection, focusAll, focusStep, selectAll, clearSel, selIds,

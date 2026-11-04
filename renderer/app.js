@@ -465,8 +465,7 @@
   // ---------- toolbar ----------
   function syncToolbar() {
     $$('#toolbar [data-tool]').forEach((b) => b.classList.toggle('on', b.dataset.tool === B.tool));
-    $('#penBar').hidden = !['pen', 'eraser', 'text'].includes(B.tool) || !S.current;
-    if ($('#penBar').hidden && typeof closePicker === 'function') closePicker();
+    $('#penBar').hidden = !(drawing() || styleTargets().length) || !S.current;
     $$('#toolbar [data-tool="pen"]').forEach((b) => b.classList.toggle('on', B.tool === 'pen' || B.tool === 'eraser'));
     $('#penEraser').classList.toggle('on', B.tool === 'eraser');
     $('#penText').classList.toggle('on', B.tool === 'text');
@@ -487,6 +486,40 @@
   const nextColor = () => { const list = recent.length ? recent : PEN_COLORS.map((c) => ({ c, op: 1 })); const i = list.findIndex((r) => r.c.toUpperCase() === String(B.pen.color).toUpperCase()); const n = list[(i + 1) % list.length]; B.pen.color = n.c; B.pen.op = n.op == null ? 1 : n.op; savePen(); toast('Pen colour changed'); };
   $('#penEraser').addEventListener('click', () => B.setTool(B.tool === 'eraser' ? 'pen' : 'eraser'));
   $('#penText').addEventListener('click', () => B.setTool(B.tool === 'text' ? 'pen' : 'text'));
+  // Selected lines and text (or the text being typed): the pen bar shows their size
+  // and colour, and changing them changes those
+  function styleTargets() {
+    if (!S.current || S.readOnly) return [];
+    const ids = new Set(B.selIds ? B.selIds() : []);
+    if (B.editingId) ids.add(B.editingId);
+    const list = [...ids].map((id) => B.items.get(id)).filter((it) => it && !it.deleted);
+    if (!list.length || !list.every((it) => it.type === 'draw' || it.plain)) return [];
+    return list;
+  }
+  const lineK = (it) => (it.nw ? it.w / it.nw : 1);
+  const sizeOf = (it) => (it.type === 'draw' ? (it.sw || 4) * lineK(it) : ((it.fs || 16) * B.view.s - 12) / 2);
+  const textFs = (size) => (12 + size * 2) / B.view.s;
+  let selKey = '';
+  B.onSel = () => {
+    const k = (B.selIds ? B.selIds().join(',') : '') + '|' + (B.editingId || '');
+    if (k === selKey) return;
+    selKey = k;
+    B.restyleDone();
+    const t = styleTargets();
+    if (t.length) { B.pen.color = t[0].color || B.pen.color; B.pen.op = t[0].op == null ? 1 : t[0].op; B.pen.size = Math.max(1, Math.min(40, Math.round(sizeOf(t[0])))); }
+    syncToolbar();
+  };
+  function restyleTargets(final) {
+    const t = styleTargets();
+    if (!t.length) return;
+    const size = B.pen.size, color = B.pen.color, op = B.pen.op == null ? 1 : B.pen.op;
+    B.restyle(t.map((it) => it.id), (it) => {
+      if (it.type === 'draw') return { sw: Math.round((size / lineK(it)) * 100) / 100, color, op };
+      const fs = textFs(size), k = fs / (it.fs || 16);
+      return { fs, w: it.w * k, color, op };
+    }, final);
+  }
+
   function drawPenBar() {
     const styles = $('#penStyles');
     styles.innerHTML = '';
@@ -505,7 +538,8 @@
     $('#penColorDot').style.background = c;
     if (!$('#picker').hidden) paintPicker();
   }
-  $('#penSize').addEventListener('input', (e) => { B.pen.size = Number(e.target.value); if (B.tool === 'eraser') B.setTool('pen'); savePen(); });
+  $('#penSize').addEventListener('input', (e) => { B.pen.size = Number(e.target.value); if (B.tool === 'eraser') B.setTool('pen'); savePen(); restyleTargets(false); });
+  $('#penSize').addEventListener('change', () => restyleTargets(true));
 
   // ---------- colour picker ----------
   // A disc for the colour (around for the colour, inward for softer), sliders for
@@ -532,7 +566,11 @@
     try { localStorage.setItem('pen', JSON.stringify(B.pen)); } catch (_) {}
     drawPenBar();
     paintPicker(fromField);
+    restyleTargets(false);
+    clearTimeout(keepTimer);
+    keepTimer = setTimeout(() => { keepRecent(); restyleTargets(true); if (!$('#picker').hidden) drawRecent(); }, 1200);
   }
+  let keepTimer = null;
   function paintPicker(fromField) {
     const R = 84, ang = (HSV.h * Math.PI) / 180;
     const hex = toHex(hsv2rgb(HSV.h, HSV.s, HSV.v));
@@ -552,7 +590,7 @@
     for (const r of recent) {
       const op = r.op == null ? 1 : r.op;
       const b = el('button', { 'aria-label': `Colour ${r.c}`, title: op < 1 ? `${r.c}  ${Math.round(op * 100)} percent` : r.c }, el('span', { style: `background:${r.c};opacity:${op}` }));
-      b.onclick = () => { B.pen.color = r.c.toUpperCase(); B.pen.op = op; loadHsv(); setPen(); };
+      b.onclick = () => { B.pen.color = r.c.toUpperCase(); B.pen.op = op; loadHsv(); setPen(); restyleTargets(true); };
       box.append(b);
     }
   }
@@ -567,16 +605,16 @@
     $('#picker').hidden = true;
     $('#penColor').classList.remove('open');
     if (keep !== false) keepRecent();
+    restyleTargets(true);
   }
   $('#penColor').addEventListener('click', () => ($('#picker').hidden ? openPicker() : closePicker()));
-  document.addEventListener('pointerdown', (e) => { if (!$('#picker').hidden && !e.target.closest('#picker, #penColor')) closePicker(); }, true);
   const dragOn = (node, fn) => node.addEventListener('pointerdown', (e) => {
     e.preventDefault();
     node.setPointerCapture(e.pointerId);
     const mv = (ev) => { fn(ev, node.getBoundingClientRect()); setPen(); };
     mv(e);
     node.onpointermove = mv;
-    node.onpointerup = () => { node.onpointermove = null; };
+    node.onpointerup = () => { node.onpointermove = null; restyleTargets(true); };
   });
   dragOn($('#pkDisc'), (e, r) => { const x = e.clientX - r.left - r.width / 2, y = e.clientY - r.top - r.height / 2; HSV.h = ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360; HSV.s = Math.min(1, Math.hypot(x, y) / (r.width / 2)); });
   dragOn($('#pkBright'), (e, r) => { HSV.v = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)); });

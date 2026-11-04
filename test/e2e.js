@@ -316,17 +316,44 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await sleep(100);
   const picked = await win.evaluate(() => ({ color: Board.pen.color, hex: document.querySelector('#pkHex').value, dot: document.querySelector('#penColorDot').style.background }));
   await win.screenshot({ path: `${OUT}/03h-picker.png` });
-  await win.mouse.click(700, 300); // away: keeps it
+  await win.mouse.click(700, 300); // drawing on the board leaves the picker open
   await sleep(150);
-  const kept = await win.evaluate(() => ({ closed: document.querySelector('#picker').hidden, recent: JSON.parse(localStorage.getItem('penRecent') || '[]')[0] }));
-  await win.evaluate(() => Board.undo()); // the click away drew a dot
+  const stillOpen = await win.evaluate(() => !document.querySelector('#picker').hidden);
+  await win.click('#penColor'); // the wheel button tucks it away
+  await sleep(150);
+  const kept = await win.evaluate(() => ({ stillOpen: window.__x, closed: document.querySelector('#picker').hidden, recent: JSON.parse(localStorage.getItem('penRecent') || '[]')[0] }));
+  kept.stillOpen = stillOpen;
   const sizeRes = await win.evaluate(() => { const sl = document.querySelector('#penSize'); sl.value = '18'; sl.dispatchEvent(new Event('input', { bubbles: true })); const r = { size: Board.pen.size, label: document.querySelector('#penSizeVal').textContent }; sl.value = '4'; sl.dispatchEvent(new Event('input', { bubbles: true })); return r; });
   await win.evaluate(() => { Board.pen.color = '#D7F04A'; Board.setTool('select'); });
   const rgb = /^#([0-9A-F]{2})([0-9A-F]{2})([0-9A-F]{2})$/.exec(picked.color || '') || [];
   const blue = rgb.length && parseInt(rgb[3], 16) > 200 && parseInt(rgb[1], 16) < 40 && parseInt(rgb[2], 16) < 40;
   expect('colour disc sits above the right end of the pen bar', Math.abs(geo.pRight - geo.bRight) < 12 && geo.pBottom < geo.bTop - 10, geo);
   expect('colour disc picks the colour under the pointer', blue && picked.hex === picked.color.slice(1), picked);
-  expect('clicking away keeps the colour and adds it to Recent', kept.closed && kept.recent && kept.recent.c === picked.color, kept);
+  expect('picker stays open until the wheel is clicked, colour goes to Recent', kept.stillOpen && kept.closed && kept.recent && kept.recent.c === picked.color, kept);
+  // Select typed text: the pen bar shows, and size and colour change that text
+  const restyled = await win.evaluate(async () => {
+    const t = Board.live().find((x) => x.plain && x.text);
+    if (!t) return { none: true };
+    Board.setTool('select'); Board.sel = new Set([t.id]); Board.render();
+    await new Promise((r) => setTimeout(r, 50));
+    const bar = !document.querySelector('#penBar').hidden;
+    const fs0 = t.fs, w0 = t.w, c0 = t.color;
+    const sl = document.querySelector('#penSize');
+    sl.value = '30'; sl.dispatchEvent(new Event('input', { bubbles: true })); sl.dispatchEvent(new Event('change', { bubbles: true }));
+    const fs1 = Board.items.get(t.id).fs, w1 = Board.items.get(t.id).w;
+    document.querySelector('#pkRecent button') || document.querySelector('#penColor').click();
+    await new Promise((r) => setTimeout(r, 50));
+    const sw = [...document.querySelectorAll('#pkRecent button')].find((b) => /F4F3EE/i.test(b.getAttribute('aria-label')));
+    if (sw) sw.click();
+    const c1 = Board.items.get(t.id).color;
+    document.querySelector('#penColor').click();
+    Board.undo(); Board.undo();
+    const back = Board.items.get(t.id);
+    const r = { bar, fs0, fs1, grew: fs1 > fs0 && w1 > w0, c0, c1, backFs: back.fs, backC: back.color };
+    Board.clearSel();
+    return r;
+  });
+  expect('selected text takes the new size and colour, undo puts it back', restyled.bar && restyled.grew && /F4F3EE/i.test(restyled.c1 || '') && Math.abs(restyled.backFs - restyled.fs0) < 0.01 && restyled.backC === restyled.c0, restyled);
   expect('tip size is a slider', sizeRes.size === 18 && sizeRes.label === '18 px', sizeRes);
   // A message never sits on the pen bar
   await win.evaluate(() => Board.setTool('pen'));
