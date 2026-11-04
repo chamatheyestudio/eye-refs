@@ -31,11 +31,14 @@
   --warn: #F0B84A;
   --font: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
-  color-scheme: dark;
 }
+/* Dark form controls and scrollbars, set below the root on purpose: a dark colour
+   scheme or a background on the page root is remembered by macOS as the window's
+   own background, which would stop see through from ever showing what's behind. */
+body { color-scheme: dark; }
 
 * { box-sizing: border-box; }
-html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--text);
+html, body { margin: 0; height: 100%; overflow: hidden; background: transparent; color: var(--text);
   font: 13px/1.35 var(--font); letter-spacing: -0.011em; -webkit-font-smoothing: antialiased; user-select: none; }
 button { font: inherit; color: inherit; letter-spacing: inherit; }
 input, select, textarea { font: inherit; letter-spacing: inherit; }
@@ -47,8 +50,8 @@ svg { display: block; }
 #canvas.bg-dots { background-image: radial-gradient(var(--dot) 1px, transparent 1.2px); }
 #canvas.bg-grid { background-image: linear-gradient(var(--dot) 1px, transparent 1px), linear-gradient(90deg, var(--dot) 1px, transparent 1px); }
 /* See through: only the references show, so the board can sit over other apps */
-body.see, body.see #canvas { background-color: transparent !important; background-image: none !important; }
-html:has(body.see) { background: transparent; }
+/* The board layer carries the dark background, so see through only has to clear it */
+body.see #canvas { background-color: transparent !important; background-image: none !important; }
 body.see #canvas::after { content: ''; position: fixed; inset: 0; pointer-events: none; border-radius: 10px; box-shadow: inset 0 0 0 1px rgba(215, 240, 74, 0); transition: box-shadow 160ms ease; }
 body.see:hover #canvas::after { box-shadow: inset 0 0 0 1px rgba(215, 240, 74, 0.35); }
 #canvas.panning, #canvas.tool-hand { cursor: grab; }
