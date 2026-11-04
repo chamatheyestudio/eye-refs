@@ -454,7 +454,7 @@
   window.addEventListener('pointerup', () => { busy = false; });
   // The pointer left the window, or another app came to the front: hide the bars
   // (unless the window is being moved by its top bar right now)
-  const hideEdges = () => { if (!isClean()) return; showTop(false); showBottom(false); };
+  const hideEdges = () => { showTop(false); showBottom(false); };
   document.documentElement.addEventListener('mouseleave', hideEdges);
   window.addEventListener('blur', hideEdges);
   // Working in another app: the selection boxes step aside so only the pictures show.
@@ -466,7 +466,7 @@
   function syncToolbar() {
     $$('#toolbar [data-tool]').forEach((b) => b.classList.toggle('on', b.dataset.tool === B.tool));
     $('#penBar').hidden = !['pen', 'eraser', 'text'].includes(B.tool) || !S.current;
-    $$('#toolbar [data-tool="pen"]').forEach((b) => b.classList.toggle('on', B.tool === 'pen' || B.tool === 'eraser' || B.tool === 'text'));
+    $$('#toolbar [data-tool="pen"]').forEach((b) => b.classList.toggle('on', B.tool === 'pen' || B.tool === 'eraser'));
     $('#penEraser').classList.toggle('on', B.tool === 'eraser');
     $('#penText').classList.toggle('on', B.tool === 'text');
     drawPenBar();
@@ -547,6 +547,7 @@
     const drawing = B.tool === 'pen' || B.tool === 'eraser';
     return [
       { label: 'Draw', key: 'Mod+D', checked: drawing, onClick: () => B.setTool(drawing ? 'select' : 'pen'), disabled: !ed },
+      { label: 'Text', key: 'T', checked: B.tool === 'text', onClick: () => B.setTool(B.tool === 'text' ? 'select' : 'text'), disabled: !ed },
       { label: 'Arrange', sub: [
         { label: 'Arrange optimal', key: 'Mod+P', onClick: () => B.arrange(), disabled: !ed },
         '-',
@@ -1110,7 +1111,7 @@
   const SHORTCUTS = [
     ['Board', [['Pan', 'Alt + drag, or middle mouse'], ['Zoom', 'Scroll, or hold Z and drag'], ['Move window', 'Right mouse drag'], ['Menu', 'Right click'], ['Focus image', 'Space'], ['Focus canvas', 'Mod+Space'], ['Reset zoom', 'Mod+0'], ['Zoom in / out', 'Mod+=  /  Mod+-'], ['Next or previous image', '→  ←'], ['Lock canvas', 'Mod+R'], ['Grayscale canvas', 'Mod+Alt+G'], ['Hide or show controls', 'Tab'], ['Select all', 'Mod+A']]],
     ['Items', [['Crop', 'Hold C and drag'], ['Pan cropping', 'Hold V and drag'], ['Reset cropping', 'Mod+Shift+C'], ['Rotate', 'Mod + drag'], ['Scale', 'Mod+Alt + drag'], ['Flip', 'Alt+Shift+H  /  Alt+Shift+V'], ['Grayscale', 'Alt+G'], ['Toggle locked', 'Alt+L'], ['Reset transform', 'Mod+Shift+T'], ['Arrange optimal', 'Mod+P'], ['Align', 'Mod + arrows'], ['Normalize', 'Mod+Alt + arrows'], ['Send to front / back', '↑  ↓'], ['Note', 'Mod+N'], ['Copy / Cut / Paste', 'Mod+C  /  Mod+X  /  Mod+V'], ['Delete', 'Del'], ['Undo / Redo', 'Mod+Z  /  Mod+Shift+Z']]],
-    ['Draw', [['Draw', 'Mod+D'], ['Pen / Eraser / Text', 'D  /  E  /  T'], ['Solid / Dotted / Arrow', '1  /  2  /  3'], ['Pen colour', 'Mod+T'], ['Stop drawing', 'Esc']]],
+    ['Draw', [['Draw', 'Mod+D'], ['Pen / Eraser', 'D  /  E'], ['Text', 'T'], ['Straight line', 'Hold Shift while drawing'], ['Line opacity', 'Pen bar, or right click a line'], ['Solid / Dotted / Arrow', '1  /  2  /  3'], ['Pen colour', 'Mod+T'], ['Stop drawing', 'Esc']]],
     ['Video', [['Play or pause', 'K'], ['Set start / end', 'I  /  O'], ['Step a frame', ',  .'], ['Grab frame', 'F'], ['Sound', 'M']]],
     ['Window', [['Always on top', 'Mod+Shift+A'], ['Transparent to mouse', 'Mod+T'], ['Opacity', 'Mod+Shift+-  /  Mod+Shift+='], ['Lock window', 'Mod+W'], ['Minimize / Maximize', 'Mod+M  /  Mod+F'], ['Close', 'Mod+Q']]],
     ['Files', [['New board', 'Mod+K'], ['Open', 'Mod+L'], ['Open most recent', 'Mod+Shift+L'], ['Open images', 'Mod+I'], ['Save', 'Mod+S'], ['Save as one file', 'Mod+Shift+S'], ['Search boards', 'Mod+Shift+P']]],
@@ -1214,7 +1215,7 @@
     // Draw mode (PureRef): D pen, E eraser, 1 solid, 2 dotted, 3 arrow
     'D': () => { if (drawing()) B.setTool('pen'); },
     'E': () => { if (drawing()) B.setTool('eraser'); },
-    'T': () => { if (drawing()) B.setTool('text'); },
+    'T': () => B.setTool(B.tool === 'text' ? 'select' : 'text'),
     '1': () => { if (drawing()) penStyle('solid'); },
     '2': () => { if (drawing()) penStyle('dotted'); },
     '3': () => { if (drawing()) penStyle('arrow'); },

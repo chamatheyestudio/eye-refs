@@ -44,6 +44,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   // Like PureRef: straight onto a blank untitled board
   await win.waitForSelector('#title:not([hidden])');
   await win.waitForFunction(() => document.querySelector('#tName').textContent === 'Untitled');
+  expect('opens in the normal view, not see through', await win.evaluate(() => !document.body.classList.contains('see')));
   await win.evaluate(async (src) => {
     await Board.addPaths([`${src}/mandel.png`, `${src}/warm.jpg`, `${src}/night.jpg`, `${src}/pattern.png`, `${src}/reel.mp4`], { x: 0, y: 0 });
     Board.arrange(); Board.focusAll(); Board.clearSel();
@@ -291,6 +292,18 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await win.evaluate(() => Board.setTool('select'));
   await win.screenshot({ path: `${OUT}/03g-text.png` });
   expect('type on the board, text sticks to its picture', tRes.text === 'Make it brighter' && tRes.on === tRes.host && tRes.bg === 'rgba(0, 0, 0, 0)' && !!tRes.color && Math.abs(tRes.moved - 50) < 0.5 && tRes.empties === 0, tRes);
+  // Text is on the bottom toolbar too
+  const tbText = await win.evaluate(() => { const b = document.querySelector('#toolbar [data-tool="text"]'); b.click(); const r = { exists: !!b, tool: Board.tool, on: b.classList.contains('on'), penBar: !document.querySelector('#penBar').hidden }; Board.setTool('select'); return r; });
+  expect('text button on the bottom toolbar', tbText.exists && tbText.tool === 'text' && tbText.on && tbText.penBar, tbText);
+  // Middle click drag moves the board
+  const mv0 = await win.evaluate(() => ({ ...Board.view }));
+  await win.mouse.move(700, 450); await win.mouse.down({ button: 'middle' }); await win.mouse.move(780, 500, { steps: 5 }); await win.mouse.up({ button: 'middle' });
+  const mv1 = await win.evaluate(() => ({ ...Board.view }));
+  await win.evaluate((v) => { Object.assign(Board.view, v); Board.applyView(); }, mv0);
+  expect('middle click drag moves the board', Math.abs(mv1.x - mv0.x - 80) < 2 && Math.abs(mv1.y - mv0.y - 50) < 2 && mv1.s === mv0.s, { mv0, mv1 });
+  // Top bar goes away when you switch to another app
+  const topAway = await win.evaluate(async () => { document.body.classList.add('show-top', 'show-bottom'); window.dispatchEvent(new Event('blur')); await new Promise((r) => setTimeout(r, 700)); const r = !document.body.classList.contains('show-top') && !document.body.classList.contains('show-bottom'); window.dispatchEvent(new Event('focus')); return r; });
+  expect('top and bottom bars hide when another app is in front', topAway, topAway);
   // A message never sits on the pen bar
   await win.evaluate(() => Board.setTool('pen'));
   await win.waitForSelector('#penBar:not([hidden])');
@@ -448,6 +461,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await win.evaluate(() => { window.__toasts2 = []; window.dispatchEvent(new Event('focus')); });
   await win.waitForFunction(() => (window.__toasts2 || []).some((t) => /shared/.test(t)), null, { timeout: 20000 }).catch(() => {});
   const told2 = await win.evaluate(() => ({ toasts: window.__toasts2, row: [...document.querySelectorAll('#tree .row .name')].some((n) => n.textContent === 'Brunch Edit') }));
+  const order = await win.evaluate(() => [...document.querySelectorAll('#tree .row .name')].map((n) => n.textContent));
+  expect('sidebar lists the latest edited first', order.indexOf('Spring Campaign') > -1 && order.indexOf('Spring Campaign') < order.indexOf('Brunch Edit'), order);
   expect('a board shared with you is announced', told2.toasts.includes('Nousaiba shared "Brunch Edit" with you') && told2.row, told2);
 
   // Approve Rami from the share window
