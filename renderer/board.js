@@ -45,6 +45,7 @@
   const toWorld = (sx, sy) => ({ x: (sx - B.view.x) / B.view.s, y: (sy - B.view.y) / B.view.s });
 
   function dims(it) {
+    if (it.type === 'section') return { w: it.w, h: it.h || 400, k: 1 };
     if (it.type === 'note') {
       const e = B.els.get(it.id);
       const h = e ? e.offsetHeight : (it.fs || 16) * 3;
@@ -148,7 +149,12 @@
   // ---------- rendering ----------
   function makeEl(it) {
     const node = el('div', { class: 'item', 'data-id': it.id });
-    if (it.type === 'note') {
+    if (it.type === 'section') {
+      node.classList.add('section');
+      const label = el('div', { class: 'section-label' });
+      label.addEventListener('dblclick', (e) => { e.stopPropagation(); editSectionTitle(it.id); });
+      node.append(label);
+    } else if (it.type === 'note') {
       node.classList.add('note');
       node.append(el('div', { class: 'note-text' }));
     } else if (it.type === 'draw') {
@@ -198,6 +204,14 @@
     if (!node) return;
     node.style.zIndex = String(Math.round((it.z || 0) - (mz === undefined ? minZ() : mz) + 1));
     node.classList.toggle('gray', !!it.gray);
+    if (it.type === 'section') {
+      node.style.width = it.w + 'px';
+      node.style.height = (it.h || 400) + 'px';
+      node.style.transform = `translate(${it.x}px, ${it.y}px)`;
+      const label = node.firstChild;
+      if (B.sectionEditing !== it.id && label.textContent !== (it.title || 'Section')) label.textContent = it.title || 'Section';
+      return;
+    }
     if (it.type === 'note') {
       node.style.width = it.plain ? 'max-content' : it.w + 'px';
       node.style.height = '';
@@ -349,6 +363,8 @@
   function applyView() {
     const v = B.view;
     world.style.transform = `translate(${v.x}px, ${v.y}px) scale(${v.s})`;
+    // Section labels and outlines stay the same size on screen at any zoom
+    world.style.setProperty('--ls', String(1 / Math.max(0.02, v.s)));
     canvas.style.backgroundSize = `${28 * v.s}px ${28 * v.s}px`;
     canvas.style.backgroundPosition = `${v.x}px ${v.y}px`;
     $('#zVal').textContent = Math.round(v.s * 100) + '%';
@@ -455,7 +471,7 @@
     const k = keep && B.items.get(keep);
     if (k && !k.deleted && cover(k) >= 0.5) return keep;
     for (const it of live()) {
-      if (it.type === 'draw' || it.plain) continue;
+      if (it.type === 'draw' || it.plain || it.type === 'section') continue;
       const r = bbox([it.id]);
       if (!r) continue;
       const ix = Math.max(0, Math.min(box.x + box.w, r.x + r.w) - Math.max(box.x, r.x));
@@ -580,7 +596,7 @@
     if (handle && canEdit(true)) {
       const ids = unlocked([...B.sel]);
       if (!ids.length) return;
-      startGesture({ type: 'resize', corner: handle.dataset.h, ids, before: snapshot(ids, ['x', 'y', 'w', 'fs']), start: ids.map((id) => clone(B.items.get(id))), bb: bbox(ids) }, e);
+      startGesture({ type: 'resize', corner: handle.dataset.h, ids, before: snapshot(ids, ['x', 'y', 'w', 'h', 'fs']), start: ids.map((id) => clone(B.items.get(id))), bb: bbox(ids) }, e);
       return;
     }
     const hit = itemAt(e.clientX, e.clientY);
@@ -640,7 +656,7 @@
       }
       if (e.altKey && e.shiftKey && canEdit()) { if (free.length) startGesture({ type: 'flip', ids: free }, e); renderOverlay(); return; }
       // View only boards still select, they just don't move
-      const movable = B.readOnly ? [] : free;
+      const movable = B.readOnly ? [] : withSectionContents(free);
       startGesture({ type: 'move', hit, ids: movable, start: movable.map((id) => ({ id, x: B.items.get(id).x, y: B.items.get(id).y })), before: snapshot(movable, ['x', 'y']) }, e);
       renderOverlay();
       return;
@@ -714,6 +730,17 @@
         const ax = g.corner.includes('w') ? bb.x + bb.w : bb.x;
         const ay = g.corner.includes('n') ? bb.y + bb.h : bb.y;
         let f;
+        if (g.ids.length === 1 && g.start[0].type === 'section') {
+          // A section's frame resizes freely; what's in it stays as it is
+          const it = B.items.get(g.ids[0]);
+          const minS = 80;
+          const x0 = Math.min(ax, p.x), y0 = Math.min(ay, p.y);
+          it.w = Math.max(minS, Math.abs(p.x - ax)); it.h = Math.max(minS, Math.abs(p.y - ay));
+          it.x = p.x < ax ? Math.min(x0, ax - minS) : ax; it.y = p.y < ay ? Math.min(y0, ay - minS) : ay;
+          updateEl(B.els.get(it.id), it, mz);
+          renderOverlay();
+          break;
+        }
         if (g.ids.length === 1 && (g.start[0].rot || 0) % 360 !== 0) {
           const cx = bb.x + bb.w / 2, cy = bb.y + bb.h / 2;
           f = Math.hypot(p.x - cx, p.y - cy) / Math.max(1, Math.hypot(g.w0.x - cx, g.w0.y - cy));
@@ -786,7 +813,7 @@
         B.sel = new Set(g.base);
         for (const it of live()) {
           const r = bbox([it.id]);
-          if (r.x < b.x && r.x + r.w > a.x && r.y < b.y && r.y + r.h > a.y) B.sel.add(it.id);
+          if (it.type === 'section' ? (r.x >= a.x && r.y >= a.y && r.x + r.w <= b.x && r.y + r.h <= b.y) : (r.x < b.x && r.x + r.w > a.x && r.y < b.y && r.y + r.h > a.y)) B.sel.add(it.id);
         }
         renderOverlay();
         break;
@@ -1716,7 +1743,7 @@
       const n = merged[id];
       if (B.items.has(id) || n.deleted || !n.type || !n.by || n.by === B.me.name || (n._dev && n._dev === B.me.deviceKey)) continue;
       if (!(n.created > B.openedAt - 5000)) continue;
-      const kind = n.type === 'image' ? 'picture' : n.type === 'video' ? 'video' : n.type === 'draw' ? 'line' : n.plain ? 'text' : 'note';
+      const kind = n.type === 'image' ? 'picture' : n.type === 'video' ? 'video' : n.type === 'draw' ? 'line' : n.type === 'section' ? 'section' : n.plain ? 'text' : 'note';
       const a = added[n.by] || (added[n.by] = {});
       a[kind] = (a[kind] || 0) + 1;
     }
@@ -1738,6 +1765,69 @@
       clearTimeout(w._t);
       w._t = setTimeout(() => w.classList.remove('show'), 2500);
     }, 0);
+  }
+
+  // ---------- sections ----------
+  // A labelled area behind references. Moving it carries everything inside it.
+  const sections = () => live().filter((it) => it.type === 'section').sort((a, b) => (a.y - b.y) || (a.x - b.x));
+  function inside(sec, it) {
+    const r = bbox([it.id]);
+    return r && r.x >= sec.x - 1 && r.y >= sec.y - 1 && r.x + r.w <= sec.x + sec.w + 1 && r.y + r.h <= sec.y + (sec.h || 400) + 1;
+  }
+  function withSectionContents(ids) {
+    const out = new Set(ids);
+    for (const id of ids) {
+      const sec = B.items.get(id);
+      if (!sec || sec.type !== 'section') continue;
+      for (const it of live()) if (!out.has(it.id) && !it.locked && it.id !== sec.id && inside(sec, it)) out.add(it.id);
+    }
+    return [...out];
+  }
+  function addSection(rect, title) {
+    if (!canEdit()) return;
+    const id = uid();
+    commit([{ id, fields: { type: 'section', title: title || 'Section', x: rect.x, y: rect.y, w: Math.max(120, rect.w), h: Math.max(80, rect.h), z: minZ() - 1, rot: 0, deleted: false, created: Date.now(), addedBy: B.me.name } }]);
+    B.sel = new Set([id]);
+    renderOverlay();
+    setTimeout(() => editSectionTitle(id), 0);
+    return id;
+  }
+  function sectionFromSelection() {
+    const ids = selIds().filter((id) => B.items.get(id).type !== 'section');
+    const bb = ids.length ? bbox(ids) : null;
+    if (!bb) return;
+    const pad = Math.max(30, Math.min(bb.w, bb.h) * 0.06) , top = 64 / B.view.s;
+    addSection({ x: bb.x - pad, y: bb.y - pad - top, w: bb.w + pad * 2, h: bb.h + pad * 2 + top });
+  }
+  function editSectionTitle(id) {
+    const it = B.items.get(id);
+    const node = B.els.get(id);
+    if (!it || !node || !canEdit(true)) return;
+    const label = node.firstChild;
+    B.sectionEditing = id;
+    label.contentEditable = 'plaintext-only';
+    label.focus();
+    const range = document.createRange(); range.selectNodeContents(label);
+    const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
+    const done = (save) => {
+      label.contentEditable = 'false';
+      label.removeEventListener('keydown', onKey); label.removeEventListener('blur', onBlur);
+      B.sectionEditing = null;
+      const t = label.textContent.trim().slice(0, 80) || 'Section';
+      if (save && t !== (it.title || 'Section')) commit([{ id, fields: { title: t } }]);
+      else label.textContent = it.title || 'Section';
+      canvas.focus({ preventScroll: true });
+    };
+    const onKey = (e) => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); done(true); } if (e.key === 'Escape') { e.preventDefault(); done(false); } };
+    const onBlur = () => done(true);
+    label.addEventListener('keydown', onKey); label.addEventListener('blur', onBlur);
+  }
+  function goToSection(id) {
+    const it = B.items.get(id);
+    if (!it) return;
+    B.sel = new Set([id]);
+    fitRect(bbox([id]), 40);
+    renderOverlay();
   }
 
   // ---------- export ----------
@@ -1782,7 +1872,13 @@
       x.rotate(((it.rot || 0) * Math.PI) / 180);
       x.translate(-d.w / 2, -d.h / 2);
       const op = it.op == null ? 1 : it.op;
-      if (it.type === 'image' || it.type === 'video') {
+      if (it.type === 'section') {
+        x.fillStyle = 'rgba(255,255,255,0.035)'; x.fillRect(0, 0, d.w, d.h);
+        x.strokeStyle = 'rgba(255,255,255,0.14)'; x.lineWidth = 2 / k; x.strokeRect(0, 0, d.w, d.h);
+        const fs = Math.max(18, Math.min(d.w, d.h) * 0.035);
+        x.fillStyle = '#F4F3EE'; x.font = `600 ${fs}px Inter, system-ui, sans-serif`; x.textBaseline = 'top';
+        x.fillText(it.title || 'Section', fs * 0.8, fs * 0.7);
+      } else if (it.type === 'image' || it.type === 'video') {
         const img = await loadImg(it);
         x.globalAlpha = op;
         if (it.gray) x.filter = 'grayscale(1)';
@@ -1927,6 +2023,7 @@
           { label: 'Export as picture', onClick: () => exportAs('png', true) },
           { label: 'Export as PDF', onClick: () => exportAs('pdf', true) },
         ] },
+        ...(one && one.type === 'section' ? [{ label: 'Rename section', onClick: () => editSectionTitle(one.id), disabled: !ed }] : [{ label: 'Make a section', onClick: sectionFromSelection, disabled: !ed }]),
         { label: 'Locked', key: 'Alt+L', checked: ids.every((id) => B.items.get(id).locked), onClick: () => toggleField('locked'), disabled: !ed },
         { label: 'Delete', key: 'Delete', onClick: deleteSelection, disabled: !ed },
         '-');
@@ -1937,6 +2034,7 @@
           { label: 'Images and videos', key: 'Mod+I', onClick: async () => addPaths(await api.openImagesDialog(), at), disabled: !ed },
           { label: 'A folder of images', onClick: async () => addPaths(await api.importFolderDialog(), at), disabled: !ed },
           { label: 'Note', key: 'Mod+N', onClick: () => addNote(at), disabled: !ed },
+          { label: 'Section', onClick: () => addSection({ x: at.x - 400 / B.view.s, y: at.y - 260 / B.view.s, w: 800 / B.view.s, h: 520 / B.view.s }), disabled: !ed },
         ] },
         { label: 'Select all', key: 'Mod+A', onClick: selectAll },
         '-');
@@ -2000,7 +2098,7 @@
   function restore(ids) { commit(ids.map((id) => ({ id, fields: { deleted: false } }))); B.sel = new Set(ids); renderOverlay(); }
 
   Object.assign(B, {
-    addSocial, addText, restyle, restyleDone, getPalette, addPaletteStrip, renderExport, exportAs, load, unload, applyRemote, render, applyView, zoomAt, fitRect, toWorld, toScreen,
+    addSection, sectionFromSelection, sections, goToSection, editSectionTitle, addSocial, addText, restyle, restyleDone, getPalette, addPaletteStrip, renderExport, exportAs, load, unload, applyRemote, render, applyView, zoomAt, fitRect, toWorld, toScreen,
     commit, undo, redo, addPaths, addBytes, addUrl, addNote, editNote, stopEditing,
     copySelection, pasteInternal, pasteNative, pasteKey, deleteSelection, duplicate, toggleField, resetCrop, resetTransform, front, back,
     align, normalize, arrange, focusSelection, focusAll, focusStep, selectAll, clearSel, selIds,

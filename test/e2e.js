@@ -495,6 +495,31 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   expect('a social link comes in as a video through Pluck', pluckRes.cardSeen && pluckRes.added === 1 && pluckRes.cardGone && pluckRes.tmpLeft === 0, pluckRes);
   expect('when Pluck says no, the card says why', /private/.test(pluckRes.errText || ''), pluckRes.errText);
   expect('without Pluck, the card offers to get it', pluckRes.missing && pluckRes.missing.get.includes('Get Pluck'), pluckRes.missing);
+  // The window strip at the top never covers the board while you work
+  const stripRes = await win.evaluate(() => { const hit = document.elementFromPoint(innerWidth / 2, 30); return { id: hit && hit.id, cls: hit && hit.className && String(hit.className.baseVal !== undefined ? hit.className.baseVal : hit.className) }; });
+  expect('the top of the board can be clicked while working', stripRes.id !== 'topbar', stripRes);
+  // Sections: wrap some pictures, name it, move it and they come along
+  const secRes = await (async () => {
+    const ids = await win.evaluate(() => { const imgs = Board.live().filter((x) => x.type === 'image').slice(0, 2); Board.sel = new Set(imgs.map((x) => x.id)); Board.render(); Board.sectionFromSelection(); return imgs.map((x) => ({ id: x.id, x: x.x, y: x.y })); });
+    await sleep(150);
+    await win.keyboard.type('Lighting');
+    await win.keyboard.press('Enter');
+    await sleep(150);
+    const sec = await win.evaluate(() => Board.sections()[0]);
+    const lab = await win.evaluate((id) => { const r = Board.els.get(id).querySelector('.section-label').getBoundingClientRect(); return { x: r.left + 20, y: r.top + r.height / 2 }; }, sec.id);
+    await win.screenshot({ path: `${OUT}/03l-section.png` });
+    await win.mouse.move(lab.x, lab.y); await win.mouse.down(); await win.mouse.move(lab.x + 80, lab.y + 40, { steps: 6 }); await win.mouse.up();
+    const after = await win.evaluate((ids) => ids.map((o) => ({ dx: Board.items.get(o.id).x - o.x, dy: Board.items.get(o.id).y - o.y })), ids);
+    const secAfter = await win.evaluate((id) => Board.items.get(id), sec.id);
+    const pill = await win.evaluate(() => ({ shown: !document.querySelector('#tSections').hidden, text: document.querySelector('#tSectionsN').textContent }));
+    await win.evaluate(() => { Board.undo(); });
+    const undone = await win.evaluate((ids) => ids.every((o) => Math.abs(Board.items.get(o.id).x - o.x) < 0.5), ids);
+    // Remove the section again so later checks see the board as it was
+    await win.evaluate((id) => { Board.commit([{ id, fields: { deleted: true } }]); }, sec.id);
+    return { title: sec.title, moved: after, secMoved: secAfter.x - sec.x, pill, undone, wraps: ids.length };
+  })();
+  const sm = secRes.moved.every((m) => Math.abs(m.dx - secRes.secMoved) < 0.5 && Math.abs(secRes.secMoved) > 10);
+  expect('a section holds pictures, has a name, and moves them with it', secRes.title === 'Lighting' && sm && secRes.pill.shown && secRes.pill.text === '1 section' && secRes.undone, secRes);
   // A message never sits on the pen bar
   await win.evaluate(() => Board.setTool('pen'));
   await win.waitForSelector('#penBar:not([hidden])');

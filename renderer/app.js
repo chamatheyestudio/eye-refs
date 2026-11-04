@@ -708,6 +708,7 @@
       ] },
       { label: 'View', sub: [
         { label: 'Fit everything', key: 'Mod+Space', onClick: () => B.focusAll() },
+        ...(B.sections().length ? [{ label: 'Sections', sub: B.sections().map((sec) => ({ label: sec.title || 'Section', onClick: () => B.goToSection(sec.id) })) }] : []),
         { label: 'Reset zoom', key: 'Mod+0', onClick: () => resetZoom() },
         { label: 'Zoom in', key: 'Mod+Equal', onClick: () => B.zoomAt(innerWidth / 2, innerHeight / 2, 1.25) },
         { label: 'Zoom out', key: 'Mod+Minus', onClick: () => B.zoomAt(innerWidth / 2, innerHeight / 2, 0.8) },
@@ -886,9 +887,21 @@
     ]);
   };
 
+  // Sections list in the title: a quick way to jump between them
+  function syncSections() {
+    const list = S.current ? B.sections() : [];
+    const b = $('#tSections');
+    b.hidden = !list.length;
+    $('#tSectionsN').textContent = list.length === 1 ? '1 section' : `${list.length} sections`;
+  }
+  $('#tSections').addEventListener('click', (e) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    openMenu(B.sections().map((sec) => ({ label: sec.title || 'Section', onClick: () => B.goToSection(sec.id) })), r.left, r.bottom + 6);
+  });
+
   // "Neal added 2 pictures and a line"
   function addedText(by, a) {
-    const word = { picture: ['a picture', 'pictures'], video: ['a video', 'videos'], line: ['a line', 'lines'], note: ['a note', 'notes'], text: ['some text', 'text'] };
+    const word = { section: ['a section', 'sections'], picture: ['a picture', 'pictures'], video: ['a video', 'videos'], line: ['a line', 'lines'], note: ['a note', 'notes'], text: ['some text', 'text'] };
     const parts = Object.keys(a).map((k) => (a[k] === 1 ? word[k][0] : `${a[k]} ${word[k][1]}`));
     const list = parts.length > 1 ? parts.slice(0, -1).join(', ') + ' and ' + parts[parts.length - 1] : parts[0];
     return `${by} added ${list}`;
@@ -910,6 +923,7 @@
       }, 1500);
     }
     if (what === 'tool') syncToolbar();
+    if (what === 'items') syncSections();
     if (what === 'lock') { syncChrome(); toast(B.lockedCanvas ? 'Canvas locked' : 'Canvas unlocked'); }
     if (what === 'bin') binModal();
     if (what === 'readonly') { S.readOnly = true; syncChrome(); }

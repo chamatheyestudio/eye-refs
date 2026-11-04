@@ -287,7 +287,8 @@ body.clickthrough #canvas { outline: 2px solid rgba(215, 240, 74, 0.5); outline-
    window buttons. Nothing changes position, it only fades, so nothing jumps. */
 /* An invisible strip across the top moves the window whenever the bars are showing,
    like the start screen where the sidebar is tucked away */
-#topbar { display: block; position: fixed; left: 0; right: 0; top: 0; height: 60px; z-index: 14; background: transparent; -webkit-app-region: drag; }
+#topbar { display: none; }
+body.board-empty #topbar { display: block; position: fixed; left: 0; right: 0; top: 0; height: 60px; z-index: 14; background: transparent; -webkit-app-region: drag; }
 :is(body.ui-hidden, body.ui-auto:not(.board-empty)) #topbar { display: block; position: fixed; left: 0; right: 0; top: 0; height: 60px; z-index: 14; background: var(--panel-solid); border-bottom: 1px solid var(--line); opacity: 0; pointer-events: none; -webkit-app-region: no-drag; transition: opacity 140ms ease; }
 :is(body.ui-hidden, body.ui-auto:not(.board-empty)) #sidebar { display: none; }
 /* Bottom edge: the toolbar and zoom fade back in, in the same spot as always */
@@ -485,3 +486,11 @@ body.is-opening #opening .opening-card { transform: translate(-50%, -50%) scale(
 .fetch-card .fc-btn { height: 26px; padding: 0 12px; border-radius: 999px; border: 0; background: rgba(255, 255, 255, 0.08); color: var(--text); font: 500 11px Inter, system-ui, sans-serif; cursor: pointer; }
 .fetch-card .fc-btn:hover { background: rgba(255, 255, 255, 0.14); }
 .fetch-card .fc-btn.primary { background: var(--lime); color: #141413; }
+
+/* Sections: a labelled area behind references */
+.item.section { background: rgba(255, 255, 255, 0.03); box-shadow: inset 0 0 0 calc(1px * var(--ls, 1)) rgba(255, 255, 255, 0.14); border-radius: calc(14px * var(--ls, 1)); pointer-events: none; }
+.item.section .section-label { position: absolute; left: 0; top: 0; transform: scale(var(--ls, 1)); transform-origin: 0 0; padding: 10px 14px; font-size: 13px; font-weight: 600; color: var(--soft); white-space: nowrap; pointer-events: auto; cursor: grab; outline: none; border-radius: 10px; max-width: 480px; overflow: hidden; text-overflow: ellipsis; }
+.item.section .section-label:hover { color: var(--text); }
+.item.section .section-label[contenteditable="plaintext-only"], .item.section .section-label[contenteditable="true"] { cursor: text; color: var(--text); box-shadow: inset 0 0 0 1px var(--lime); background: var(--panel-solid); }
+#title .t-sections { -webkit-app-region: no-drag; height: 26px; padding: 0 10px; margin-left: 4px; border-radius: 999px; border: 0; background: rgba(255, 255, 255, 0.06); color: var(--soft); font: 500 12px Inter, system-ui, sans-serif; cursor: pointer; }
+#title .t-sections:hover { background: rgba(255, 255, 255, 0.12); color: var(--text); }

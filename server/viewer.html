@@ -24,6 +24,10 @@
   .item .big { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; padding: 12px; background: #262523; color: var(--muted); font-size: 13px; }
   .item.note { background: #2A2927; }
   .item.note .note-text { padding: 0.8em 0.95em; white-space: pre-wrap; word-break: break-word; line-height: 1.45; }
+  .item.note.plain { background: transparent; }
+  .item.note.plain .note-text { padding: 0.1em 0.15em; line-height: 1.25; font-weight: 600; white-space: pre; }
+  .item.section { background: rgba(255,255,255,0.03); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.14); border-radius: 14px; }
+  .item.section .section-label { position: absolute; left: 14px; top: 10px; font-size: 13px; font-weight: 600; color: #C9C7BF; white-space: nowrap; }
   .item.draw svg { position: absolute; left: 0; top: 0; overflow: visible; }
   .bar { position: fixed; left: 12px; right: 12px; top: max(12px, env(safe-area-inset-top)); display: flex; align-items: center; gap: 10px; pointer-events: none; z-index: 5; }
   .pill { pointer-events: auto; display: flex; align-items: center; gap: 10px; height: 44px; padding: 0 16px 0 8px; border-radius: 999px; background: var(--panel); border: 1px solid var(--line); -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px); min-width: 0; }
@@ -114,6 +118,7 @@
 
   // ---------- drawing the board ----------
   function dims(it) {
+    if (it.type === 'section') return { w: it.w, h: it.h || 400, k: 1 };
     if (it.type === 'note') return { w: it.w, h: null, k: 1 };
     var c = it.crop || { l: 0, t: 0, r: 0, b: 0 };
     var vw = Math.max(1, (it.nw || 1) * (1 - c.l - c.r)), vh = Math.max(1, (it.nh || 1) * (1 - c.t - c.b));
@@ -144,12 +149,19 @@
     items.forEach(function (it) {
       var node = el('div', 'item' + (it.gray ? ' gray' : ''));
       var d = dims(it);
-      node.style.width = d.w + 'px';
+      node.style.width = it.plain ? 'max-content' : d.w + 'px';
       if (d.h != null) node.style.height = d.h + 'px';
       node.style.transform = 'translate(' + it.x + 'px,' + it.y + 'px) rotate(' + (it.rot || 0) + 'deg)';
-      if (it.type === 'note') {
+      if (it.op != null && it.op < 1 && it.type !== 'draw') node.style.opacity = String(it.op);
+      if (it.type === 'section') {
+        node.classList.add('section');
+        var lab = el('div', 'section-label'); lab.textContent = it.title || 'Section';
+        node.appendChild(lab);
+      } else if (it.type === 'note') {
         node.classList.add('note');
+        if (it.plain) node.classList.add('plain');
         var t = el('div', 'note-text'); t.textContent = it.text || ''; node.style.fontSize = (it.fs || 16) + 'px';
+        if (it.plain) t.style.color = it.color || '#D7F04A';
         node.appendChild(t);
       } else if (it.type === 'draw') {
         node.classList.add('draw');
@@ -158,7 +170,7 @@
         svg.setAttribute('width', d.w); svg.setAttribute('height', d.h);
         var p = document.createElementNS(SVGNS, 'path');
         p.setAttribute('d', strokePath(parsePts(it.pts), it.style === 'arrow' ? (it.sw || 4) : 0));
-        p.setAttribute('fill', 'none'); p.setAttribute('stroke', it.color || '#D7F04A'); p.setAttribute('stroke-width', it.sw || 4);
+        p.setAttribute('fill', 'none'); p.setAttribute('stroke', it.color || '#D7F04A'); p.setAttribute('stroke-width', it.sw || 4); p.setAttribute('stroke-opacity', it.op == null ? 1 : it.op);
         p.setAttribute('stroke-linecap', 'round'); p.setAttribute('stroke-linejoin', 'round');
         if (it.style === 'dotted') p.setAttribute('stroke-dasharray', '0 ' + (it.sw || 4) * 2);
         svg.appendChild(p); node.appendChild(svg);
