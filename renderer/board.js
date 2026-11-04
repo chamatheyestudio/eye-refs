@@ -122,11 +122,11 @@
   }
 
   // changes: [{ id, fields }]; before: optional snapshot taken at gesture start
-  function commit(changes, before) {
+  function commit(changes, before, opts) {
     if (!changes.length || !canEdit()) return;
     changes = changes.map((c) => ({ id: c.id, fields: { ...c.fields } }));
     const prev = (before || changes.map((c) => ({ id: c.id, fields: pick(B.items.get(c.id), Object.keys(c.fields)) }))).map((p) => ({ id: p.id, fields: { ...p.fields } }));
-    addFollowers(changes, prev);
+    if (!(opts && opts.exact)) addFollowers(changes, prev);
     applyLocal(changes);
     send(changes);
     B.undoStack.push({ before: prev, after: clone(changes) });
@@ -1830,6 +1830,32 @@
     renderOverlay();
   }
 
+  // ---------- saved versions ----------
+  function versionItems() {
+    const out = {};
+    for (const it of live()) out[it.id] = clone(it);
+    return out;
+  }
+  // Put the board back as it was: one undo step, and teammates see it too
+  function restoreVersion(items) {
+    if (!canEdit() || !items) return 0;
+    const changes = [];
+    for (const id in items) {
+      const want = { ...items[id], deleted: false };
+      delete want.id;
+      const cur = B.items.get(id);
+      const diff = {};
+      for (const k in want) if (!cur || JSON.stringify(cur[k]) !== JSON.stringify(want[k])) diff[k] = want[k];
+      if (Object.keys(diff).length) changes.push({ id, fields: diff });
+    }
+    for (const it of live()) if (!items[it.id]) changes.push({ id: it.id, fields: { deleted: true } });
+    // Exactly as saved: lines and pictures are already where they were
+    if (changes.length) commit(changes, null, { exact: true });
+    B.sel.clear();
+    renderOverlay();
+    return changes.length;
+  }
+
   // ---------- export ----------
   // Draws the board (or the chosen pieces) into one big picture at full quality:
   // each picture is drawn from its own file, so nothing is limited to screen size.
@@ -2098,7 +2124,7 @@
   function restore(ids) { commit(ids.map((id) => ({ id, fields: { deleted: false } }))); B.sel = new Set(ids); renderOverlay(); }
 
   Object.assign(B, {
-    addSection, sectionFromSelection, sections, goToSection, editSectionTitle, addSocial, addText, restyle, restyleDone, getPalette, addPaletteStrip, renderExport, exportAs, load, unload, applyRemote, render, applyView, zoomAt, fitRect, toWorld, toScreen,
+    versionItems, restoreVersion, addSection, sectionFromSelection, sections, goToSection, editSectionTitle, addSocial, addText, restyle, restyleDone, getPalette, addPaletteStrip, renderExport, exportAs, load, unload, applyRemote, render, applyView, zoomAt, fitRect, toWorld, toScreen,
     commit, undo, redo, addPaths, addBytes, addUrl, addNote, editNote, stopEditing,
     copySelection, pasteInternal, pasteNative, pasteKey, deleteSelection, duplicate, toggleField, resetCrop, resetTransform, front, back,
     align, normalize, arrange, focusSelection, focusAll, focusStep, selectAll, clearSel, selIds,

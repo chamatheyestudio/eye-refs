@@ -520,6 +520,29 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   })();
   const sm = secRes.moved.every((m) => Math.abs(m.dx - secRes.secMoved) < 0.5 && Math.abs(secRes.secMoved) > 10);
   expect('a section holds pictures, has a name, and moves them with it', secRes.title === 'Lighting' && sm && secRes.pill.shown && secRes.pill.text === '1 section' && secRes.undone, secRes);
+  // Saved versions: save, change things, go back, and undo the going back
+  const verRes = await (async () => {
+    const pid = await win.evaluate(() => Board.project.id);
+    const snap = await win.evaluate(() => { const it = Board.live().find((x) => x.type === 'image'); return { id: it.id, x: it.x, count: Board.live().length }; });
+    await win.evaluate(async (pid) => { await window.eyerefs.versionSave(pid, 'Before feedback', Board.versionItems()); }, pid);
+    await win.evaluate((snap) => { Board.commit([{ id: snap.id, fields: { x: snap.x + 500 } }]); Board.addNote(Board.toWorld(700, 400), 'New idea'); }, snap);
+    await sleep(200);
+    await win.keyboard.press('Escape');
+    const opened = await win.evaluate(async () => { const b = document.querySelector('#settingsBtn'); return !!b; });
+    await win.evaluate(() => window.__openVersions && window.__openVersions());
+    await win.waitForSelector('.versions', { timeout: 5000 });
+    await win.screenshot({ path: `${OUT}/03m-versions.png` });
+    await win.click('.versions .vrow:first-child .btn:text("Restore")');
+    await sleep(400);
+    const after = await win.evaluate((snap) => ({ x: Board.items.get(snap.id).x, count: Board.live().length, note: Board.live().some((x) => x.type === 'note' && x.text === 'New idea') }), snap);
+    const list = await win.evaluate(async (pid) => (await window.eyerefs.versionsList(pid)).versions.map((v) => v.name), pid);
+    await win.evaluate(() => Board.undo());
+    const undone = await win.evaluate((snap) => ({ x: Board.items.get(snap.id).x, note: Board.live().some((x) => x.type === 'note' && x.text === 'New idea') }), snap);
+    // Tidy up for the checks after this
+    await win.evaluate((snap) => { Board.restoreVersion(Object.fromEntries(Board.live().filter((x) => !(x.type === 'note' && x.text === 'New idea')).map((x) => [x.id, x]))); Board.commit([{ id: snap.id, fields: { x: snap.x } }]); }, snap);
+    return { snap, after, list, undone, opened };
+  })();
+  expect('a saved version brings the board back, and undo returns to before', Math.abs(verRes.after.x - verRes.snap.x) < 0.5 && !verRes.after.note && verRes.after.count === verRes.snap.count && verRes.list.includes('Before feedback') && verRes.list.some((n) => n.startsWith('Before restoring')) && verRes.undone.note && Math.abs(verRes.undone.x - verRes.snap.x - 500) < 0.5, verRes);
   // A message never sits on the pen bar
   await win.evaluate(() => Board.setTool('pen'));
   await win.waitForSelector('#penBar:not([hidden])');

@@ -675,6 +675,40 @@ handle('media:state', async (projectId, src) => {
   return 'missing';
 });
 
+// ---------- saved versions ----------
+// A copy of the board as it was, kept in the board's own folder. Restoring
+// writes it back as ordinary changes, so teammates get it too and undo works.
+function versionsDir() { return session ? path.join(session.rec.dir, 'versions') : null; }
+handle('versions:list', async (projectId) => {
+  if (!session || session.rec.id !== projectId) return { versions: [] };
+  const dir = versionsDir();
+  const out = [];
+  for (const f of await fsp.readdir(dir).catch(() => [])) {
+    if (!f.endsWith('.json')) continue;
+    const v = await readJson(path.join(dir, f));
+    if (v && v.id) out.push({ id: v.id, name: v.name, at: v.at, by: v.by, count: Object.keys(v.items || {}).length });
+  }
+  out.sort((a, b) => b.at - a.at);
+  return { versions: out };
+});
+handle('versions:save', async (projectId, name, items) => {
+  if (!session || session.rec.id !== projectId) return { error: 'Open the board first.' };
+  const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  const v = { id, name: String(name || '').trim().slice(0, 80) || 'Saved version', at: Date.now(), by: me ? me.name : '', items: items && typeof items === 'object' ? items : {} };
+  await fsp.mkdir(versionsDir(), { recursive: true });
+  await writeJson(path.join(versionsDir(), id + '.json'), v);
+  return { id, name: v.name, at: v.at };
+});
+handle('versions:get', async (projectId, id) => {
+  if (!session || session.rec.id !== projectId) return null;
+  return readJson(path.join(versionsDir(), path.basename(String(id)) + '.json'));
+});
+handle('versions:delete', async (projectId, id) => {
+  if (!session || session.rec.id !== projectId) return { ok: false };
+  await fsp.rm(path.join(versionsDir(), path.basename(String(id)) + '.json'), { force: true });
+  return { ok: true };
+});
+
 // Social links through Pluck: progress goes to the page as it comes in
 handle('pluck:fetch', async (projectId, url, key) => {
   if (!session || session.rec.id !== projectId) return { error: 'Open the board first.' };

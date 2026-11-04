@@ -742,6 +742,7 @@
           ? { label: 'Save', key: 'Mod+S', onClick: () => saveModal() }
           : { label: 'Rename', onClick: renameModal, disabled: !cur || !cur.mine },
         { label: 'Save as one file', key: 'Mod+Shift+S', onClick: packCurrent },
+        { label: 'Versions', onClick: () => versionsModal(), disabled: !cur },
         { label: 'Export', sub: [
           { label: 'Board as picture', onClick: () => B.exportAs('png', false), disabled: !B.live().length },
           { label: 'Board as PDF', onClick: () => B.exportAs('pdf', false), disabled: !B.live().length },
@@ -886,6 +887,60 @@
         el('button', { class: 'btn', text: 'Add to board', disabled: S.readOnly, onclick: () => { close(); B.addPaletteStrip(it, colors); } })),
     ]);
   };
+
+  // ---------- saved versions ----------
+  function whenText(t) {
+    const d = new Date(t), now = new Date();
+    const same = d.toDateString() === now.toDateString();
+    return same ? `Today at ${d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : d.toLocaleString([], { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
+  }
+  window.__openVersions = () => versionsModal();
+  async function versionsModal() {
+    if (!S.current) return;
+    const pid = S.current.id;
+    let list = (await api.versionsList(pid)).versions || [];
+    openModal((close) => {
+      const name = el('input', { class: 'input', placeholder: `Version ${list.length + 1}`, maxlength: 80, 'aria-label': 'Name this version' });
+      const rows = el('div', { class: 'versions' });
+      const draw = () => {
+        rows.innerHTML = '';
+        if (!list.length) rows.append(el('p', { class: 'muted', text: 'No saved versions yet. Save one before a big round of changes, and you can always come back to it.' }));
+        for (const v of list) {
+          const restore = el('button', { class: 'btn ghost small', text: 'Restore', disabled: S.readOnly });
+          restore.onclick = async () => {
+            const full = await api.versionGet(pid, v.id);
+            if (!full || !S.current || S.current.id !== pid) return;
+            // Keep where things are now too, so restoring never loses work
+            await api.versionSave(pid, `Before restoring ${v.name}`, B.versionItems());
+            const n = B.restoreVersion(full.items);
+            close();
+            toast(n ? `Back to ${v.name}` : `Already the same as ${v.name}`);
+          };
+          const del = el('button', { class: 'btn ghost small', text: 'Delete' });
+          del.onclick = async () => { await api.versionDelete(pid, v.id); list = list.filter((x) => x.id !== v.id); draw(); };
+          rows.append(el('div', { class: 'vrow' },
+            el('div', { class: 'vinfo' }, el('div', { class: 'vname', text: v.name }), el('div', { class: 'vmeta', text: `${whenText(v.at)}${v.by ? ' by ' + v.by : ''}, ${v.count === 1 ? '1 piece' : v.count + ' pieces'}` })),
+            restore, del));
+        }
+      };
+      const save = el('button', { class: 'btn', text: 'Save this version', disabled: S.readOnly });
+      const doSave = async () => {
+        const r = await api.versionSave(pid, name.value.trim() || name.placeholder, B.versionItems());
+        if (r && r.id) { list = (await api.versionsList(pid)).versions || []; name.value = ''; name.placeholder = `Version ${list.length + 1}`; draw(); toast(`Saved ${r.name}`); }
+      };
+      save.onclick = doSave;
+      name.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); doSave(); } });
+      draw();
+      setTimeout(() => name.focus(), 50);
+      return [
+        el('h2', { text: 'Versions' }),
+        el('p', { text: 'Save the board as it is now, and go back to it any time.' }),
+        el('div', { class: 'vsave' }, name, save),
+        rows,
+        el('div', { class: 'actions' }, el('button', { class: 'btn ghost', text: 'Done', onclick: close })),
+      ];
+    });
+  }
 
   // Sections list in the title: a quick way to jump between them
   function syncSections() {
