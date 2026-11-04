@@ -291,6 +291,26 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await win.evaluate(() => Board.setTool('select'));
   await win.screenshot({ path: `${OUT}/03g-text.png` });
   expect('type on the board, text sticks to its picture', tRes.text === 'Make it brighter' && tRes.on === tRes.host && tRes.bg === 'rgba(0, 0, 0, 0)' && !!tRes.color && Math.abs(tRes.moved - 50) < 0.5 && tRes.empties === 0, tRes);
+  // A short text gets a box as small as its words
+  const fit = await win.evaluate(async () => {
+    Board.setTool('text');
+    const c = Board.toWorld(700, 160);
+    Board.addText(c);
+    await new Promise((r) => setTimeout(r, 50));
+    const id = Board.editingId;
+    const t = Board.els.get(id).querySelector('.note-text');
+    t.textContent = 'HI';
+    Board.stopEditing();
+    await new Promise((r) => setTimeout(r, 50));
+    Board.sel = new Set([id]); Board.render();
+    const it = Board.items.get(id);
+    const box = document.querySelector('#overlay .sel, #overlay > div');
+    const r = { w: Board.els.get(id).offsetWidth, fs: it.fs, overlayW: box ? box.getBoundingClientRect().width / Board.view.s : null };
+    Board.undo(); Board.undo();
+    Board.setTool('select');
+    return r;
+  });
+  expect('text box is the size of the text', fit.w < fit.fs * 2.2 && fit.overlayW !== null && Math.abs(fit.overlayW - fit.w) < 6, fit);
   // Text is on the bottom toolbar too
   const tbText = await win.evaluate(() => { const b = document.querySelector('#toolbar [data-tool="text"]'); b.click(); const r = { exists: !!b, tool: Board.tool, on: b.classList.contains('on'), penBar: !document.querySelector('#penBar').hidden }; Board.setTool('select'); return r; });
   expect('text button on the bottom toolbar', tbText.exists && tbText.tool === 'text' && tbText.on && tbText.penBar, tbText);

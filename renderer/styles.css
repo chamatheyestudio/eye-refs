@@ -132,7 +132,10 @@ body.away #overlay, body.away #videoBar, body.away #marquee { visibility: hidden
 #tree::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 3px; }
 .row { display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border-radius: 14px; color: var(--soft); border: 0; background: transparent; width: 100%; text-align: left; cursor: pointer; flex-shrink: 0; }
 .row:hover { background: var(--hover); color: var(--text); }
-.row.project { gap: 8px; }
+.row.project { gap: 10px; }
+.row.project .meta { max-width: 96px; overflow: hidden; text-overflow: ellipsis; }
+.row.project .meta.when { min-width: 26px; margin-left: 4px; }
+.row.project .name { min-width: 48px; }
 .row.project.current { background: var(--lime-tint); color: var(--text); font-weight: 500; }
 .row .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row .meta { font-size: 11px; color: var(--faint); font-weight: 400; display: flex; align-items: center; gap: 4px; white-space: nowrap; }

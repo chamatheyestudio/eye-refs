@@ -48,7 +48,9 @@
     if (it.type === 'note') {
       const e = B.els.get(it.id);
       const h = e ? e.offsetHeight : (it.fs || 16) * 3;
-      return { w: it.w, h: h || (it.fs || 16) * 3, k: 1 };
+      // Typed text is as wide as its words
+      const w = it.plain && e && e.offsetWidth ? e.offsetWidth : it.w;
+      return { w, h: h || (it.fs || 16) * 3, k: 1 };
     }
     const c = it.crop || ZC;
     const vw = Math.max(1, it.nw * (1 - c.l - c.r));
@@ -197,7 +199,7 @@
     node.style.zIndex = String(Math.round((it.z || 0) - (mz === undefined ? minZ() : mz) + 1));
     node.classList.toggle('gray', !!it.gray);
     if (it.type === 'note') {
-      node.style.width = it.w + 'px';
+      node.style.width = it.plain ? 'max-content' : it.w + 'px';
       node.style.height = '';
       node.style.fontSize = (it.fs || 16) + 'px';
       node.classList.toggle('plain', !!it.plain);
@@ -989,7 +991,7 @@
     if (it && it.plain) {
       // Typed text fits its words; text left empty simply goes
       if (!text.trim()) { commit([{ id, fields: { deleted: true } }]); renderOverlay(); return; }
-      const w = Math.max(t.scrollWidth, (it.fs || 16)) + 2;
+      const w = node.offsetWidth || it.w;
       if (text !== (it.text || '') || Math.abs(w - it.w) > 0.5) commit([{ id, fields: { text, w } }]);
     } else if (it && text !== (it.text || '')) commit([{ id, fields: { text } }]);
     renderOverlay();
