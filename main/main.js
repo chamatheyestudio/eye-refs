@@ -14,6 +14,7 @@ const { randCode, initialsFrom, firstNameFrom, cleanFolderName } = require('../s
 const PKG = require('../package.json');
 
 let win = null;
+const SEE_ALWAYS = process.platform === 'darwin'; // Mac windows can always see through
 let settings = {};
 let me = null;
 let session = null;
@@ -589,14 +590,14 @@ handle('prefs:set', async (patch) => {
 // and only the page background changes. Windows can only resize a normal window,
 // so there the window is rebuilt: the new one stays hidden until its board has
 // loaded, then takes the old one's place, with nothing closing on screen.
-const SEE_ALWAYS = process.platform === 'darwin';
 let swapFrom = null;
 handle('win:transparent', async (on) => {
   on = !!on;
   if (on === !!settings.transparent) return { on, rebuilt: false };
   settings.transparent = on;
   await saveSettings();
-  if (SEE_ALWAYS) return { on, rebuilt: false };
+  // A window made see through capable can switch on the spot
+  if (win && win.__canSee) return { on, rebuilt: false };
   if (session) await session.flush();
   resumeProject = session ? session.rec.id : null;
   const old = win;
@@ -637,7 +638,7 @@ handle('prefs:sidebar', async (on) => { settings.sidebar = !!on; saveSettings();
 
 function createWindow(bounds, opts = {}) {
   const area = screen.getPrimaryDisplay().workAreaSize;
-  const see = process.platform === 'darwin' || !!settings.transparent;
+  const see = SEE_ALWAYS || !!settings.transparent;
   win = new BrowserWindow({
     width: bounds ? bounds.width : Math.min(1360, area.width - 80),
     height: bounds ? bounds.height : Math.min(860, area.height - 80),
@@ -652,6 +653,7 @@ function createWindow(bounds, opts = {}) {
     title: 'Eye Refs',
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true, spellcheck: false },
   });
+  win.__canSee = see;
   win.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
   win.once('ready-to-show', () => {
     if (opts.swap) return; // shown once its board is on screen
