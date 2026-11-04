@@ -553,7 +553,12 @@ API['projects.list'] = function (req) {
   var out = [];
   for (var id in team.projects) {
     var p = team.projects[id];
-    if (roleOf_(p, me.email, team)) out.push(projectSummary_(p, me.email, team));
+    if (!roleOf_(p, me.email, team)) continue;
+    var sum = projectSummary_(p, me.email, team);
+    var mine = p.members && p.members[me.email];
+    if (mine && mine.at) { sum.sharedAt = mine.at; sum.sharedBy = mine.by ? firstName_(mine.by) : sum.ownerName; }
+    try { var u = JSON.parse(cacheGet_('upd:' + id) || 'null'); if (u && u.at) sum.updated = { at: u.at, by: String(u.by || ''), email: String(u.email || '') }; } catch (x) {}
+    out.push(sum);
   }
   return out;
 };
@@ -832,6 +837,8 @@ API['sync.push'] = function (req) {
   var name = req.device + '.json';
   var file = fileIn_(f.changes, name);
   if (file) file.setContent(req.data); else f.changes.createFile(name, req.data, 'application/json');
+  // Who changed the board last, so teammates can be told. Cache only: no Drive write.
+  cachePut_('upd:' + p.id, JSON.stringify({ at: Date.now(), by: me.name, email: me.email }), 21600);
   return { saved: true };
 };
 

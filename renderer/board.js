@@ -1600,9 +1600,20 @@
     for (const writes of unconfirmed) {
       for (const w of writes) merged[w.id] = { ...(merged[w.id] || { id: w.id }), ...w.fields };
     }
+    // New things a teammate added since you opened the board, by who added them
+    const added = {};
+    for (const id in merged) {
+      const n = merged[id];
+      if (B.items.has(id) || n.deleted || !n.type || !n.by || n.by === B.me.name || (n._dev && n._dev === B.me.deviceKey)) continue;
+      if (!(n.created > B.openedAt - 5000)) continue;
+      const kind = n.type === 'image' ? 'picture' : n.type === 'video' ? 'video' : n.type === 'draw' ? 'line' : n.plain ? 'text' : 'note';
+      const a = added[n.by] || (added[n.by] = {});
+      a[kind] = (a[kind] || 0) + 1;
+    }
     B.items = new Map(Object.entries(merged));
     adoptLines();
     render();
+    if (Object.keys(added).length) B.onChange('added', added);
   }
 
   function flashWho(id, name) {
@@ -1702,6 +1713,7 @@
     B.readOnly = !!p.readOnly;
     B.items = new Map(Object.entries(p.items || {}));
     B.undoStack = []; B.redoStack = [];
+    B.openedAt = Date.now();
     let v = null;
     try { v = JSON.parse(localStorage.getItem('view:' + p.record.id) || 'null'); } catch (_) {}
     adoptLines();

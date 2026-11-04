@@ -432,6 +432,23 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await win.waitForFunction((id) => Board.items.get(id) && Board.items.get(id).gray === true, night.id, { timeout: 40000 });
   await sleep(800);
   await win.screenshot({ path: `${OUT}/06-teammate.png` });
+  // She adds a note and a line: the board says so
+  await win.evaluate(() => { window.__toasts2 = []; new MutationObserver(() => window.__toasts2.push(document.querySelector('#toast').textContent)).observe(document.querySelector('#toast'), { childList: true, characterData: true, subtree: true }); });
+  sB.write([
+    { id: 'nb-note', fields: { type: 'note', text: 'Love this one', x: 0, y: -300, w: 200, fs: 16, z: 500, rot: 0, deleted: false, created: Date.now(), by: 'Nousaiba' } },
+    { id: 'nb-line', fields: { type: 'draw', pts: '0 0 40 40', nw: 50, nh: 50, w: 50, x: 10, y: -250, sw: 4, z: 501, rot: 0, deleted: false, created: Date.now(), by: 'Nousaiba' } },
+  ]);
+  await sB.flush(); await syncB.tick();
+  await win.waitForFunction(() => (window.__toasts2 || []).some((t) => /Nousaiba added/.test(t)), null, { timeout: 40000 }).catch(() => {});
+  const told = await win.evaluate(() => window.__toasts2);
+  expect('teammate additions are announced on the board', told.some((t) => t === 'Nousaiba added a note and a line'), told);
+  // She shares a new board with you: you're told
+  gas.call({ action: 'projects.create', token: tB, id: 'nousaiba-board-0001', name: 'Brunch Edit' });
+  gas.call({ action: 'projects.invite', token: tB, id: 'nousaiba-board-0001', emails: ['chamath@eyestudio.ae'] });
+  await win.evaluate(() => { window.__toasts2 = []; window.dispatchEvent(new Event('focus')); });
+  await win.waitForFunction(() => (window.__toasts2 || []).some((t) => /shared/.test(t)), null, { timeout: 20000 }).catch(() => {});
+  const told2 = await win.evaluate(() => ({ toasts: window.__toasts2, row: [...document.querySelectorAll('#tree .row .name')].some((n) => n.textContent === 'Brunch Edit') }));
+  expect('a board shared with you is announced', told2.toasts.includes('Nousaiba shared "Brunch Edit" with you') && told2.row, told2);
 
   // Approve Rami from the share window
   await win.click('#share');

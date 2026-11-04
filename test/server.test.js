@@ -89,6 +89,11 @@ module.exports = async function (test) {
     // Change files: each device writes only its own
     assert.equal(gas.call({ action: 'sync.push', token: nous, id, device: 'contact-xx11', data: '{}' }).ok, false, 'cannot write someone else\'s file');
     assert.ok(gas.call({ action: 'sync.push', token: nous, id, device: 'nousaiba-aa11', data: JSON.stringify({ items: { a: { x: [1, 1] } } }) }).ok);
+    // Teammates are told who changed a board last
+    const listed = gas.call({ action: 'projects.list', token: owner }).data.find((p) => p.id === id);
+    assert.ok(listed.updated && listed.updated.email === 'nousaiba@eyestudio.ae' && listed.updated.at > 0, 'last change is listed');
+    const asGuest = gas.call({ action: 'projects.list', token: guest }).data.find((p) => p.id === id);
+    assert.ok(asGuest.sharedAt > 0 && asGuest.sharedBy, 'who shared it is listed');
     const pull = gas.call({ action: 'sync.pull', token: owner, id, device: 'contact-zz99' });
     assert.ok(pull.ok, pull.error);
     assert.equal(pull.data.changes.length, 1);

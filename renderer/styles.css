@@ -137,6 +137,7 @@ body.away #overlay, body.away #videoBar, body.away #marquee { visibility: hidden
 .row .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row .meta { font-size: 11px; color: var(--faint); font-weight: 400; display: flex; align-items: center; gap: 4px; white-space: nowrap; }
 .row .meta.here { color: var(--lime); }
+.row .meta.new { color: var(--ink); background: var(--lime); font-weight: 600; padding: 1px 7px; border-radius: 999px; }
 .row .meta.when { min-width: 22px; justify-content: flex-end; font-variant-numeric: tabular-nums; }
 .row .chev { width: 12px; height: 12px; flex-shrink: 0; transition: transform 0.15s; }
 .row.open .chev { transform: rotate(90deg); }

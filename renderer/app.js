@@ -129,6 +129,7 @@
     S.alwaysOnTop = r.prefs.alwaysOnTop;
     S.opacity = r.prefs.opacity || 1;
     S.startWith = r.prefs.startWith || 'new';
+    S.notify = r.prefs.notify !== false;
     S.transparent = !!r.prefs.transparent;
     document.body.classList.toggle('see', S.transparent);
     setBg(S.bg, true);
@@ -152,6 +153,7 @@
     const leftScratch = S.current && S.current.scratch && S.current.id !== res.record.id;
     S.current = res.record;
     S.browse = false;
+    const seenRec = S.projects.find((x) => x.id === res.record.id); if (seenRec) seenRec.unread = false;
     if (leftScratch) setTimeout(rescan, 50);
     S.status = res.status;
     S.readOnly = res.readOnly;
@@ -209,6 +211,7 @@
         let meta = null;
         const when = !p.scratch && p.modified ? el('span', { class: 'meta when', text: shortAgo(p.modified), title: new Date(p.modified).toLocaleString() }) : null;
         if (p.scratch) meta = el('span', { class: 'meta', text: 'Not saved' });
+        else if (p.unread && !(S.current && S.current.id === p.id)) meta = el('span', { class: 'meta new', title: 'New changes', text: 'New' });
         else if (n) meta = el('span', { class: 'meta here', html: ICONS.people + `<span>${n} here</span>` });
         else if (p.requests) meta = el('span', { class: 'meta here', text: p.requests === 1 ? '1 request' : `${p.requests} requests` });
         else if (p.cloudOnly) meta = el('span', { class: 'meta', html: ICONS.cloud + '<span>Shared</span>' });
@@ -700,6 +703,7 @@
       seg('Controls', [['auto', 'Auto hide'], ['shown', 'Always'], ['hidden', 'Hidden']], uiMode, (v) => setUi(v, true)),
       seg('Opens with', [['new', 'New board'], ['last', 'Last board']], S.startWith || 'new', async (v) => { const r = await api.setPrefs({ startWith: v }); S.startWith = r.startWith; drawSettings(); }),
       el('div', { class: 'set-row' }, el('span', { class: 'set-label', text: 'Opacity' }), opacityIn),
+      toggle('Notifications', S.notify !== false, async () => { const r = await api.setPrefs({ notify: S.notify === false }); S.notify = r.notify; drawSettings(); }),
       toggle('Always on top', S.alwaysOnTop, async () => { await toggleTop(); drawSettings(); }, 'Mod+Shift+A'),
       toggle('Grayscale canvas', B.grayCanvas, () => { B.setGrayCanvas(!B.grayCanvas); drawSettings(); }, 'Mod+Alt+G'),
       toggle('Lock window', S.lockedWindow, async () => { await toggleWindowLock(); drawSettings(); }, 'Mod+W'),
@@ -715,7 +719,29 @@
 
   async function toggleWindowLock() { S.lockedWindow = !S.lockedWindow; await api.lockWindow(S.lockedWindow); toast(S.lockedWindow ? 'Window locked in place' : 'Window unlocked'); }
 
-  B.onChange = (what) => {
+  // "Neal added 2 pictures and a line"
+  function addedText(by, a) {
+    const word = { picture: ['a picture', 'pictures'], video: ['a video', 'videos'], line: ['a line', 'lines'], note: ['a note', 'notes'], text: ['some text', 'text'] };
+    const parts = Object.keys(a).map((k) => (a[k] === 1 ? word[k][0] : `${a[k]} ${word[k][1]}`));
+    const list = parts.length > 1 ? parts.slice(0, -1).join(', ') + ' and ' + parts[parts.length - 1] : parts[0];
+    return `${by} added ${list}`;
+  }
+  let addedTimer = null, addedBuf = {};
+  B.onChange = (what, data) => {
+    if (what === 'added') {
+      // Gathered for a moment, so a big drop is one message, not twenty
+      for (const by in data) { const a = addedBuf[by] || (addedBuf[by] = {}); for (const k in data[by]) a[k] = (a[k] || 0) + data[by][k]; }
+      clearTimeout(addedTimer);
+      addedTimer = setTimeout(() => {
+        const name = S.current ? S.current.name : 'the board';
+        for (const by in addedBuf) {
+          const msg = addedText(by, addedBuf[by]);
+          toast(msg);
+          if (!document.hasFocus() && S.notify !== false) api.notify({ id: S.current && S.current.id, title: name, body: msg });
+        }
+        addedBuf = {};
+      }, 1500);
+    }
     if (what === 'tool') syncToolbar();
     if (what === 'lock') { syncChrome(); toast(B.lockedCanvas ? 'Canvas locked' : 'Canvas unlocked'); }
     if (what === 'bin') binModal();
@@ -733,6 +759,9 @@
     renderPresence(); renderSidebar();
   });
   api.onOpenFile(async (file) => openResult(await api.openProjectFile(file)));
+  // Shared with you, or changes on a shared board you don't have open
+  api.onNews((n) => { toast(n.body); rescan(); });
+  api.onNewsOpen((id) => { if (id && (!S.current || S.current.id !== id)) switchTo(id); });
   // Updates download by themselves; one click restarts into the new version
   const showUpdate = (u) => {
     if (!u) return;

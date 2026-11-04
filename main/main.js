@@ -1,5 +1,5 @@
 // Eye Refs by Matte Black
-const { app, BrowserWindow, ipcMain, dialog, shell, globalShortcut, net, screen, Menu, clipboard } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, globalShortcut, net, screen, Menu, clipboard, Notification } = require('electron');
 const path = require('path');
 const fsp = require('fs').promises;
 const { pathToFileURL } = require('url');
@@ -110,7 +110,7 @@ async function boot() {
 function prefs() {
   return {
     alwaysOnTop: !!settings.alwaysOnTop, opacity: settings.opacity || 1, sidebar: settings.sidebar !== false,
-    transparent: !!settings.transparent, startWith: settings.startWith === 'last' ? 'last' : 'new',
+    transparent: !!settings.transparent, startWith: settings.startWith === 'last' ? 'last' : 'new', notify: settings.notify !== false,
   };
 }
 
@@ -200,22 +200,63 @@ async function allProjects(online = true) {
   }
   let remote = [];
   if (online) { try { remote = await cloud.call('projects.list', {}, 20000); } catch (_) { remote = []; } }
+  const fresh = online && remote.length ? news(remote) : null;
   const byShared = new Map(local.filter((p) => p.shared).map((p) => [p.shared.id, p]));
   for (const r of remote) {
     const l = byShared.get(r.id) || local.find((p) => p.id === r.id);
     if (l) {
       Object.assign(l, { shared: l.shared || { id: r.id }, role: r.role, requests: r.requests, members: r.members, ownerName: r.ownerName });
+      if (fresh && fresh.has(r.id)) l.unread = true;
       l.mine = r.owner === me.email;
       // The owner renamed it: show the new name here too (the folder keeps its name)
       if (r.name && r.name !== l.name && !l.mine) {
         try { await lib.updateProject(l, { name: r.name }); l.name = r.name; if (session && session.rec.id === l.id) session.rec.name = r.name; } catch (_) {}
       }
     } else {
-      local.push({ id: r.id, name: r.name, client: r.client, owner: { email: r.owner, name: r.ownerName }, mine: r.owner === me.email, shared: { id: r.id }, cloudOnly: true, role: r.role, requests: r.requests, members: r.members });
+      local.push({ id: r.id, name: r.name, client: r.client, owner: { email: r.owner, name: r.ownerName }, mine: r.owner === me.email, shared: { id: r.id }, cloudOnly: true, role: r.role, requests: r.requests, members: r.members, unread: !!(fresh && fresh.has(r.id)) });
     }
   }
   return local;
 }
+
+// ---------- notifications ----------
+// A board shared with you, or a teammate changing a shared board you don't have
+// open: a note in the app, and a system notification when Eye Refs is in the back.
+// Returns the boards with changes you haven't looked at yet.
+function news(remote) {
+  const first = !settings.news;
+  const N = settings.news || (settings.news = { boards: {}, seen: {}, told: {} });
+  N.told = N.told || {};
+  const openShared = session && session.rec.shared ? session.rec.shared.id : session ? session.rec.id : null;
+  const unread = new Set();
+  let changed = first;
+  for (const r of remote) {
+    if (!N.boards[r.id]) {
+      N.boards[r.id] = 1; changed = true;
+      if (!first && r.owner !== me.email) tell({ id: r.id, title: 'New board shared with you', body: `${r.sharedBy || r.ownerName || 'Someone'} shared "${r.name}" with you` });
+    }
+    const u = r.updated;
+    if (first) { N.seen[r.id] = u ? u.at : Date.now(); continue; }
+    if (!u || u.email === me.email || u.at <= (N.seen[r.id] || 0)) continue;
+    if (openShared === r.id) { N.seen[r.id] = u.at; changed = true; continue; } // the open board tells you itself
+    unread.add(r.id);
+    if ((N.told[r.id] || 0) < u.at) { N.told[r.id] = u.at; changed = true; tell({ id: r.id, title: r.name, body: `${u.by || 'A teammate'} made changes to "${r.name}"` }); }
+  }
+  if (changed) saveSettings();
+  return unread;
+}
+
+function tell(n) {
+  if (!n.local) send('news', n);
+  if (settings.notify === false || !Notification.isSupported()) return;
+  if (win && !win.isDestroyed() && win.isFocused()) return; // the app shows it already
+  try {
+    const note = new Notification({ title: n.title || 'Eye Refs', body: n.body, silent: false });
+    note.on('click', () => { if (win && !win.isDestroyed()) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); send('news-open', n.id); } });
+    note.show();
+  } catch (_) {}
+}
+handle('app:notify', async (n) => { if (n && n.body) tell({ id: n.id || null, title: n.title || 'Eye Refs', body: String(n.body).slice(0, 200), local: true }); return true; });
 
 // ---------- board session ----------
 // Save first, then the final upload, so the very last edit reaches teammates.
@@ -259,6 +300,7 @@ async function openProject(rec) {
     presence: () => {},
   }, { onSaved: () => { if (sync) sync.kick(); } });
   session = s;
+  if (rec.shared && settings.news) { settings.news.seen[rec.shared.id] = Date.now(); }
   const items = await s.open();
   if (rec.shared) startSync(rec, s);
   settings.lastProject = rec.id;
@@ -647,6 +689,7 @@ handle('win:setOpacity', async (value) => {
 
 handle('prefs:set', async (patch) => {
   if (patch && 'startWith' in patch) settings.startWith = patch.startWith === 'last' ? 'last' : 'new';
+  if (patch && 'notify' in patch) settings.notify = !!patch.notify;
   saveSettings();
   return prefs();
 });
