@@ -110,7 +110,7 @@ async function boot() {
 function prefs() {
   return {
     alwaysOnTop: !!settings.alwaysOnTop, opacity: settings.opacity || 1, sidebar: settings.sidebar !== false,
-    transparent: !!settings.transparent, startWith: settings.startWith === 'last' ? 'last' : 'new', notify: settings.notify !== false,
+    transparent: !!settings.transparent, startWith: settings.startWith === 'last' ? 'last' : 'new', notify: settings.notify !== false, pins: Array.isArray(settings.pins) ? settings.pins : [],
   };
 }
 
@@ -690,6 +690,7 @@ handle('win:setOpacity', async (value) => {
 handle('prefs:set', async (patch) => {
   if (patch && 'startWith' in patch) settings.startWith = patch.startWith === 'last' ? 'last' : 'new';
   if (patch && 'notify' in patch) settings.notify = !!patch.notify;
+  if (patch && Array.isArray(patch.pins)) settings.pins = patch.pins.filter((x) => typeof x === 'string').slice(0, 50);
   saveSettings();
   return prefs();
 });

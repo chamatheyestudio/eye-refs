@@ -130,6 +130,7 @@
     S.opacity = r.prefs.opacity || 1;
     S.startWith = r.prefs.startWith || 'new';
     S.notify = r.prefs.notify !== false;
+    S.pins = r.prefs.pins || [];
     S.transparent = !!r.prefs.transparent;
     document.body.classList.toggle('see', S.transparent);
     setBg(S.bg, true);
@@ -203,9 +204,17 @@
     });
     // Latest edited on top
     const when = (p) => p.modified || 0;
-    const list = shown.sort((a, b) => (when(b) - when(a)) || a.name.localeCompare(b.name));
+    const sorted = shown.sort((a, b) => (when(b) - when(a)) || a.name.localeCompare(b.name));
+    // Pinned boards stay at the top, in the order they were pinned
+    const pins = S.pins || [];
+    const pinned = pins.map((id) => sorted.find((p) => p.id === id)).filter(Boolean);
+    const rest = sorted.filter((p) => !pins.includes(p.id));
+    const list = [...pinned, ...rest];
     {
       for (const p of list) {
+        if (pinned.length && p === pinned[0]) tree.append(el('div', { class: 'tree-label', text: 'Pinned' }));
+        if (pinned.length && p === rest[0]) tree.append(el('div', { class: 'tree-label', text: 'Boards' }));
+        const isPinned = pins.includes(p.id);
         const isCurrent = S.current && S.current.id === p.id;
         const n = isCurrent ? others(S.here).length : 0;
         let meta = null;
@@ -218,7 +227,18 @@
         else if (!p.mine && p.owner) meta = el('span', { class: 'meta', text: `${p.owner.name}'s` });
         else if (p.shared) meta = el('span', { class: 'meta', html: ICONS.people });
         const pr = el('button', { class: 'row project' + (S.current && S.current.id === p.id ? ' current' : ''), role: 'treeitem', title: p.mine ? p.name : `${p.name}, owned by ${p.owner ? p.owner.name : 'someone else'}` },
-          el('span', { class: 'name', text: p.name }), meta, when);
+          el('span', { class: 'name', text: p.name }), S.openingId === p.id ? el('span', { class: 'meta opening-dot', 'aria-label': 'Opening' }) : meta, when);
+        const pinBtn = el('span', { class: 'pin' + (isPinned ? ' on' : ''), role: 'button', 'aria-label': isPinned ? 'Unpin' : 'Pin to top', title: isPinned ? 'Unpin' : 'Pin to top', html: ICONS.pin });
+        pinBtn.addEventListener('click', (e) => { e.stopPropagation(); togglePin(p.id); });
+        pinBtn.addEventListener('dblclick', (e) => e.stopPropagation());
+        pr.append(pinBtn);
+        pr.addEventListener('contextmenu', (e) => {
+          e.preventDefault();
+          openMenu(e.clientX, e.clientY, [
+            { label: isPinned ? 'Unpin' : 'Pin to top', onClick: () => togglePin(p.id) },
+            { label: 'Rename', onClick: () => { if (p.cloudOnly || (!p.mine && !p.scratch)) return toast('Only the owner can rename this board.', true); renameInline(pr.querySelector('.name'), p); } },
+          ]);
+        });
         // One click opens, a double click renames in place
         let clickTimer = null;
         pr.addEventListener('click', () => {
@@ -235,6 +255,14 @@
         tree.append(pr);
       }
     }
+  }
+
+  async function togglePin(id) {
+    const pins = S.pins || [];
+    S.pins = pins.includes(id) ? pins.filter((x) => x !== id) : [...pins, id];
+    renderSidebar();
+    const r = await api.setPrefs({ pins: S.pins });
+    if (r && r.pins) S.pins = r.pins;
   }
 
   $('#search').addEventListener('input', (e) => { S.search = e.target.value; renderSidebar(); });
@@ -939,7 +967,7 @@
   async function opening(name, fn) {
     const g = ++openGen;
     const box = $('#opening');
-    const show = setTimeout(() => { if (g !== openGen) return; $('#openingName').textContent = name ? `Opening ${name}` : 'Opening'; box.hidden = false; requestAnimationFrame(() => body.classList.add('is-opening')); }, 150);
+    const show = setTimeout(() => { if (g !== openGen) return; $('#openingName').textContent = name || 'Your board'; box.hidden = false; requestAnimationFrame(() => body.classList.add('is-opening')); }, 80);
     let res;
     try { res = await fn(); } finally { clearTimeout(show); }
     if (g !== openGen) return res;
@@ -955,7 +983,7 @@
 
   function switchTo(id) {
     const p = S.projects.find((x) => x.id === id);
-    return confirmLeave(() => opening(p ? p.name : 'the board', () => api.openProject(id)));
+    return confirmLeave(async () => { S.openingId = id; renderSidebar(); try { return await opening(p ? p.name : '', () => api.openProject(id)); } finally { S.openingId = null; renderSidebar(); } });
   }
 
   async function newBoard() {

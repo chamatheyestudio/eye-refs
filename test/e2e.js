@@ -522,6 +522,20 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await win.waitForFunction(() => [...document.querySelectorAll('#tree .row .name')].some((n) => n.textContent === 'Brunch Edit'), null, { timeout: 15000 }).catch(() => {});
   const told2 = await win.evaluate(() => ({ toasts: window.__toasts2, row: [...document.querySelectorAll('#tree .row .name')].some((n) => n.textContent === 'Brunch Edit') }));
   const order = await win.evaluate(() => [...document.querySelectorAll('#tree .row .name')].map((n) => n.textContent));
+  // Pin a board: it moves to a Pinned group at the top and stays after a restart of the list
+  const pinRes = await win.evaluate(async () => {
+    const row = [...document.querySelectorAll('#tree .row')].find((r) => r.querySelector('.name').textContent === 'Brunch Edit');
+    row.querySelector('.pin').click();
+    await new Promise((r) => setTimeout(r, 300));
+    const labels = [...document.querySelectorAll('#tree > *')].map((n) => n.classList.contains('tree-label') ? '#' + n.textContent : n.querySelector('.name') && n.querySelector('.name').textContent);
+    const saved = (await window.eyerefs.setPrefs({})).pins;
+    const r2 = [...document.querySelectorAll('#tree .row')].find((r) => r.querySelector('.name').textContent === 'Brunch Edit');
+    r2.querySelector('.pin').click();
+    await new Promise((r) => setTimeout(r, 300));
+    const after = [...document.querySelectorAll('#tree .tree-label')].length;
+    return { labels, saved, after };
+  });
+  expect('pinned boards sit at the top and are remembered', pinRes.labels[0] === '#Pinned' && pinRes.labels[1] === 'Brunch Edit' && pinRes.labels[2] === '#Boards' && pinRes.saved.length === 1 && pinRes.after === 0, pinRes);
   expect('sidebar lists the latest edited first', order.indexOf('Spring Campaign') > -1 && order.indexOf('Spring Campaign') < order.indexOf('Brunch Edit'), order);
   expect('a board shared with you is announced', told2.toasts.includes('Nousaiba shared "Brunch Edit" with you') && told2.row, told2);
 
@@ -615,7 +629,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await sleep(800);
   const unsavedLeft = await win.evaluate(() => [...document.querySelectorAll('#tree .row .name')].filter((n) => n.textContent === 'Untitled').length);
   const openingGone = await win.evaluate(() => !document.body.classList.contains('is-opening'));
-  expect('switching boards shows what is opening, then clears', !slowed || (openingSeen && openingSeen.on && openingSeen.text === 'Opening Spring Campaign' && openingGone), { slowed, openingSeen, openingGone });
+  expect('switching boards shows what is opening, then clears', !slowed || (openingSeen && openingSeen.on && openingSeen.text === 'Spring Campaign' && openingGone), { slowed, openingSeen, openingGone });
   expect('leaving an unsaved board asks, and Don\'t save removes it', startGone && asked && unsavedLeft === 0, { startGone, asked, unsavedLeft });
   const result = await win.evaluate((fresh) => ({ fresh, items: Board.live().length, status: document.querySelector('#tStatus').textContent, rows: [...document.querySelectorAll('#tree .row')].map((r) => r.textContent) }), fresh);
   await syncB.stop(); await sB.close();
