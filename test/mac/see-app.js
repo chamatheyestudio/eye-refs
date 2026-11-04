@@ -38,17 +38,22 @@ fs.mkdirSync(OUT, { recursive: true });
   await win.evaluate(() => { document.body.classList.add('see'); });
   const state = await win.evaluate(() => ({ see: document.body.classList.contains('see'), html: getComputedStyle(document.documentElement).backgroundColor, body: getComputedStyle(document.body).backgroundColor, canvas: getComputedStyle(document.querySelector('#canvas')).backgroundColor, top: document.elementFromPoint(700, 80) && document.elementFromPoint(700, 80).id }));
   const after = await shot('after');
-  const info = await app.evaluate(({ BrowserWindow, screen }) => ({ wins: BrowserWindow.getAllWindows().map((w) => w.getBounds()), scale: screen.getPrimaryDisplay().scaleFactor, size: screen.getPrimaryDisplay().size }));
+  const info = await app.evaluate(({ BrowserWindow, screen }) => ({ wins: BrowserWindow.getAllWindows().map((w) => ({ b: w.getBounds(), canSee: w.__canSee, bg: w.getBackgroundColor(), op: w.getOpacity() })), scale: screen.getPrimaryDisplay().scaleFactor, size: screen.getPrimaryDisplay().size }));
+  // Try forcing the window background clear, then capture again
+  await app.evaluate(({ BrowserWindow }) => { const w = BrowserWindow.getAllWindows()[0]; w.setBackgroundColor('#00000000'); });
+  const forced = await shot('forced');
   const px = await app.evaluate(({ nativeImage }, { files, info }) => {
     const out = {};
     for (const f of files) {
       const im = nativeImage.createFromPath(f); const { width } = im.getSize(); const b = im.toBitmap(); const k = width / info.size.width;
       const p = (x, y) => { const i = (Math.round(y * k) * width + Math.round(x * k)) * 4; return [b[i + 2], b[i + 1], b[i]]; };
       // empty board area, the picture, outside the window
-      out[f.split('/').pop()] = { board: p(100 + 700, 100 + 450), picture: p(100 + 500, 100 + 400), outside: p(50, 50) };
+      const grid = [];
+      for (let y = 120; y < 700; y += 80) { const row = []; for (let x = 120; x < 1000; x += 110) { const c = p(x, y); row.push(c[0] > 200 && c[1] < 60 ? 'R' : c[2] > 200 && c[0] < 60 ? 'B' : c[0] < 40 ? 'D' : '?'); } grid.push(row.join('')); }
+      out[f.split('/').pop()] = { board: p(100 + 700, 100 + 450), outside: p(50, 50), grid };
     }
     return out;
-  }, { files: [before, after], info });
+  }, { files: [before, after, forced], info });
   console.log('SEE APP ' + JSON.stringify({ r, state, info, px }));
   await app.close(); red.kill(); srv.close();
 })().catch((e) => { console.error(e); process.exit(1); });
