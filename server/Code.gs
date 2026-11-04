@@ -43,7 +43,10 @@ var GENERIC_ERROR = 'Something went wrong on the server. Try again.';
 
 // ---------------------------------------------------------------- entry points
 
-function doGet() {
+function doGet(e) {
+  // ?v=<key> opens the board in the browser, view only, for anyone with the link
+  var key = e && e.parameter && e.parameter.v;
+  if (key) return viewerPage_(String(key));
   return json_({ ok: true, data: { app: 'Eye Refs', api: 2 } });
 }
 
@@ -381,6 +384,7 @@ function projectSummary_(p, email, team) {
     role: role, members: countKeys_(p.members),
     requests: manage ? countKeys_(p.requests) : 0,
     code: manage ? p.code : null, created: p.created,
+    viewKey: manage ? (p.viewKey || null) : null,
   };
 }
 
@@ -959,6 +963,151 @@ API['media.get'] = function (req) {
   if (code !== 200 && code !== 206) throw userError_('Google Drive did not send the file (' + code + ').');
   return { size: size, data: Utilities.base64Encode(res.getContent()) };
 };
+
+// ---------------------------------------------------------------- view links
+// A board owner can turn on a link that shows the board in any browser, phones
+// included, without signing in and without being able to change anything.
+
+function viewKey_() {
+  var a = 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  var b = randomBytes_(24), s = '';
+  for (var i = 0; i < b.length; i++) s += a.charAt(b[i] % a.length);
+  return s;
+}
+
+API['projects.viewLink'] = function (req) {
+  var me = readToken_(req.token);
+  return withTeam_(function (team) {
+    var p = project_(team, req.id);
+    requireRole_(p, me.email, team, ['owner', 'admin']);
+    if (req.on === undefined && !req.rotate) return { key: p.viewKey || null }; // just asking
+    if (req.rotate || (req.on && !p.viewKey)) p.viewKey = viewKey_();
+    if (!req.on && !req.rotate) delete p.viewKey;
+    return { key: p.viewKey || null };
+  });
+};
+
+function boardByViewKey_(key) {
+  if (!/^[A-Za-z0-9]{24}$/.test(String(key || ''))) throw userError_('This view link is not valid.');
+  if (bump_('vw:' + key + ':' + hour_(), 3600) > 3000) throw userError_('This board is being viewed a lot right now. Try again in a little while.');
+  var team = readTeam_();
+  for (var id in team.projects) {
+    if (team.projects.hasOwnProperty(id) && team.projects[id].viewKey === key) return team.projects[id];
+  }
+  throw userError_('This view link was turned off by the board owner.');
+}
+
+// The same merge the app does: for every item and field, the newest write wins
+// (ties go to the higher device name).
+function mergeChanges_(files) {
+  var win = {};
+  for (var f = 0; f < files.length; f++) {
+    var file = files[f];
+    if (!file || !file.items || typeof file.items !== 'object' || !file.device) continue;
+    var dk = String(file.device.key || '');
+    for (var id in file.items) {
+      if (!file.items.hasOwnProperty(id) || id === '__proto__' || id === 'constructor' || id === 'prototype') continue;
+      var fields = file.items[id];
+      if (!fields || typeof fields !== 'object') continue;
+      var w = win[id] || (win[id] = {});
+      for (var k in fields) {
+        if (!fields.hasOwnProperty(k) || k === '__proto__') continue;
+        var pair = fields[k];
+        if (!pair || pair.length < 2 || typeof pair[1] !== 'number') continue;
+        var cur = w[k];
+        if (!cur || pair[1] > cur[1] || (pair[1] === cur[1] && dk > cur[2])) w[k] = [pair[0], pair[1], dk];
+      }
+    }
+  }
+  var out = [];
+  for (var i in win) {
+    if (!win.hasOwnProperty(i)) continue;
+    var o = { id: i };
+    for (var key in win[i]) if (win[i].hasOwnProperty(key)) o[key] = win[i][key][0];
+    if (o.type && !o.deleted) out.push(o);
+  }
+  return out;
+}
+
+// Where the latest app lives, for the "Get Eye Refs" button
+function downloads_() {
+  var cached = cacheGet_('downloads');
+  if (cached) { try { return JSON.parse(cached); } catch (x) {} }
+  var out = { page: 'https://github.com/chamatheyestudio/eye-refs/releases/latest' };
+  try {
+    var res = UrlFetchApp.fetch('https://api.github.com/repos/chamatheyestudio/eye-refs/releases/latest', { muteHttpExceptions: true, headers: { Accept: 'application/vnd.github+json' } });
+    if (res.getResponseCode() === 200) {
+      var rel = JSON.parse(res.getContentText());
+      var assets = rel.assets || [];
+      for (var i = 0; i < assets.length; i++) {
+        var n = assets[i].name, u = assets[i].browser_download_url;
+        if (/-arm64\.pkg$/.test(n)) out.macArm = u;
+        else if (/\.pkg$/.test(n)) out.macIntel = u;
+        else if (/\.exe$/.test(n)) out.windows = u;
+      }
+      out.version = String(rel.tag_name || '').replace(/^v/, '');
+    }
+  } catch (x) {}
+  cachePut_('downloads', JSON.stringify(out), 3600);
+  return out;
+}
+
+API['view.state'] = function (req) {
+  var p = boardByViewKey_(req.key);
+  var f = folders_(p);
+  var files = [], it = f.changes.getFiles();
+  while (it.hasNext()) {
+    var file = it.next();
+    if (!/\.json$/.test(file.getName()) || file.getSize() > 3 * 1024 * 1024) continue;
+    try { files.push(JSON.parse(file.getBlob().getDataAsString())); } catch (x) {}
+  }
+  var media = {}, mit = f.media.getFiles();
+  while (mit.hasNext()) { var m = mit.next(); media[m.getName()] = m.getSize(); }
+  return { name: p.name, owner: p.ownerName || firstName_(p.owner), items: mergeChanges_(files), media: media, downloads: downloads_() };
+};
+
+API['view.media'] = function (req) {
+  var p = boardByViewKey_(req.key);
+  if (!safeName_(req.name)) throw userError_('That file name is not allowed.');
+  var file = fileIn_(folders_(p).media, req.name);
+  if (!file) throw userError_('That file is not on the board yet.');
+  var size = file.getSize();
+  var offset = Math.max(0, Number(req.offset) || 0);
+  var length = Math.min(4 * 1024 * 1024, size - offset);
+  if (length <= 0) return { size: size, data: '' };
+  var res = UrlFetchApp.fetch('https://www.googleapis.com/drive/v3/files/' + file.getId() + '?alt=media', {
+    headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken(), Range: 'bytes=' + offset + '-' + (offset + length - 1) },
+    muteHttpExceptions: true,
+  });
+  var code = res.getResponseCode();
+  if (code !== 200 && code !== 206) throw userError_('Google Drive did not send the file.');
+  return { size: size, data: Utilities.base64Encode(res.getContent()) };
+};
+
+// The page calls these through google.script.run
+function viewState(key) { return viewCall_('view.state', { key: key }); }
+function viewMedia(key, name, offset) { return viewCall_('view.media', { key: key, name: name, offset: offset }); }
+function viewCall_(action, req) {
+  try {
+    return { ok: true, data: API[action](req) };
+  } catch (x) {
+    if (x && x.userMessage) return { ok: false, error: x.userMessage };
+    console.error('Eye Refs ' + action + ' failed: ' + ((x && x.stack) || x));
+    return { ok: false, error: GENERIC_ERROR };
+  }
+}
+
+function viewerPage_(key) {
+  var html = VIEWER_HTML.replace('__VIEW_KEY__', /^[A-Za-z0-9]{24}$/.test(key) ? key : '');
+  return HtmlService.createHtmlOutput(html)
+    .setTitle('Eye Refs')
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.DEFAULT);
+}
+
+// VIEWER_HTML_START (built from server/viewer.html by tools/embed-viewer.js, do not edit here)
+var VIEWER_HTML = "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover\">\n<title>Eye Refs</title>\n<link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>\n<link href=\"https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap\" rel=\"stylesheet\">\n<style>\n  :root { --bg: #1C1B1A; --dot: #2B2A28; --panel: rgba(38, 37, 35, 0.86); --line: rgba(255,255,255,0.07); --text: #ECEAE3; --soft: #B8B6AE; --muted: #8F8D85; --lime: #D7F04A; --ink: #1C1B1A; }\n  * { box-sizing: border-box; }\n  [hidden] { display: none !important; }\n  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--text); font: 14px/1.4 Inter, system-ui, -apple-system, 'Segoe UI', sans-serif; -webkit-font-smoothing: antialiased; touch-action: none; }\n  #canvas { position: fixed; inset: 0; overflow: hidden; background-image: radial-gradient(var(--dot) 1px, transparent 1.2px); cursor: grab; }\n  #canvas.dragging { cursor: grabbing; }\n  #world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }\n  .item { position: absolute; left: 0; top: 0; transform-origin: 50% 50%; }\n  .item .clip { position: absolute; inset: 0; overflow: hidden; }\n  .item .media { position: absolute; display: block; max-width: none; pointer-events: none; -webkit-user-drag: none; }\n  .item.gray .clip { filter: grayscale(1); }\n  .item .wait { position: absolute; inset: 0; background: #262523; }\n  .item .wait::after { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, rgba(255,255,255,0.05), transparent); animation: shine 1.4s infinite; }\n  @keyframes shine { from { transform: translateX(-100%); } to { transform: translateX(100%); } }\n  .item .big { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; padding: 12px; background: #262523; color: var(--muted); font-size: 13px; }\n  .item.note { background: #2A2927; }\n  .item.note .note-text { padding: 0.8em 0.95em; white-space: pre-wrap; word-break: break-word; line-height: 1.45; }\n  .item.draw svg { position: absolute; left: 0; top: 0; overflow: visible; }\n  .bar { position: fixed; left: 12px; right: 12px; top: max(12px, env(safe-area-inset-top)); display: flex; align-items: center; gap: 10px; pointer-events: none; z-index: 5; }\n  .pill { pointer-events: auto; display: flex; align-items: center; gap: 10px; height: 44px; padding: 0 16px 0 8px; border-radius: 999px; background: var(--panel); border: 1px solid var(--line); -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px); min-width: 0; }\n  .logo { width: 28px; height: 28px; border-radius: 50%; background: var(--lime); color: var(--ink); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }\n  .name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }\n  .by { color: var(--muted); font-size: 12px; white-space: nowrap; }\n  .tag { font-size: 11px; font-weight: 600; color: var(--lime); background: rgba(215,240,74,0.12); border-radius: 999px; padding: 3px 9px; white-space: nowrap; }\n  .grow { flex: 1; }\n  .get { pointer-events: auto; display: flex; align-items: center; gap: 8px; }\n  .btn { height: 44px; padding: 0 18px; border-radius: 999px; border: 0; background: var(--text); color: var(--ink); font: 600 13px Inter, system-ui, sans-serif; text-decoration: none; display: inline-flex; align-items: center; white-space: nowrap; }\n  .link { color: var(--muted); font-size: 12px; text-decoration: none; white-space: nowrap; }\n  .link:hover { color: var(--text); }\n  .note-m { color: var(--muted); font-size: 12px; padding: 0 6px; }\n  .center { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; text-align: center; padding: 24px; z-index: 4; }\n  .center h1 { margin: 0; font-size: 20px; }\n  .center p { margin: 0; color: var(--muted); max-width: 360px; }\n  .zoom { position: fixed; right: 12px; bottom: max(12px, env(safe-area-inset-bottom)); z-index: 5; display: flex; align-items: center; gap: 2px; height: 44px; padding: 0 4px; border-radius: 999px; background: var(--panel); border: 1px solid var(--line); -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px); }\n  .zoom button { width: 36px; height: 36px; border-radius: 50%; border: 0; background: transparent; color: var(--soft); font: 500 18px Inter, sans-serif; cursor: pointer; }\n  .zoom .val { width: 56px; font-size: 12px; font-family: ui-monospace, Menlo, monospace; border-radius: 999px; }\n  .credit { position: fixed; left: 16px; bottom: max(16px, env(safe-area-inset-bottom)); color: #5E5C55; font-size: 11px; z-index: 5; }\n  @media (max-width: 640px) { .by, .credit { display: none; } .btn { padding: 0 14px; } .note-m { display: none; } }\n</style>\n</head>\n<body>\n<div id=\"canvas\"><div id=\"world\"></div></div>\n<div class=\"bar\">\n  <div class=\"pill\">\n    <span class=\"logo\"><svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><rect x=\"3\" y=\"3\" width=\"7\" height=\"7\" rx=\"1.5\"/><rect x=\"14\" y=\"3\" width=\"7\" height=\"11\" rx=\"1.5\"/><rect x=\"3\" y=\"14\" width=\"7\" height=\"7\" rx=\"1.5\"/><rect x=\"14\" y=\"18\" width=\"7\" height=\"3\" rx=\"1.5\"/></svg></span>\n    <span class=\"name\" id=\"name\">Eye Refs</span>\n    <span class=\"by\" id=\"by\"></span>\n    <span class=\"tag\">View only</span>\n  </div>\n  <span class=\"grow\"></span>\n  <div class=\"get\" id=\"get\"></div>\n</div>\n<div class=\"center\" id=\"msg\"><h1>Opening the board</h1><p id=\"msgText\">One moment.</p></div>\n<div class=\"zoom\" id=\"zoom\" hidden>\n  <button id=\"zOut\" aria-label=\"Zoom out\">\u2212</button>\n  <button class=\"val\" id=\"zVal\" aria-label=\"Fit everything\">100%</button>\n  <button id=\"zIn\" aria-label=\"Zoom in\">+</button>\n</div>\n<div class=\"credit\">Eye Refs by Matte Black</div>\n<script>\n(function () {\n  var KEY = '__VIEW_KEY__';\n  var $ = function (id) { return document.getElementById(id); };\n  var canvas = $('canvas'), world = $('world');\n  var view = { s: 1, x: 0, y: 0 };\n  var items = [];\n  var SVGNS = 'http://www.w3.org/2000/svg';\n\n  function server(fn, args) {\n    return new Promise(function (resolve, reject) {\n      var run = google.script.run.withSuccessHandler(function (r) { if (r && r.ok) resolve(r.data); else reject(new Error((r && r.error) || 'Something went wrong.')); })\n        .withFailureHandler(function (e) { reject(e instanceof Error ? e : new Error(String(e))); });\n      run[fn].apply(run, args);\n    });\n  }\n  function message(title, text) {\n    $('msg').hidden = false;\n    $('msg').querySelector('h1').textContent = title;\n    $('msgText').textContent = text || '';\n  }\n\n  // ---------- the right download for this computer ----------\n  function offerApp(d) {\n    var box = $('get');\n    var ua = navigator.userAgent;\n    var mobile = /iPhone|iPad|iPod|Android|Mobile/i.test(ua) || (navigator.maxTouchPoints > 1 && /Macintosh/.test(ua));\n    function button(text, url) { var a = document.createElement('a'); a.className = 'btn'; a.textContent = text; a.href = url; a.target = '_blank'; a.rel = 'noopener'; return a; }\n    function small(text, url) { var a = document.createElement('a'); a.className = 'link'; a.textContent = text; a.href = url; a.target = '_blank'; a.rel = 'noopener'; return a; }\n    if (mobile) { var s = document.createElement('span'); s.className = 'note-m'; s.textContent = 'Get Eye Refs on a Mac or PC'; box.appendChild(s); return; }\n    if (/Windows/.test(ua)) { box.appendChild(button('Get Eye Refs for Windows', d.windows || d.page)); return; }\n    if (/Mac/.test(ua)) {\n      var arm = button('Get Eye Refs for Mac', d.macArm || d.page);\n      var intel = small('Intel Mac', d.macIntel || d.page);\n      box.appendChild(intel); box.appendChild(arm);\n      // Chrome and Edge can tell an Apple chip from Intel; Safari can't, so both stay on offer\n      if (navigator.userAgentData && navigator.userAgentData.getHighEntropyValues) {\n        navigator.userAgentData.getHighEntropyValues(['architecture']).then(function (v) {\n          if (v.architecture === 'x86') { arm.href = d.macIntel || d.page; intel.textContent = 'Apple chip Mac'; intel.href = d.macArm || d.page; }\n        }).catch(function () {});\n      }\n      return;\n    }\n    box.appendChild(small('Get Eye Refs', d.page));\n  }\n\n  // ---------- drawing the board ----------\n  function dims(it) {\n    if (it.type === 'note') return { w: it.w, h: null, k: 1 };\n    var c = it.crop || { l: 0, t: 0, r: 0, b: 0 };\n    var vw = Math.max(1, (it.nw || 1) * (1 - c.l - c.r)), vh = Math.max(1, (it.nh || 1) * (1 - c.t - c.b));\n    var k = it.w / vw;\n    return { w: it.w, h: vh * k, k: k };\n  }\n  function parsePts(s) { var n = String(s || '').split(' ').map(Number), out = []; for (var i = 0; i + 1 < n.length; i += 2) out.push({ x: n[i], y: n[i + 1] }); return out; }\n  function strokePath(pts, arrow) {\n    if (!pts.length) return '';\n    var d = 'M' + pts[0].x + ' ' + pts[0].y;\n    if (pts.length < 3) { for (var i = 1; i < pts.length; i++) d += ' L' + pts[i].x + ' ' + pts[i].y; }\n    else {\n      for (var j = 1; j < pts.length - 1; j++) d += ' Q' + pts[j].x + ' ' + pts[j].y + ' ' + (pts[j].x + pts[j + 1].x) / 2 + ' ' + (pts[j].y + pts[j + 1].y) / 2;\n      d += ' L' + pts[pts.length - 1].x + ' ' + pts[pts.length - 1].y;\n    }\n    if (arrow && pts.length > 1) {\n      var tip = pts[pts.length - 1], back = pts[0];\n      for (var b = pts.length - 2; b >= 0; b--) if (Math.hypot(tip.x - pts[b].x, tip.y - pts[b].y) > arrow * 4) { back = pts[b]; break; }\n      var a = Math.atan2(tip.y - back.y, tip.x - back.x), L = arrow * 4.5;\n      d += ' M' + (tip.x - L * Math.cos(a - 0.5)) + ' ' + (tip.y - L * Math.sin(a - 0.5)) + ' L' + tip.x + ' ' + tip.y + ' L' + (tip.x - L * Math.cos(a + 0.5)) + ' ' + (tip.y - L * Math.sin(a + 0.5));\n    }\n    return d;\n  }\n  function el(tag, cls) { var n = document.createElement(tag); if (cls) n.className = cls; return n; }\n  function render() {\n    world.innerHTML = '';\n    items.sort(function (a, b) { return (a.z || 0) - (b.z || 0); });\n    items.forEach(function (it) {\n      var node = el('div', 'item' + (it.gray ? ' gray' : ''));\n      var d = dims(it);\n      node.style.width = d.w + 'px';\n      if (d.h != null) node.style.height = d.h + 'px';\n      node.style.transform = 'translate(' + it.x + 'px,' + it.y + 'px) rotate(' + (it.rot || 0) + 'deg)';\n      if (it.type === 'note') {\n        node.classList.add('note');\n        var t = el('div', 'note-text'); t.textContent = it.text || ''; node.style.fontSize = (it.fs || 16) + 'px';\n        node.appendChild(t);\n      } else if (it.type === 'draw') {\n        node.classList.add('draw');\n        var svg = document.createElementNS(SVGNS, 'svg');\n        svg.setAttribute('viewBox', '0 0 ' + it.nw + ' ' + it.nh); svg.setAttribute('preserveAspectRatio', 'none');\n        svg.setAttribute('width', d.w); svg.setAttribute('height', d.h);\n        var p = document.createElementNS(SVGNS, 'path');\n        p.setAttribute('d', strokePath(parsePts(it.pts), it.style === 'arrow' ? (it.sw || 4) : 0));\n        p.setAttribute('fill', 'none'); p.setAttribute('stroke', it.color || '#D7F04A'); p.setAttribute('stroke-width', it.sw || 4);\n        p.setAttribute('stroke-linecap', 'round'); p.setAttribute('stroke-linejoin', 'round');\n        if (it.style === 'dotted') p.setAttribute('stroke-dasharray', '0 ' + (it.sw || 4) * 2);\n        svg.appendChild(p); node.appendChild(svg);\n      } else {\n        var c = it.crop || { l: 0, t: 0, r: 0, b: 0 };\n        var clip = el('div', 'clip');\n        clip.style.transform = 'scale(' + (it.flipX ? -1 : 1) + ',' + (it.flipY ? -1 : 1) + ')';\n        clip.appendChild(el('div', 'wait'));\n        node.appendChild(clip);\n        it._clip = clip;\n        it._box = { w: it.nw * d.k, h: it.nh * d.k, l: -c.l * it.nw * d.k, t: -c.t * it.nh * d.k };\n      }\n      world.appendChild(node);\n    });\n  }\n  function showMedia(it, url) {\n    var m = it.type === 'video' ? el('video', 'media') : el('img', 'media');\n    if (it.type === 'video') { m.muted = true; m.loop = true; m.playsInline = true; m.autoplay = true; m.setAttribute('playsinline', ''); }\n    m.style.width = it._box.w + 'px'; m.style.height = it._box.h + 'px'; m.style.left = it._box.l + 'px'; m.style.top = it._box.t + 'px';\n    m.src = url;\n    it._clip.innerHTML = '';\n    it._clip.appendChild(m);\n  }\n  function showBig(it, text) { it._clip.innerHTML = ''; var b = el('div', 'big'); b.textContent = text; it._clip.appendChild(b); }\n\n  // ---------- loading pictures and videos, a few at a time ----------\n  var TYPES = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp', avif: 'image/avif', svg: 'image/svg+xml', bmp: 'image/bmp', mp4: 'video/mp4', m4v: 'video/mp4', mov: 'video/mp4', webm: 'video/webm' };\n  var MAX_PREVIEW = 60 * 1024 * 1024;\n  function fetchFile(name, size) {\n    var parts = [], offset = 0;\n    function next() {\n      if (offset >= size) return Promise.resolve();\n      return server('viewMedia', [KEY, name, offset]).then(function (r) {\n        var bin = atob(r.data || ''), bytes = new Uint8Array(bin.length);\n        for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);\n        parts.push(bytes); offset += bytes.length;\n        if (!bytes.length) offset = size;\n        return next();\n      });\n    }\n    return next().then(function () {\n      var ext = (name.split('.').pop() || '').toLowerCase();\n      return URL.createObjectURL(new Blob(parts, { type: TYPES[ext] || 'application/octet-stream' }));\n    });\n  }\n  function loadAll(media) {\n    var queue = items.filter(function (it) { return it.type === 'image' || it.type === 'video'; });\n    var cache = {};\n    function worker() {\n      var it = queue.shift();\n      if (!it) return Promise.resolve();\n      var size = media[it.src];\n      if (size == null) { showBig(it, 'Still uploading'); return worker(); }\n      if (size > MAX_PREVIEW) { showBig(it, it.type === 'video' ? 'This video is too big to preview here. Open the board in Eye Refs.' : 'Too big to preview here'); return worker(); }\n      var p = cache[it.src] || (cache[it.src] = fetchFile(it.src, size));\n      return p.then(function (url) { showMedia(it, url); }, function () { showBig(it, \"Couldn't load this file\"); }).then(worker);\n    }\n    return Promise.all([worker(), worker(), worker()]);\n  }\n\n  // ---------- pan and zoom with a mouse, a trackpad or fingers ----------\n  function apply() {\n    world.style.transform = 'translate(' + view.x + 'px,' + view.y + 'px) scale(' + view.s + ')';\n    canvas.style.backgroundSize = 28 * view.s + 'px ' + 28 * view.s + 'px';\n    canvas.style.backgroundPosition = view.x + 'px ' + view.y + 'px';\n    $('zVal').textContent = Math.round(view.s * 100) + '%';\n  }\n  function zoomAt(cx, cy, f) {\n    var s = Math.max(0.03, Math.min(20, view.s * f));\n    f = s / view.s;\n    view.x = cx - (cx - view.x) * f; view.y = cy - (cy - view.y) * f; view.s = s;\n    apply();\n  }\n  function fit() {\n    if (!items.length) return;\n    var x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;\n    items.forEach(function (it) { var d = dims(it); var h = d.h == null ? (it.fs || 16) * 4 : d.h; x0 = Math.min(x0, it.x); y0 = Math.min(y0, it.y); x1 = Math.max(x1, it.x + d.w); y1 = Math.max(y1, it.y + h); });\n    var W = innerWidth, H = innerHeight, top = 72, pad = 24;\n    var s = Math.min((W - pad * 2) / Math.max(1, x1 - x0), (H - top - pad * 2) / Math.max(1, y1 - y0), 2);\n    view.s = s; view.x = (W - (x1 - x0) * s) / 2 - x0 * s; view.y = top + (H - top - (y1 - y0) * s) / 2 - y0 * s;\n    apply();\n  }\n  var pointers = {}, last = null, pinch = null;\n  canvas.addEventListener('pointerdown', function (e) {\n    canvas.setPointerCapture(e.pointerId);\n    pointers[e.pointerId] = { x: e.clientX, y: e.clientY };\n    canvas.classList.add('dragging');\n    var ids = Object.keys(pointers);\n    if (ids.length === 2) { var a = pointers[ids[0]], b = pointers[ids[1]]; pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), s: view.s }; }\n    last = { x: e.clientX, y: e.clientY };\n  });\n  canvas.addEventListener('pointermove', function (e) {\n    if (!pointers[e.pointerId]) return;\n    pointers[e.pointerId] = { x: e.clientX, y: e.clientY };\n    var ids = Object.keys(pointers);\n    if (ids.length === 2 && pinch) {\n      var a = pointers[ids[0]], b = pointers[ids[1]];\n      var mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;\n      var target = pinch.s * Math.hypot(a.x - b.x, a.y - b.y) / Math.max(1, pinch.d);\n      if (last) { view.x += mx - last.x; view.y += my - last.y; }\n      zoomAt(mx, my, target / view.s);\n      last = { x: mx, y: my };\n      return;\n    }\n    if (last) { view.x += e.clientX - last.x; view.y += e.clientY - last.y; apply(); }\n    last = { x: e.clientX, y: e.clientY };\n  });\n  function up(e) {\n    delete pointers[e.pointerId];\n    var ids = Object.keys(pointers);\n    pinch = null;\n    last = ids.length ? { x: pointers[ids[0]].x, y: pointers[ids[0]].y } : null;\n    if (!ids.length) canvas.classList.remove('dragging');\n  }\n  canvas.addEventListener('pointerup', up);\n  canvas.addEventListener('pointercancel', up);\n  canvas.addEventListener('wheel', function (e) {\n    e.preventDefault();\n    var mouseLike = e.deltaMode === 1 || Math.abs(e.deltaY) >= 50;\n    if (e.ctrlKey || mouseLike) zoomAt(e.clientX, e.clientY, Math.exp(-e.deltaY * (e.ctrlKey && !mouseLike ? 0.01 : 0.0018)));\n    else { view.x -= e.deltaX; view.y -= e.deltaY; apply(); }\n  }, { passive: false });\n  canvas.addEventListener('dblclick', fit);\n  $('zIn').onclick = function () { zoomAt(innerWidth / 2, innerHeight / 2, 1.25); };\n  $('zOut').onclick = function () { zoomAt(innerWidth / 2, innerHeight / 2, 0.8); };\n  $('zVal').onclick = fit;\n  window.addEventListener('resize', fit);\n\n  // ---------- start ----------\n  if (!KEY) { message('This view link is not valid', 'Ask whoever shared it for a new link.'); return; }\n  server('viewState', [KEY]).then(function (st) {\n    document.title = st.name + ' \u00b7 Eye Refs';\n    $('name').textContent = st.name;\n    $('by').textContent = 'by ' + st.owner;\n    offerApp(st.downloads || {});\n    items = st.items || [];\n    if (!items.length) { message('Nothing on this board yet', 'Check back once something is added.'); return; }\n    $('msg').hidden = true;\n    $('zoom').hidden = false;\n    render(); fit();\n    return loadAll(st.media || {});\n  }).catch(function (e) { message(\"Can't show this board\", e.message); });\n})();\n</script>\n</body>\n</html>\n";
+// VIEWER_HTML_END
 
 // Run once from the editor to grant permissions before deploying.
 function setup() {

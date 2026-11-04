@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<title>Eye Refs</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root { --bg: #1C1B1A; --dot: #2B2A28; --panel: rgba(38, 37, 35, 0.86); --line: rgba(255,255,255,0.07); --text: #ECEAE3; --soft: #B8B6AE; --muted: #8F8D85; --lime: #D7F04A; --ink: #1C1B1A; }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--text); font: 14px/1.4 Inter, system-ui, -apple-system, 'Segoe UI', sans-serif; -webkit-font-smoothing: antialiased; touch-action: none; }
+  #canvas { position: fixed; inset: 0; overflow: hidden; background-image: radial-gradient(var(--dot) 1px, transparent 1.2px); cursor: grab; }
+  #canvas.dragging { cursor: grabbing; }
+  #world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+  .item { position: absolute; left: 0; top: 0; transform-origin: 50% 50%; }
+  .item .clip { position: absolute; inset: 0; overflow: hidden; }
+  .item .media { position: absolute; display: block; max-width: none; pointer-events: none; -webkit-user-drag: none; }
+  .item.gray .clip { filter: grayscale(1); }
+  .item .wait { position: absolute; inset: 0; background: #262523; }
+  .item .wait::after { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, rgba(255,255,255,0.05), transparent); animation: shine 1.4s infinite; }
+  @keyframes shine { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+  .item .big { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; padding: 12px; background: #262523; color: var(--muted); font-size: 13px; }
+  .item.note { background: #2A2927; }
+  .item.note .note-text { padding: 0.8em 0.95em; white-space: pre-wrap; word-break: break-word; line-height: 1.45; }
+  .item.draw svg { position: absolute; left: 0; top: 0; overflow: visible; }
+  .bar { position: fixed; left: 12px; right: 12px; top: max(12px, env(safe-area-inset-top)); display: flex; align-items: center; gap: 10px; pointer-events: none; z-index: 5; }
+  .pill { pointer-events: auto; display: flex; align-items: center; gap: 10px; height: 44px; padding: 0 16px 0 8px; border-radius: 999px; background: var(--panel); border: 1px solid var(--line); -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px); min-width: 0; }
+  .logo { width: 28px; height: 28px; border-radius: 50%; background: var(--lime); color: var(--ink); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .by { color: var(--muted); font-size: 12px; white-space: nowrap; }
+  .tag { font-size: 11px; font-weight: 600; color: var(--lime); background: rgba(215,240,74,0.12); border-radius: 999px; padding: 3px 9px; white-space: nowrap; }
+  .grow { flex: 1; }
+  .get { pointer-events: auto; display: flex; align-items: center; gap: 8px; }
+  .btn { height: 44px; padding: 0 18px; border-radius: 999px; border: 0; background: var(--text); color: var(--ink); font: 600 13px Inter, system-ui, sans-serif; text-decoration: none; display: inline-flex; align-items: center; white-space: nowrap; }
+  .link { color: var(--muted); font-size: 12px; text-decoration: none; white-space: nowrap; }
+  .link:hover { color: var(--text); }
+  .note-m { color: var(--muted); font-size: 12px; padding: 0 6px; }
+  .center { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; text-align: center; padding: 24px; z-index: 4; }
+  .center h1 { margin: 0; font-size: 20px; }
+  .center p { margin: 0; color: var(--muted); max-width: 360px; }
+  .zoom { position: fixed; right: 12px; bottom: max(12px, env(safe-area-inset-bottom)); z-index: 5; display: flex; align-items: center; gap: 2px; height: 44px; padding: 0 4px; border-radius: 999px; background: var(--panel); border: 1px solid var(--line); -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px); }
+  .zoom button { width: 36px; height: 36px; border-radius: 50%; border: 0; background: transparent; color: var(--soft); font: 500 18px Inter, sans-serif; cursor: pointer; }
+  .zoom .val { width: 56px; font-size: 12px; font-family: ui-monospace, Menlo, monospace; border-radius: 999px; }
+  .credit { position: fixed; left: 16px; bottom: max(16px, env(safe-area-inset-bottom)); color: #5E5C55; font-size: 11px; z-index: 5; }
+  @media (max-width: 640px) { .by, .credit { display: none; } .btn { padding: 0 14px; } .note-m { display: none; } }
+</style>
+</head>
+<body>
+<div id="canvas"><div id="world"></div></div>
+<div class="bar">
+  <div class="pill">
+    <span class="logo"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="11" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="18" width="7" height="3" rx="1.5"/></svg></span>
+    <span class="name" id="name">Eye Refs</span>
+    <span class="by" id="by"></span>
+    <span class="tag">View only</span>
+  </div>
+  <span class="grow"></span>
+  <div class="get" id="get"></div>
+</div>
+<div class="center" id="msg"><h1>Opening the board</h1><p id="msgText">One moment.</p></div>
+<div class="zoom" id="zoom" hidden>
+  <button id="zOut" aria-label="Zoom out">−</button>
+  <button class="val" id="zVal" aria-label="Fit everything">100%</button>
+  <button id="zIn" aria-label="Zoom in">+</button>
+</div>
+<div class="credit">Eye Refs by Matte Black</div>
+<script>
+(function () {
+  var KEY = '__VIEW_KEY__';
+  var $ = function (id) { return document.getElementById(id); };
+  var canvas = $('canvas'), world = $('world');
+  var view = { s: 1, x: 0, y: 0 };
+  var items = [];
+  var SVGNS = 'http://www.w3.org/2000/svg';
+
+  function server(fn, args) {
+    return new Promise(function (resolve, reject) {
+      var run = google.script.run.withSuccessHandler(function (r) { if (r && r.ok) resolve(r.data); else reject(new Error((r && r.error) || 'Something went wrong.')); })
+        .withFailureHandler(function (e) { reject(e instanceof Error ? e : new Error(String(e))); });
+      run[fn].apply(run, args);
+    });
+  }
+  function message(title, text) {
+    $('msg').hidden = false;
+    $('msg').querySelector('h1').textContent = title;
+    $('msgText').textContent = text || '';
+  }
+
+  // ---------- the right download for this computer ----------
+  function offerApp(d) {
+    var box = $('get');
+    var ua = navigator.userAgent;
+    var mobile = /iPhone|iPad|iPod|Android|Mobile/i.test(ua) || (navigator.maxTouchPoints > 1 && /Macintosh/.test(ua));
+    function button(text, url) { var a = document.createElement('a'); a.className = 'btn'; a.textContent = text; a.href = url; a.target = '_blank'; a.rel = 'noopener'; return a; }
+    function small(text, url) { var a = document.createElement('a'); a.className = 'link'; a.textContent = text; a.href = url; a.target = '_blank'; a.rel = 'noopener'; return a; }
+    if (mobile) { var s = document.createElement('span'); s.className = 'note-m'; s.textContent = 'Get Eye Refs on a Mac or PC'; box.appendChild(s); return; }
+    if (/Windows/.test(ua)) { box.appendChild(button('Get Eye Refs for Windows', d.windows || d.page)); return; }
+    if (/Mac/.test(ua)) {
+      var arm = button('Get Eye Refs for Mac', d.macArm || d.page);
+      var intel = small('Intel Mac', d.macIntel || d.page);
+      box.appendChild(intel); box.appendChild(arm);
+      // Chrome and Edge can tell an Apple chip from Intel; Safari can't, so both stay on offer
+      if (navigator.userAgentData && navigator.userAgentData.getHighEntropyValues) {
+        navigator.userAgentData.getHighEntropyValues(['architecture']).then(function (v) {
+          if (v.architecture === 'x86') { arm.href = d.macIntel || d.page; intel.textContent = 'Apple chip Mac'; intel.href = d.macArm || d.page; }
+        }).catch(function () {});
+      }
+      return;
+    }
+    box.appendChild(small('Get Eye Refs', d.page));
+  }
+
+  // ---------- drawing the board ----------
+  function dims(it) {
+    if (it.type === 'note') return { w: it.w, h: null, k: 1 };
+    var c = it.crop || { l: 0, t: 0, r: 0, b: 0 };
+    var vw = Math.max(1, (it.nw || 1) * (1 - c.l - c.r)), vh = Math.max(1, (it.nh || 1) * (1 - c.t - c.b));
+    var k = it.w / vw;
+    return { w: it.w, h: vh * k, k: k };
+  }
+  function parsePts(s) { var n = String(s || '').split(' ').map(Number), out = []; for (var i = 0; i + 1 < n.length; i += 2) out.push({ x: n[i], y: n[i + 1] }); return out; }
+  function strokePath(pts, arrow) {
+    if (!pts.length) return '';
+    var d = 'M' + pts[0].x + ' ' + pts[0].y;
+    if (pts.length < 3) { for (var i = 1; i < pts.length; i++) d += ' L' + pts[i].x + ' ' + pts[i].y; }
+    else {
+      for (var j = 1; j < pts.length - 1; j++) d += ' Q' + pts[j].x + ' ' + pts[j].y + ' ' + (pts[j].x + pts[j + 1].x) / 2 + ' ' + (pts[j].y + pts[j + 1].y) / 2;
+      d += ' L' + pts[pts.length - 1].x + ' ' + pts[pts.length - 1].y;
+    }
+    if (arrow && pts.length > 1) {
+      var tip = pts[pts.length - 1], back = pts[0];
+      for (var b = pts.length - 2; b >= 0; b--) if (Math.hypot(tip.x - pts[b].x, tip.y - pts[b].y) > arrow * 4) { back = pts[b]; break; }
+      var a = Math.atan2(tip.y - back.y, tip.x - back.x), L = arrow * 4.5;
+      d += ' M' + (tip.x - L * Math.cos(a - 0.5)) + ' ' + (tip.y - L * Math.sin(a - 0.5)) + ' L' + tip.x + ' ' + tip.y + ' L' + (tip.x - L * Math.cos(a + 0.5)) + ' ' + (tip.y - L * Math.sin(a + 0.5));
+    }
+    return d;
+  }
+  function el(tag, cls) { var n = document.createElement(tag); if (cls) n.className = cls; return n; }
+  function render() {
+    world.innerHTML = '';
+    items.sort(function (a, b) { return (a.z || 0) - (b.z || 0); });
+    items.forEach(function (it) {
+      var node = el('div', 'item' + (it.gray ? ' gray' : ''));
+      var d = dims(it);
+      node.style.width = d.w + 'px';
+      if (d.h != null) node.style.height = d.h + 'px';
+      node.style.transform = 'translate(' + it.x + 'px,' + it.y + 'px) rotate(' + (it.rot || 0) + 'deg)';
+      if (it.type === 'note') {
+        node.classList.add('note');
+        var t = el('div', 'note-text'); t.textContent = it.text || ''; node.style.fontSize = (it.fs || 16) + 'px';
+        node.appendChild(t);
+      } else if (it.type === 'draw') {
+        node.classList.add('draw');
+        var svg = document.createElementNS(SVGNS, 'svg');
+        svg.setAttribute('viewBox', '0 0 ' + it.nw + ' ' + it.nh); svg.setAttribute('preserveAspectRatio', 'none');
+        svg.setAttribute('width', d.w); svg.setAttribute('height', d.h);
+        var p = document.createElementNS(SVGNS, 'path');
+        p.setAttribute('d', strokePath(parsePts(it.pts), it.style === 'arrow' ? (it.sw || 4) : 0));
+        p.setAttribute('fill', 'none'); p.setAttribute('stroke', it.color || '#D7F04A'); p.setAttribute('stroke-width', it.sw || 4);
+        p.setAttribute('stroke-linecap', 'round'); p.setAttribute('stroke-linejoin', 'round');
+        if (it.style === 'dotted') p.setAttribute('stroke-dasharray', '0 ' + (it.sw || 4) * 2);
+        svg.appendChild(p); node.appendChild(svg);
+      } else {
+        var c = it.crop || { l: 0, t: 0, r: 0, b: 0 };
+        var clip = el('div', 'clip');
+        clip.style.transform = 'scale(' + (it.flipX ? -1 : 1) + ',' + (it.flipY ? -1 : 1) + ')';
+        clip.appendChild(el('div', 'wait'));
+        node.appendChild(clip);
+        it._clip = clip;
+        it._box = { w: it.nw * d.k, h: it.nh * d.k, l: -c.l * it.nw * d.k, t: -c.t * it.nh * d.k };
+      }
+      world.appendChild(node);
+    });
+  }
+  function showMedia(it, url) {
+    var m = it.type === 'video' ? el('video', 'media') : el('img', 'media');
+    if (it.type === 'video') { m.muted = true; m.loop = true; m.playsInline = true; m.autoplay = true; m.setAttribute('playsinline', ''); }
+    m.style.width = it._box.w + 'px'; m.style.height = it._box.h + 'px'; m.style.left = it._box.l + 'px'; m.style.top = it._box.t + 'px';
+    m.src = url;
+    it._clip.innerHTML = '';
+    it._clip.appendChild(m);
+  }
+  function showBig(it, text) { it._clip.innerHTML = ''; var b = el('div', 'big'); b.textContent = text; it._clip.appendChild(b); }
+
+  // ---------- loading pictures and videos, a few at a time ----------
+  var TYPES = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp', avif: 'image/avif', svg: 'image/svg+xml', bmp: 'image/bmp', mp4: 'video/mp4', m4v: 'video/mp4', mov: 'video/mp4', webm: 'video/webm' };
+  var MAX_PREVIEW = 60 * 1024 * 1024;
+  function fetchFile(name, size) {
+    var parts = [], offset = 0;
+    function next() {
+      if (offset >= size) return Promise.resolve();
+      return server('viewMedia', [KEY, name, offset]).then(function (r) {
+        var bin = atob(r.data || ''), bytes = new Uint8Array(bin.length);
+        for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        parts.push(bytes); offset += bytes.length;
+        if (!bytes.length) offset = size;
+        return next();
+      });
+    }
+    return next().then(function () {
+      var ext = (name.split('.').pop() || '').toLowerCase();
+      return URL.createObjectURL(new Blob(parts, { type: TYPES[ext] || 'application/octet-stream' }));
+    });
+  }
+  function loadAll(media) {
+    var queue = items.filter(function (it) { return it.type === 'image' || it.type === 'video'; });
+    var cache = {};
+    function worker() {
+      var it = queue.shift();
+      if (!it) return Promise.resolve();
+      var size = media[it.src];
+      if (size == null) { showBig(it, 'Still uploading'); return worker(); }
+      if (size > MAX_PREVIEW) { showBig(it, it.type === 'video' ? 'This video is too big to preview here. Open the board in Eye Refs.' : 'Too big to preview here'); return worker(); }
+      var p = cache[it.src] || (cache[it.src] = fetchFile(it.src, size));
+      return p.then(function (url) { showMedia(it, url); }, function () { showBig(it, "Couldn't load this file"); }).then(worker);
+    }
+    return Promise.all([worker(), worker(), worker()]);
+  }
+
+  // ---------- pan and zoom with a mouse, a trackpad or fingers ----------
+  function apply() {
+    world.style.transform = 'translate(' + view.x + 'px,' + view.y + 'px) scale(' + view.s + ')';
+    canvas.style.backgroundSize = 28 * view.s + 'px ' + 28 * view.s + 'px';
+    canvas.style.backgroundPosition = view.x + 'px ' + view.y + 'px';
+    $('zVal').textContent = Math.round(view.s * 100) + '%';
+  }
+  function zoomAt(cx, cy, f) {
+    var s = Math.max(0.03, Math.min(20, view.s * f));
+    f = s / view.s;
+    view.x = cx - (cx - view.x) * f; view.y = cy - (cy - view.y) * f; view.s = s;
+    apply();
+  }
+  function fit() {
+    if (!items.length) return;
+    var x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    items.forEach(function (it) { var d = dims(it); var h = d.h == null ? (it.fs || 16) * 4 : d.h; x0 = Math.min(x0, it.x); y0 = Math.min(y0, it.y); x1 = Math.max(x1, it.x + d.w); y1 = Math.max(y1, it.y + h); });
+    var W = innerWidth, H = innerHeight, top = 72, pad = 24;
+    var s = Math.min((W - pad * 2) / Math.max(1, x1 - x0), (H - top - pad * 2) / Math.max(1, y1 - y0), 2);
+    view.s = s; view.x = (W - (x1 - x0) * s) / 2 - x0 * s; view.y = top + (H - top - (y1 - y0) * s) / 2 - y0 * s;
+    apply();
+  }
+  var pointers = {}, last = null, pinch = null;
+  canvas.addEventListener('pointerdown', function (e) {
+    canvas.setPointerCapture(e.pointerId);
+    pointers[e.pointerId] = { x: e.clientX, y: e.clientY };
+    canvas.classList.add('dragging');
+    var ids = Object.keys(pointers);
+    if (ids.length === 2) { var a = pointers[ids[0]], b = pointers[ids[1]]; pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), s: view.s }; }
+    last = { x: e.clientX, y: e.clientY };
+  });
+  canvas.addEventListener('pointermove', function (e) {
+    if (!pointers[e.pointerId]) return;
+    pointers[e.pointerId] = { x: e.clientX, y: e.clientY };
+    var ids = Object.keys(pointers);
+    if (ids.length === 2 && pinch) {
+      var a = pointers[ids[0]], b = pointers[ids[1]];
+      var mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+      var target = pinch.s * Math.hypot(a.x - b.x, a.y - b.y) / Math.max(1, pinch.d);
+      if (last) { view.x += mx - last.x; view.y += my - last.y; }
+      zoomAt(mx, my, target / view.s);
+      last = { x: mx, y: my };
+      return;
+    }
+    if (last) { view.x += e.clientX - last.x; view.y += e.clientY - last.y; apply(); }
+    last = { x: e.clientX, y: e.clientY };
+  });
+  function up(e) {
+    delete pointers[e.pointerId];
+    var ids = Object.keys(pointers);
+    pinch = null;
+    last = ids.length ? { x: pointers[ids[0]].x, y: pointers[ids[0]].y } : null;
+    if (!ids.length) canvas.classList.remove('dragging');
+  }
+  canvas.addEventListener('pointerup', up);
+  canvas.addEventListener('pointercancel', up);
+  canvas.addEventListener('wheel', function (e) {
+    e.preventDefault();
+    var mouseLike = e.deltaMode === 1 || Math.abs(e.deltaY) >= 50;
+    if (e.ctrlKey || mouseLike) zoomAt(e.clientX, e.clientY, Math.exp(-e.deltaY * (e.ctrlKey && !mouseLike ? 0.01 : 0.0018)));
+    else { view.x -= e.deltaX; view.y -= e.deltaY; apply(); }
+  }, { passive: false });
+  canvas.addEventListener('dblclick', fit);
+  $('zIn').onclick = function () { zoomAt(innerWidth / 2, innerHeight / 2, 1.25); };
+  $('zOut').onclick = function () { zoomAt(innerWidth / 2, innerHeight / 2, 0.8); };
+  $('zVal').onclick = fit;
+  window.addEventListener('resize', fit);
+
+  // ---------- start ----------
+  if (!KEY) { message('This view link is not valid', 'Ask whoever shared it for a new link.'); return; }
+  server('viewState', [KEY]).then(function (st) {
+    document.title = st.name + ' · Eye Refs';
+    $('name').textContent = st.name;
+    $('by').textContent = 'by ' + st.owner;
+    offerApp(st.downloads || {});
+    items = st.items || [];
+    if (!items.length) { message('Nothing on this board yet', 'Check back once something is added.'); return; }
+    $('msg').hidden = true;
+    $('zoom').hidden = false;
+    render(); fit();
+    return loadAll(st.media || {});
+  }).catch(function (e) { message("Can't show this board", e.message); });
+})();
+</script>
+</body>
+</html>

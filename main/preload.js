@@ -22,6 +22,7 @@ contextBridge.exposeInMainWorld('eyerefs', {
   openProjectFile: call('projects:openFile'),
   renameProject: call('projects:rename'),
   renameBoard: call('projects:renameAny'),
+  viewLink: call('projects:viewLink'),
   share: call('projects:share'),
   members: call('projects:members'),
   invite: call('projects:invite'),

@@ -372,7 +372,7 @@
   function viewport() {
     const b = document.body.classList;
     if (b.contains('ui-hidden') || (b.contains('ui-auto') && !b.contains('board-empty'))) return { left: 16, top: 16, right: window.innerWidth - 16, bottom: window.innerHeight - 16 };
-    const side = b.contains('has-sidebar') ? 304 : 16;
+    const side = b.contains('has-sidebar') && window.innerWidth > 760 ? 304 : 16; // small windows hide the sidebar
     return { left: side, top: 76, right: window.innerWidth - 16, bottom: window.innerHeight - 76 };
   }
 

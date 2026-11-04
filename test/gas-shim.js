@@ -85,6 +85,10 @@ function createGas(driveDir, ownerEmail) {
       newBlob: (b) => ({ getDataAsString: () => toBuf(b).toString('utf8') }),
     },
     ContentService: { MimeType: { JSON: 'json' }, createTextOutput: (s) => ({ setMimeType() { return this; }, getContent: () => s }) },
+    HtmlService: {
+      XFrameOptionsMode: { DEFAULT: 0, ALLOWALL: 1 },
+      createHtmlOutput: (s) => ({ html: true, setTitle() { return this; }, addMetaTag() { return this; }, setXFrameOptionsMode() { return this; }, getContent: () => s }),
+    },
     DriveApp: {
       getRootFolder: () => Folder(driveDir),
       getFolderById: (id) => { const p = ids.get(id); if (!p || !fs.existsSync(p)) throw new Error('No item with the given ID could be found.'); return Folder(p); },
@@ -113,6 +117,7 @@ function createGas(driveDir, ownerEmail) {
           return resp(206, data.subarray(+r[1], +r[2] + 1));
         }
         if (url.includes('/drive/v3/about')) return resp(200, Buffer.from('{}'));
+        if (url.includes('api.github.com/repos/')) return resp(200, Buffer.from(JSON.stringify({ tag_name: 'v9.9.9', assets: [{ name: 'Eye-Refs-9.9.9-arm64.pkg', browser_download_url: 'https://example.com/arm.pkg' }, { name: 'Eye-Refs-9.9.9.pkg', browser_download_url: 'https://example.com/intel.pkg' }, { name: 'Eye-Refs-Setup-9.9.9.exe', browser_download_url: 'https://example.com/win.exe' }] })));
         throw new Error('unexpected fetch ' + url);
       },
     },
@@ -131,7 +136,21 @@ function createGas(driveDir, ownerEmail) {
         let body = '';
         req.on('data', (d) => (body += d));
         req.on('end', () => {
-          const out = req.method === 'POST' ? ctx.doPost({ postData: { contents: body } }) : ctx.doGet();
+          const u = new URL(req.url, 'http://x');
+          const out = req.method === 'POST' ? ctx.doPost({ postData: { contents: body } }) : ctx.doGet({ parameter: Object.fromEntries(u.searchParams) });
+          if (out.html) {
+            // Stand in for google.script.run: call the same server functions over HTTP
+            const shim = `<script>window.google={script:{run:(function mk(ok,fail){return new Proxy({},{get(_,k){if(k==='withSuccessHandler')return f=>mk(f,fail);if(k==='withFailureHandler')return f=>mk(ok,f);return (...a)=>fetch('/run',{method:'POST',body:JSON.stringify({fn:k,args:a})}).then(r=>r.json()).then(ok,fail);}})})()}};</script>`;
+            res.setHeader('content-type', 'text/html');
+            res.end(out.getContent().replace('<head>', '<head>' + shim));
+            return;
+          }
+          if (u.pathname === '/run') {
+            const { fn, args } = JSON.parse(body);
+            res.setHeader('content-type', 'application/json');
+            res.end(JSON.stringify(ctx[fn](...args)));
+            return;
+          }
           res.setHeader('content-type', 'application/json');
           res.end(out.getContent());
         });

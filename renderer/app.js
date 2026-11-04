@@ -387,7 +387,7 @@
     body.classList.toggle('ui-hidden', mode === 'hidden');
     try { localStorage.setItem('ui', mode); } catch (_) {}
     if (!quiet) toast(isClean() ? 'Only the board. Tab brings the controls back.' : 'Controls shown');
-    if (!isClean()) body.classList.remove('show-top');
+    if (!isClean()) body.classList.remove('show-top', 'show-bottom');
     try { B.applyView(); } catch (_) {}
     if (typeof drawSettings === 'function') drawSettings();
   }
@@ -410,11 +410,22 @@
     movingUntil = Date.now() + 900;
     showTop(true);
   });
+  // Bottom edge: the toolbar (pen, notes, images) and zoom, same rules
+  const inBottom = (t) => t && t.closest && t.closest('#toolbar, #zoom, #penBar');
+  let bottomTimer = null;
+  const showBottom = (on) => {
+    clearTimeout(bottomTimer);
+    if (on) body.classList.add('show-bottom');
+    else bottomTimer = setTimeout(() => body.classList.remove('show-bottom'), 450);
+  };
   window.addEventListener('pointermove', (e) => {
-    if (!isClean() || busy || modalOpen() || menuOpen() || Date.now() < movingUntil) return;
+    if (!isClean() || busy || modalOpen() || menuOpen()) return;
+    const H = window.innerHeight;
+    showBottom(e.clientY > H - 28 || (body.classList.contains('show-bottom') && (e.clientY > H - 84 || !!inBottom(e.target))));
+    if (Date.now() < movingUntil) return;
     showTop(e.clientY < 28 || (body.classList.contains('show-top') && (e.clientY < 72 || !!inTop(e.target))));
   }, { passive: true });
-  $('#canvas').addEventListener('pointerdown', () => { if (isClean()) { busy = true; clearTimeout(leaveTimer); body.classList.remove('show-top'); } });
+  $('#canvas').addEventListener('pointerdown', () => { if (isClean()) { busy = true; clearTimeout(leaveTimer); clearTimeout(bottomTimer); body.classList.remove('show-top', 'show-bottom'); } });
   window.addEventListener('pointerup', () => { busy = false; });
 
   // ---------- toolbar ----------
@@ -719,6 +730,8 @@
     if (!p.shared && !S.teamMember) return toast('Only EyeStudio accounts can share boards.', true);
     let data = p.shared ? await api.members(p.id) : null;
     if (data && data.error) return toast(data.error, true);
+    let link = p.shared && data && data.role !== 'member' ? await api.viewLink(p.id) : null;
+    if (link && link.error) link = null;
     openModal((close) => {
       const box = el('div', { style: 'display:flex;flex-direction:column;gap:14px' });
       // Names get @eyestudio.ae added; a full email works for anyone outside
@@ -735,6 +748,30 @@
           return;
         }
         const canManage = data.role !== 'member';
+        // View link: the board in any browser, phones too, nobody can change it
+        if (canManage) {
+          const on = !!(link && link.url);
+          const sw = el('span', { class: 'switch' + (on ? ' on' : '') });
+          const row = el('button', { class: 'li', style: 'display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:14px;background:rgba(255,255,255,0.04);border:0;color:inherit;text-align:left;cursor:pointer;width:100%' },
+            el('span', { style: 'flex:1;display:flex;flex-direction:column;gap:2px' },
+              el('span', { text: 'Anyone with the link can view' }),
+              el('span', { style: 'font-size:12px;color:var(--muted)', text: 'Opens in a browser or on a phone. Nothing can be changed.' })),
+            sw);
+          row.onclick = async () => {
+            const r = await api.viewLink(p.id, !on);
+            if (r && r.error) return toast(r.error, true);
+            link = r;
+            if (r.url) { try { await navigator.clipboard.writeText(r.url); toast('View link copied'); } catch (_) {} } else toast('View link turned off. The old link no longer works.');
+            draw();
+          };
+          box.append(row);
+          if (on) {
+            const copyLink = el('button', { class: 'btn ghost', style: 'height:32px;padding:0 12px', text: 'Copy link' });
+            copyLink.onclick = async () => { try { await navigator.clipboard.writeText(link.url); toast('View link copied'); } catch (_) { toast(link.url); } };
+            box.append(el('div', { class: 'li', style: 'display:flex;align-items:center;gap:10px;padding:6px 6px 6px 14px;border-radius:14px;background:rgba(255,255,255,0.04)' },
+              el('span', { style: 'flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--mono);font-size:11px;color:var(--soft)', text: link.url }), copyLink));
+          }
+        }
         if (data.code && canManage) {
           const copy = el('button', { class: 'btn ghost', style: 'height:32px;padding:0 12px', text: 'Copy' });
           copy.onclick = async () => { try { await navigator.clipboard.writeText(data.code); toast('Join code copied'); } catch (_) { toast(`Join code: ${data.code}`); } };

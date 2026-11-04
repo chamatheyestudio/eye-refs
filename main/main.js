@@ -422,6 +422,14 @@ handle('projects:share', async (projectId, emails) => {
   return { shared: s.rec.shared, members: await cloud.call('projects.members', { id: s.rec.shared.id }) };
 });
 
+// View link: anyone with it sees the board in a browser, phones too, read only
+handle('projects:viewLink', async (projectId, on) => {
+  const s = sessionFor(projectId);
+  if (!s.rec.shared) return { key: null, url: null };
+  const r = await cloud.call('projects.viewLink', on === undefined ? { id: s.rec.shared.id } : { id: s.rec.shared.id, on: !!on });
+  return { key: r.key, url: r.key ? `${serverUrl()}?v=${r.key}` : null };
+});
+
 handle('projects:members', async (projectId) => {
   const s = sessionFor(projectId);
   if (!s.rec.shared) return { members: [], requests: [] };

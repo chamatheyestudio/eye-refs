@@ -54,7 +54,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await win.mouse.move(720, 450);
   await sleep(300);
   await win.screenshot({ path: `${OUT}/02a-clean.png` });
-  const hiddenOk = await win.evaluate(() => getComputedStyle(document.querySelector('#toolbar')).display === 'none' && getComputedStyle(document.querySelector('#topbar')).opacity === '0');
+  const hiddenOk = await win.evaluate(() => getComputedStyle(document.querySelector('#toolbar')).opacity === '0' && getComputedStyle(document.querySelector('#sidebar')).display === 'none' && getComputedStyle(document.querySelector('#topbar')).opacity === '0');
   await win.mouse.move(720, 10);
   await sleep(400);
   await win.screenshot({ path: `${OUT}/02b-clean-top.png` });

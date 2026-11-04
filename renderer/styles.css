@@ -270,7 +270,11 @@ body.clickthrough #canvas { outline: 2px solid rgba(215, 240, 74, 0.5); outline-
    window buttons. Nothing changes position, it only fades, so nothing jumps. */
 #topbar { display: none; }
 :is(body.ui-hidden, body.ui-auto:not(.board-empty)) #topbar { display: block; position: fixed; left: 0; right: 0; top: 0; height: 60px; z-index: 14; background: var(--panel-solid); border-bottom: 1px solid var(--line); opacity: 0; pointer-events: none; -webkit-app-region: no-drag; transition: opacity 140ms ease; }
-:is(body.ui-hidden, body.ui-auto:not(.board-empty)) :is(#sidebar, #toolbar, #zoom) { display: none; }
+:is(body.ui-hidden, body.ui-auto:not(.board-empty)) #sidebar { display: none; }
+/* Bottom edge: the toolbar and zoom fade back in, in the same spot as always */
+:is(body.ui-hidden, body.ui-auto:not(.board-empty)) :is(#toolbar, #zoom) { opacity: 0; pointer-events: none; transition: opacity 140ms ease; }
+:is(body.ui-hidden, body.ui-auto:not(.board-empty)).show-bottom :is(#toolbar, #zoom) { opacity: 1; pointer-events: auto; }
+:is(body.ui-hidden, body.ui-auto:not(.board-empty)) #toolbar { left: 50%; }
 :is(body.ui-hidden, body.ui-auto:not(.board-empty)) :is(#title, #topRight) { opacity: 0; pointer-events: none; transition: opacity 140ms ease; }
 :is(body.ui-hidden, body.ui-auto:not(.board-empty)) #title { top: 8px; left: 8px; padding-left: 4px; background: transparent; border-color: transparent; -webkit-backdrop-filter: none; backdrop-filter: none; -webkit-app-region: no-drag; max-width: calc(100vw - 560px); }
 :is(body.ui-hidden, body.ui-auto:not(.board-empty)) #topRight { top: 8px; right: 8px; }
@@ -278,7 +282,7 @@ body.clickthrough #canvas { outline: 2px solid rgba(215, 240, 74, 0.5); outline-
 :is(body.ui-hidden, body.ui-auto:not(.board-empty)).show-top #topbar { opacity: 1; pointer-events: auto; -webkit-app-region: drag; }
 :is(body.ui-hidden, body.ui-auto:not(.board-empty)).show-top :is(#title, #topRight) { opacity: 1; pointer-events: auto; }
 :is(body.ui-hidden, body.ui-auto:not(.board-empty)).show-top #title { -webkit-app-region: drag; }
-:is(body.ui-hidden, body.ui-auto:not(.board-empty)) #penBar { left: 50%; bottom: 16px; }
+:is(body.ui-hidden, body.ui-auto:not(.board-empty)) #penBar { left: 50%; }
 :is(body.ui-hidden, body.ui-auto:not(.board-empty)) #showSidebar { display: inline-flex !important; }
 
 /* Settings: one panel, everything one click away */
@@ -304,3 +308,28 @@ body.clickthrough #canvas { outline: 2px solid rgba(215, 240, 74, 0.5); outline-
 /* Renaming a board in place */
 .editing-name { outline: none; background: rgba(255,255,255,0.08); border-radius: 8px; padding: 2px 6px; margin: -2px -6px; cursor: text; white-space: nowrap; overflow: hidden; -webkit-app-region: no-drag; user-select: text; min-width: 60px; }
 .editing-name:empty::before { content: 'Board name'; color: var(--faint); }
+
+/* Small windows: things step aside instead of piling on top of each other */
+@media (max-width: 900px) {
+  #title, :is(body.ui-hidden, body.ui-auto:not(.board-empty)) #title { max-width: calc(100vw - 330px); }
+  #presence .p-text { display: none; }
+}
+@media (max-width: 760px) {
+  #sidebar { display: none; }
+  body.has-sidebar #title { left: 16px; }
+  body.has-sidebar #toolbar, body.has-sidebar #penBar { left: 50%; }
+  #showSidebar { display: none !important; }
+  #zoom { display: none; }
+  #title .t-status { display: none; }
+}
+@media (max-width: 560px) {
+  #toolbar .sep, #tAddVideo, #tTop, #tThrough { display: none; }
+  #title, :is(body.ui-hidden, body.ui-auto:not(.board-empty)) #title { max-width: calc(100vw - 250px); }
+  #share { padding: 0 14px; }
+  .setpill { display: none; }
+  #penBar .styles, #penBar .styles + .sep { display: none; }
+}
+@media (max-width: 420px) {
+  #share { display: none; }
+  #title, :is(body.ui-hidden, body.ui-auto:not(.board-empty)) #title { max-width: calc(100vw - 160px); }
+}

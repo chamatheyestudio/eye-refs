@@ -364,5 +364,42 @@ module.exports = async function (test) {
     assert.ok(logged.some((m) => /Drive exploded/.test(m)));
   });
 
+  await test('server: view link shows the board to anyone, read only, and can be turned off', () => {
+    const { gas, drive, signIn, board } = fresh();
+    const owner = signIn('contact@eyestudio.ae', 'Contact');
+    const nous = signIn('nousaiba@eyestudio.ae', 'Nousaiba');
+    board(owner, ID, 'Spring Campaign');
+    // Owner pushes a change file and a picture
+    const file = { format: 1, device: { key: 'contact-aaa111' }, clock: 3, items: { a: { type: ['image', 1], src: ['2026-11-04_CO_abcdefgh_x.png', 1], x: [0, 1], y: [0, 1], w: [100, 1], nw: [100, 1], nh: [50, 1] }, b: { type: ['note', 2], text: ['hello', 2], deleted: [true, 3] } } };
+    assert.ok(gas.call({ action: 'sync.push', token: owner, id: ID, device: 'contact-aaa111', data: JSON.stringify(file) }).ok);
+    fs.writeFileSync(path.join(drive, 'Eye Refs', 'Spring Campaign', 'media', '2026-11-04_CO_abcdefgh_x.png'), Buffer.from('fakepng'));
+    // Only the owner can make a link
+    assert.equal(gas.call({ action: 'projects.viewLink', token: nous, id: ID, on: true }).ok, false);
+    const on = gas.call({ action: 'projects.viewLink', token: owner, id: ID, on: true });
+    assert.ok(on.ok && /^[A-Za-z0-9]{24}$/.test(on.data.key));
+    const key = on.data.key;
+    // Anyone with the key sees merged items (deleted ones left out) and media sizes, no token needed
+    const st = gas.ctx.viewState(key);
+    assert.ok(st.ok, st.error);
+    assert.equal(st.data.name, 'Spring Campaign');
+    assert.deepEqual(st.data.items.map((i) => i.id), ['a']);
+    assert.equal(st.data.media['2026-11-04_CO_abcdefgh_x.png'], 7);
+    assert.equal(st.data.downloads.windows, 'https://example.com/win.exe');
+    const m = gas.ctx.viewMedia(key, '2026-11-04_CO_abcdefgh_x.png', 0);
+    assert.equal(Buffer.from(m.data.data, 'base64').toString(), 'fakepng');
+    assert.equal(gas.ctx.viewMedia(key, '../secret', 0).ok, false);
+    // The page itself
+    const page = gas.ctx.doGet({ parameter: { v: key } });
+    assert.ok(page.html && page.getContent().includes(key) && page.getContent().includes('View only'));
+    // Nothing that changes the board is reachable with a view key
+    assert.equal(gas.call({ action: 'sync.push', key, id: ID, device: 'x-1', data: '{}' }).ok, false);
+    // Turning it off kills the link
+    assert.ok(gas.call({ action: 'projects.viewLink', token: owner, id: ID, on: false }).ok);
+    const off = gas.ctx.viewState(key);
+    assert.equal(off.ok, false);
+    assert.match(off.error, /turned off/);
+    assert.equal(gas.ctx.viewState('nope').ok, false);
+  });
+
   fs.rmSync(tmp, { recursive: true, force: true });
 };
