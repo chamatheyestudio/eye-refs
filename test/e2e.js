@@ -536,10 +536,26 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await win.waitForSelector('#modal >> text=Save this board?', { timeout: 5000 }).catch(() => {});
   const asked = await win.evaluate(() => !!document.querySelector('.modal, #modal') && document.body.textContent.includes('Save this board?'));
   await win.screenshot({ path: `${OUT}/09b-ask.png` });
+  // Slow the board opening down so the opening note can be seen
+  const slowed = await app.evaluate(({ ipcMain }) => {
+    const h = ipcMain._invokeHandlers && ipcMain._invokeHandlers.get('projects:open');
+    if (!h) return false;
+    ipcMain._invokeHandlers.set('projects:open', async (...a) => { await new Promise((r) => setTimeout(r, 900)); return h(...a); });
+    return true;
+  });
   await win.click("#modalWrap button:has-text(\"Don't save\")");
+  let openingSeen = null;
+  if (slowed) {
+    await win.waitForFunction(() => document.body.classList.contains('is-opening'), null, { timeout: 3000 }).catch(() => {});
+    openingSeen = await win.evaluate(() => ({ on: document.body.classList.contains('is-opening'), text: document.querySelector('#openingName').textContent, fade: getComputedStyle(document.querySelector('#world')).opacity }));
+    await sleep(250);
+    await win.screenshot({ path: `${OUT}/09d-opening.png` });
+  }
   await win.waitForFunction(() => document.querySelector('#tName').textContent === 'Spring Campaign');
   await sleep(800);
   const unsavedLeft = await win.evaluate(() => [...document.querySelectorAll('#tree .row .name')].filter((n) => n.textContent === 'Untitled').length);
+  const openingGone = await win.evaluate(() => !document.body.classList.contains('is-opening'));
+  expect('switching boards shows what is opening, then clears', !slowed || (openingSeen && openingSeen.on && openingSeen.text === 'Opening Spring Campaign' && openingGone), { slowed, openingSeen, openingGone });
   expect('leaving an unsaved board asks, and Don\'t save removes it', startGone && asked && unsavedLeft === 0, { startGone, asked, unsavedLeft });
   const result = await win.evaluate((fresh) => ({ fresh, items: Board.live().length, status: document.querySelector('#tStatus').textContent, rows: [...document.querySelectorAll('#tree .row')].map((r) => r.textContent) }), fresh);
   await syncB.stop(); await sB.close();

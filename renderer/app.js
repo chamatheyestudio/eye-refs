@@ -140,7 +140,7 @@
     if (r.openFile) return openResult(await api.openProjectFile(r.openFile));
     if (S.current) return;
     const last = r.lastProject && S.projects.find((p) => p.id === r.lastProject);
-    if (last) openResult(await api.openProject(last.id));
+    if (last) await opening(last.name, () => api.openProject(last.id));
     else openResult(await api.newBoard());
     syncChrome();
     // Let the pictures paint before a rebuilt window is shown
@@ -819,8 +819,29 @@
     ]);
   }
 
+  // Opening a board can take a moment: the old one fades back and a small note says
+  // what's opening. Only shows when it takes longer than a blink, so quick switches stay quiet.
+  let openGen = 0;
+  async function opening(name, fn) {
+    const g = ++openGen;
+    const box = $('#opening');
+    const show = setTimeout(() => { if (g !== openGen) return; $('#openingName').textContent = name ? `Opening ${name}` : 'Opening'; box.hidden = false; requestAnimationFrame(() => body.classList.add('is-opening')); }, 150);
+    let res;
+    try { res = await fn(); } finally { clearTimeout(show); }
+    if (g !== openGen) return res;
+    openResult(res);
+    // Give the first pictures a moment to appear before the note goes
+    if (body.classList.contains('is-opening')) {
+      const imgs = [...document.querySelectorAll('#world img')].slice(0, 12);
+      await Promise.race([Promise.all(imgs.map((i) => (i.decode ? i.decode().catch(() => {}) : null))), new Promise((r) => setTimeout(r, 1200))]);
+    }
+    if (g === openGen) { body.classList.remove('is-opening'); setTimeout(() => { if (!body.classList.contains('is-opening')) box.hidden = true; }, 220); }
+    return res;
+  }
+
   function switchTo(id) {
-    return confirmLeave(async () => { openResult(await api.openProject(id)); });
+    const p = S.projects.find((x) => x.id === id);
+    return confirmLeave(() => opening(p ? p.name : 'the board', () => api.openProject(id)));
   }
 
   async function newBoard() {
