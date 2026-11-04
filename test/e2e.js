@@ -206,6 +206,34 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   // See through: the colour goes clear, the dots stay
   const seeRes = await win.evaluate(() => { document.body.classList.add('see'); const cs = getComputedStyle(document.querySelector('#canvas')); const r = { bg: cs.backgroundColor, img: cs.backgroundImage }; document.body.classList.remove('see'); return r; });
   expect('see through keeps dots and grid', seeRes.bg === 'rgba(0, 0, 0, 0)' && seeRes.img !== 'none', seeRes);
+  // Settings: pattern and background are separate, so the pattern changes while see through stays on
+  const setRes = await win.evaluate(async () => {
+    document.querySelector('#settingsBtn').click();
+    await new Promise((r) => setTimeout(r, 100));
+    const labels = [...document.querySelectorAll('#settings .set-row .set-label')].map((n) => n.textContent);
+    const btn = (row, text) => [...document.querySelectorAll('#settings .set-row')].find((r) => r.querySelector('.set-label').textContent === row).querySelector(`.seg`).querySelectorAll('button');
+    document.body.classList.add('see'); // stands in for see through being on
+    const grid = [...btn('Pattern')].find((b) => b.textContent === 'Grid'); grid.click();
+    await new Promise((r) => setTimeout(r, 100));
+    const r = { labels, grid: document.querySelector('#canvas').classList.contains('bg-grid'), stillSee: document.body.classList.contains('see') };
+    [...btn('Pattern')].find((b) => b.textContent === 'Dots').click();
+    document.body.classList.remove('see');
+    document.querySelector('#settingsBtn').click();
+    return r;
+  });
+  expect('pattern and background are separate', setRes.labels.includes('Pattern') && setRes.labels.includes('Background') && setRes.grid && setRes.stillSee, setRes);
+  // Another app in front: selection boxes hide, and come back on return
+  const awayRes = await win.evaluate(() => {
+    const it = Board.live().find((x) => x.type === 'image'); Board.sel = new Set([it.id]); Board.render();
+    window.dispatchEvent(new Event('blur'));
+    const hidden = getComputedStyle(document.querySelector('#overlay')).visibility === 'hidden';
+    window.dispatchEvent(new Event('focus'));
+    const back = getComputedStyle(document.querySelector('#overlay')).visibility === 'visible';
+    const kept = Board.sel.size === 1;
+    Board.clearSel();
+    return { hidden, back, kept };
+  });
+  expect('selection boxes hide while another app is in front', awayRes.hidden && awayRes.back && awayRes.kept, awayRes);
   // A message never sits on the pen bar
   await win.evaluate(() => Board.setTool('pen'));
   await win.waitForSelector('#penBar:not([hidden])');
@@ -399,6 +427,14 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const startRes = await win.evaluate(() => ({ shown: getComputedStyle(document.querySelector('#start')).display !== 'none' && !document.querySelector('#start').hidden, cards: [...document.querySelectorAll('#startCards .start-card .nm')].map((n) => n.textContent), pics: document.querySelectorAll('#startCards img').length, sidebar: !document.querySelector('#sidebar').hidden }));
   await win.screenshot({ path: `${OUT}/09-new.png` });
   expect('start screen shows recent boards', startRes.shown && startRes.cards.includes('Spring Campaign') && startRes.pics > 0 && !startRes.sidebar, startRes);
+  await win.hover('#startCards .start-card');
+  await sleep(400);
+  const hov = await win.evaluate(() => { const c = document.querySelector('#startCards .start-card'); return { card: getComputedStyle(c).transform, mini: getComputedStyle(c.querySelector('.mini-in')).transform }; });
+  await win.screenshot({ path: `${OUT}/09c-hover.png` });
+  expect('recent card hover lifts and zooms', hov.card !== 'none' && hov.mini !== 'none', hov);
+  await win.mouse.move(720, 200);
+  const startDrag = await win.evaluate(() => { const t = document.querySelector('#topbar'); const cs = getComputedStyle(t); return { region: cs.getPropertyValue('-webkit-app-region') || cs.webkitAppRegion, h: t.getBoundingClientRect().height, w: t.getBoundingClientRect().width }; });
+  expect('start screen window can be moved from the top', startDrag.region === 'drag' && startDrag.h >= 40 && startDrag.w > 1000, startDrag);
   const fresh = await win.evaluate(() => Board.live().length);
   // Something on the untitled board: leaving it asks first, and "Don't save" throws it away
   await win.evaluate(() => Board.addNote());

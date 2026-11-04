@@ -454,6 +454,10 @@
   const hideEdges = () => { if (!isClean()) return; showTop(false); showBottom(false); };
   document.documentElement.addEventListener('mouseleave', hideEdges);
   window.addEventListener('blur', hideEdges);
+  // Working in another app: the selection boxes step aside so only the pictures show.
+  // The selection itself stays and comes back as soon as you return.
+  window.addEventListener('blur', () => body.classList.add('away'));
+  window.addEventListener('focus', () => body.classList.remove('away'));
 
   // ---------- toolbar ----------
   function syncToolbar() {
@@ -559,7 +563,8 @@
         '-',
         { label: 'Dots', checked: S.bg === 'dots', onClick: () => setBg('dots') },
         { label: 'Grid', checked: S.bg === 'grid', onClick: () => setBg('grid') },
-        { label: 'Plain', checked: S.bg === 'plain', onClick: () => setBg('plain') },
+        { label: 'No pattern', checked: S.bg === 'plain', onClick: () => setBg('plain') },
+        '-',
         { label: 'See through', checked: S.transparent, onClick: () => setTransparent(!S.transparent) },
         '-',
         { label: 'Grayscale canvas', key: 'Mod+Alt+G', checked: B.grayCanvas, onClick: () => B.setGrayCanvas(!B.grayCanvas) },
@@ -606,7 +611,6 @@
     c.classList.toggle('bg-grid', S.bg === 'grid');
     c.classList.remove('grid');
     try { localStorage.setItem('bg', S.bg); } catch (_) {}
-    if (S.transparent && !quiet) setTransparent(false);
     drawSettings();
   }
   // Only the board background goes clear; references, notes and drawings stay solid
@@ -642,7 +646,9 @@
     p.innerHTML = '';
     p.append(
       el('div', { class: 'set-head' }, el('b', { text: 'Settings' }), el('span', { class: 'k', text: keyLabel('Mod+U') })),
-      seg('Background', [['dots', 'Dots'], ['grid', 'Grid'], ['plain', 'Plain'], ['see', 'See through']], S.transparent ? 'see' : S.bg, (v) => (v === 'see' ? setTransparent(true) : setBg(v))),
+      // Pattern and background are separate, so the pattern can change while see through is on
+      seg('Pattern', [['dots', 'Dots'], ['grid', 'Grid'], ['plain', 'None']], S.bg, (v) => setBg(v)),
+      seg('Background', [['solid', 'Solid'], ['see', 'See through']], S.transparent ? 'see' : 'solid', (v) => { if ((v === 'see') !== !!S.transparent) setTransparent(v === 'see'); }),
       seg('Controls', [['auto', 'Auto hide'], ['shown', 'Always'], ['hidden', 'Hidden']], uiMode, (v) => setUi(v, true)),
       seg('Opens with', [['new', 'New board'], ['last', 'Last board']], S.startWith || 'new', async (v) => { const r = await api.setPrefs({ startWith: v }); S.startWith = r.startWith; drawSettings(); }),
       el('div', { class: 'set-row' }, el('span', { class: 'set-label', text: 'Opacity' }), opacityIn),
@@ -781,6 +787,8 @@
   }
   function miniBoard(shapes) {
     const box = el('div', { class: 'mini' });
+    const inner = el('div', { class: 'mini-in' });
+    box.append(inner);
     if (!shapes.length) return box;
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
     for (const q of shapes) { x0 = Math.min(x0, q.x); y0 = Math.min(y0, q.y); x1 = Math.max(x1, q.x + q.w); y1 = Math.max(y1, q.y + q.h); }
@@ -789,8 +797,8 @@
     const ox = (W - (x1 - x0) * k) / 2, oy = (H - (y1 - y0) * k) / 2;
     for (const q of shapes) {
       const st = `left:${((q.x - x0) * k + ox) / W * 100}%;top:${((q.y - y0) * k + oy) / H * 100}%;width:${Math.max(2, q.w * k) / W * 100}%;height:${Math.max(2, q.h * k) / H * 100}%`;
-      if (q.src) box.append(el('img', { src: q.src, alt: '', loading: 'lazy', style: st }));
-      else if (q.type !== 'draw') box.append(el('span', { class: 'blk', style: st }));
+      if (q.src) inner.append(el('img', { src: q.src, alt: '', loading: 'lazy', style: st }));
+      else if (q.type !== 'draw') inner.append(el('span', { class: 'blk', style: st }));
     }
     return box;
   }
