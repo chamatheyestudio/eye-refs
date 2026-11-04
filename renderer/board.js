@@ -200,7 +200,9 @@
       node.style.width = it.w + 'px';
       node.style.height = '';
       node.style.fontSize = (it.fs || 16) + 'px';
+      node.classList.toggle('plain', !!it.plain);
       const t = node.firstChild;
+      t.style.color = it.plain ? (it.color || '#D7F04A') : '';
       if (B.editingId !== it.id && t.textContent !== (it.text || '')) t.textContent = it.text || '';
       node.style.transform = `translate(${it.x}px, ${it.y}px) rotate(${it.rot || 0}deg)`;
       return;
@@ -447,7 +449,7 @@
     const k = keep && B.items.get(keep);
     if (k && !k.deleted && cover(k) >= 0.5) return keep;
     for (const it of live()) {
-      if (it.type === 'draw') continue;
+      if (it.type === 'draw' || it.plain) continue;
       const r = bbox([it.id]);
       if (!r) continue;
       const ix = Math.max(0, Math.min(box.x + box.w, r.x + r.w) - Math.max(box.x, r.x));
@@ -475,7 +477,7 @@
   // Any change to a picture carries the lines on it along, in the same undo step
   function addFollowers(changes, prev) {
     const ids = new Set(changes.map((c) => c.id));
-    const strokes = [...B.items.values()].filter((it) => it.type === 'draw' && it.on);
+    const strokes = [...B.items.values()].filter((it) => it.on && (it.type === 'draw' || it.plain));
     const add = (id, fields, old) => {
       const keys = Object.keys(fields);
       if (!keys.length) return;
@@ -488,7 +490,7 @@
       const host = B.items.get(c.id);
       if (!host) continue;
       const f = c.fields;
-      if (host.type === 'draw') {
+      if (host.type === 'draw' || host.plain) {
         // A line moved on its own comes loose, or sticks to the picture it lands on
         if (('x' in f || 'y' in f) && !(host.on && ids.has(host.on))) {
           const n = { ...host, ...f }, d = dims(n);
@@ -520,10 +522,10 @@
       g.fol = [];
       for (const hid of hosts) {
         const h = B.items.get(hid);
-        if (!h || h.type === 'draw') continue;
+        if (!h || h.type === 'draw' || h.plain) continue;
         const pb = (g.before || []).find((p) => p.id === hid);
         const h0 = { ...clone(h), ...(pb ? clone(pb.fields) : {}) };
-        const st = live().filter((x) => x.type === 'draw' && x.on === hid && !moving.has(x.id)).map((x) => ({ id: x.id, s0: clone(x) }));
+        const st = live().filter((x) => (x.type === 'draw' || x.plain) && x.on === hid && !moving.has(x.id)).map((x) => ({ id: x.id, s0: clone(x) }));
         if (st.length) g.fol.push({ hid, h0, st });
       }
     }
@@ -555,6 +557,8 @@
   canvas.addEventListener('pointerdown', (e) => {
     if (!B.project) return;
     if (e.target.closest('.note-text[contenteditable]')) return;
+    // A click that only finishes typing shouldn't start a new text box
+    const wasTyping = !!B.editingId || Date.now() - lastStopAt < 400;
     if (B.editingId) stopEditing();
     canvas.focus({ preventScroll: true });
     const mod = IS_MAC ? e.metaKey : e.ctrlKey;
@@ -576,6 +580,15 @@
     const hit = itemAt(e.clientX, e.clientY);
     if (B.tool === 'hand' || B.lockedCanvas || (e.altKey && !mod && !e.shiftKey) || (B.held.has(' ') && !hit)) {
       startGesture({ type: 'pan', v0: { ...B.view } }, e); canvas.classList.add('panning'); return;
+    }
+    if (B.tool === 'text' && !B.held.has('z')) {
+      if (!canEdit()) return;
+      e.preventDefault();
+      const id = itemAt(e.clientX, e.clientY);
+      const it = id && B.items.get(id);
+      if (it && it.plain) editNote(id);
+      else if (wasTyping) return; else addText(toWorld(e.clientX, e.clientY));
+      return;
     }
     if (B.tool === 'eraser' && !B.held.has('z')) {
       if (!canEdit()) return;
@@ -928,9 +941,11 @@
     renderOverlay();
   }
 
+  let lastStopAt = 0;
   function stopEditing() {
     const id = B.editingId;
     if (!id) return;
+    lastStopAt = Date.now();
     B.editingId = null;
     const node = B.els.get(id);
     if (!node) return;
@@ -940,7 +955,12 @@
     node.classList.remove('editing');
     const text = t.innerText.replace(/\n$/, '');
     const it = B.items.get(id);
-    if (it && text !== (it.text || '')) commit([{ id, fields: { text } }]);
+    if (it && it.plain) {
+      // Typed text fits its words; text left empty simply goes
+      if (!text.trim()) { commit([{ id, fields: { deleted: true } }]); renderOverlay(); return; }
+      const w = Math.max(t.scrollWidth, (it.fs || 16)) + 2;
+      if (text !== (it.text || '') || Math.abs(w - it.w) > 0.5) commit([{ id, fields: { text, w } }]);
+    } else if (it && text !== (it.text || '')) commit([{ id, fields: { text } }]);
     renderOverlay();
   }
 
@@ -1026,6 +1046,18 @@
       if (Math.hypot(lx - (A.x + t * vx), ly - (A.y + t * vy)) <= r) return true;
     }
     return false;
+  }
+
+  // Type straight onto the board, in the pen colour. Sticks to the picture under it.
+  function addText(at) {
+    if (!canEdit()) return;
+    const fs = (12 + (B.pen.size || 4) * 2) / B.view.s;
+    const id = uid();
+    const on = hostForBox({ x: at.x, y: at.y - fs * 0.7, w: fs, h: fs });
+    commit([{ id, fields: { type: 'note', plain: true, color: B.pen.color, on: on || null, text: '', x: at.x - fs * 0.15, y: at.y - fs * 0.8, w: fs * 6, fs, z: maxZ() + 1, rot: 0, deleted: false, created: Date.now(), addedBy: B.me.name } }]);
+    B.sel = new Set([id]);
+    setTimeout(() => editNote(id), 0);
+    renderOverlay();
   }
 
   function addNote(at, text) {
@@ -1697,7 +1729,8 @@
     canvas.classList.toggle('tool-hand', t === 'hand');
     canvas.classList.toggle('tool-pen', t === 'pen');
     canvas.classList.toggle('tool-eraser', t === 'eraser');
-    if (t === 'pen' || t === 'eraser') clearSel();
+    canvas.classList.toggle('tool-text', t === 'text');
+    if (t === 'pen' || t === 'eraser' || t === 'text') { if (B.editingId) stopEditing(); clearSel(); }
     B.onChange('tool');
   }
   function setGrid(on) { B.grid = on; canvas.classList.toggle('grid', on); }
@@ -1708,7 +1741,7 @@
   function restore(ids) { commit(ids.map((id) => ({ id, fields: { deleted: false } }))); B.sel = new Set(ids); renderOverlay(); }
 
   Object.assign(B, {
-    load, unload, applyRemote, render, applyView, zoomAt, fitRect, toWorld, toScreen,
+    addText, load, unload, applyRemote, render, applyView, zoomAt, fitRect, toWorld, toScreen,
     commit, undo, redo, addPaths, addBytes, addUrl, addNote, editNote, stopEditing,
     copySelection, pasteInternal, pasteNative, pasteKey, deleteSelection, duplicate, toggleField, resetCrop, resetTransform, front, back,
     align, normalize, arrange, focusSelection, focusAll, focusStep, selectAll, clearSel, selIds,

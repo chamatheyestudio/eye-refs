@@ -462,9 +462,10 @@
   // ---------- toolbar ----------
   function syncToolbar() {
     $$('#toolbar [data-tool]').forEach((b) => b.classList.toggle('on', b.dataset.tool === B.tool));
-    $('#penBar').hidden = !['pen', 'eraser'].includes(B.tool) || !S.current;
-    $$('#toolbar [data-tool="pen"]').forEach((b) => b.classList.toggle('on', B.tool === 'pen' || B.tool === 'eraser'));
+    $('#penBar').hidden = !['pen', 'eraser', 'text'].includes(B.tool) || !S.current;
+    $$('#toolbar [data-tool="pen"]').forEach((b) => b.classList.toggle('on', B.tool === 'pen' || B.tool === 'eraser' || B.tool === 'text'));
     $('#penEraser').classList.toggle('on', B.tool === 'eraser');
+    $('#penText').classList.toggle('on', B.tool === 'text');
     drawPenBar();
     $('#tTop').classList.toggle('on', S.alwaysOnTop);
     $('#tThrough').classList.toggle('on', S.clickThrough);
@@ -476,11 +477,12 @@
   const PEN_SIZES = [2, 4, 10];
   try { Object.assign(B.pen, JSON.parse(localStorage.getItem('pen') || '{}')); } catch (_) {}
   const PEN_STYLES = [['solid', 'Solid (1)'], ['dotted', 'Dotted (2)'], ['arrow', 'Arrow (3)']];
-  const drawing = () => B.tool === 'pen' || B.tool === 'eraser';
+  const drawing = () => B.tool === 'pen' || B.tool === 'eraser' || B.tool === 'text';
   const toggleDraw = () => B.setTool(drawing() ? 'select' : 'pen');
   const penStyle = (st) => { B.pen.style = st; B.setTool('pen'); savePen(); };
   const nextColor = () => { B.pen.color = PEN_COLORS[(PEN_COLORS.indexOf(B.pen.color) + 1) % PEN_COLORS.length]; savePen(); toast('Pen colour changed'); };
   $('#penEraser').addEventListener('click', () => B.setTool(B.tool === 'eraser' ? 'pen' : 'eraser'));
+  $('#penText').addEventListener('click', () => B.setTool(B.tool === 'text' ? 'pen' : 'text'));
   function drawPenBar() {
     const colors = $('#penColors'), sizes = $('#penSizes'), styles = $('#penStyles'), ops = $('#penOps');
     colors.innerHTML = ''; sizes.innerHTML = ''; styles.innerHTML = ''; ops.innerHTML = '';
@@ -1079,7 +1081,7 @@
   const SHORTCUTS = [
     ['Board', [['Pan', 'Alt + drag, or middle mouse'], ['Zoom', 'Scroll, or hold Z and drag'], ['Move window', 'Right mouse drag'], ['Menu', 'Right click'], ['Focus image', 'Space'], ['Focus canvas', 'Mod+Space'], ['Reset zoom', 'Mod+0'], ['Zoom in / out', 'Mod+=  /  Mod+-'], ['Next or previous image', '→  ←'], ['Lock canvas', 'Mod+R'], ['Grayscale canvas', 'Mod+Alt+G'], ['Hide or show controls', 'Tab'], ['Select all', 'Mod+A']]],
     ['Items', [['Crop', 'Hold C and drag'], ['Pan cropping', 'Hold V and drag'], ['Reset cropping', 'Mod+Shift+C'], ['Rotate', 'Mod + drag'], ['Scale', 'Mod+Alt + drag'], ['Flip', 'Alt+Shift+H  /  Alt+Shift+V'], ['Grayscale', 'Alt+G'], ['Toggle locked', 'Alt+L'], ['Reset transform', 'Mod+Shift+T'], ['Arrange optimal', 'Mod+P'], ['Align', 'Mod + arrows'], ['Normalize', 'Mod+Alt + arrows'], ['Send to front / back', '↑  ↓'], ['Note', 'Mod+N'], ['Copy / Cut / Paste', 'Mod+C  /  Mod+X  /  Mod+V'], ['Delete', 'Del'], ['Undo / Redo', 'Mod+Z  /  Mod+Shift+Z']]],
-    ['Draw', [['Draw', 'Mod+D'], ['Pen / Eraser', 'D  /  E'], ['Solid / Dotted / Arrow', '1  /  2  /  3'], ['Pen colour', 'Mod+T'], ['Stop drawing', 'Esc']]],
+    ['Draw', [['Draw', 'Mod+D'], ['Pen / Eraser / Text', 'D  /  E  /  T'], ['Solid / Dotted / Arrow', '1  /  2  /  3'], ['Pen colour', 'Mod+T'], ['Stop drawing', 'Esc']]],
     ['Video', [['Play or pause', 'K'], ['Set start / end', 'I  /  O'], ['Step a frame', ',  .'], ['Grab frame', 'F'], ['Sound', 'M']]],
     ['Window', [['Always on top', 'Mod+Shift+A'], ['Transparent to mouse', 'Mod+T'], ['Opacity', 'Mod+Shift+-  /  Mod+Shift+='], ['Lock window', 'Mod+W'], ['Minimize / Maximize', 'Mod+M  /  Mod+F'], ['Close', 'Mod+Q']]],
     ['Files', [['New board', 'Mod+K'], ['Open', 'Mod+L'], ['Open most recent', 'Mod+Shift+L'], ['Open images', 'Mod+I'], ['Save', 'Mod+S'], ['Save as one file', 'Mod+Shift+S'], ['Search boards', 'Mod+Shift+P']]],
@@ -1183,6 +1185,7 @@
     // Draw mode (PureRef): D pen, E eraser, 1 solid, 2 dotted, 3 arrow
     'D': () => { if (drawing()) B.setTool('pen'); },
     'E': () => { if (drawing()) B.setTool('eraser'); },
+    'T': () => { if (drawing()) B.setTool('text'); },
     '1': () => { if (drawing()) penStyle('solid'); },
     '2': () => { if (drawing()) penStyle('dotted'); },
     '3': () => { if (drawing()) penStyle('arrow'); },

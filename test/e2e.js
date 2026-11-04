@@ -264,6 +264,33 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     return r;
   });
   expect('rulers show and follow the zoom', rul.shown && rul.ink > 50 && rul.changes && rul.noDots, rul);
+  // Type straight onto a picture: text in the pen colour, no box, sticks to the picture
+  const tHost = await win.evaluate(() => { const it = Board.live().filter((x) => x.type === 'image').sort((a, b) => b.w - a.w)[0]; const r = Board.toScreen(it.x + it.w / 3, it.y + it.w / 6); return { id: it.id, sx: r.x, sy: r.y, x: it.x }; });
+  await win.evaluate(() => Board.setTool('pen'));
+  await win.waitForSelector('#penText');
+  await win.click('#penText');
+  await win.mouse.click(tHost.sx, tHost.sy);
+  await sleep(150);
+  await win.keyboard.type('Make it brighter');
+  await win.screenshot({ path: `${OUT}/03f-text-typing.png` });
+  await win.mouse.click(tHost.sx + 300, tHost.sy + 200);
+  await sleep(200);
+  const tRes = await win.evaluate(([hid, sx, sy]) => {
+    const t = Board.live().filter((x) => x.plain).sort((a, b) => b.created - a.created)[0];
+    if (!t) return { none: true };
+    const node = Board.els.get(t.id);
+    const bg = getComputedStyle(node).backgroundColor;
+    const h = Board.items.get(hid);
+    const tx0 = t.x;
+    Board.commit([{ id: hid, fields: { x: h.x + 50 } }]);
+    const moved = Board.items.get(t.id).x - tx0;
+    Board.undo();
+    const empties = Board.live().filter((x) => x.plain && !x.text).length;
+    return { text: t.text, on: t.on, host: hid, bg, color: node.querySelector('.note-text').style.color, moved, empties };
+  }, [tHost.id, tHost.sx, tHost.sy]);
+  await win.evaluate(() => Board.setTool('select'));
+  await win.screenshot({ path: `${OUT}/03g-text.png` });
+  expect('type on the board, text sticks to its picture', tRes.text === 'Make it brighter' && tRes.on === tRes.host && tRes.bg === 'rgba(0, 0, 0, 0)' && !!tRes.color && Math.abs(tRes.moved - 50) < 0.5 && tRes.empties === 0, tRes);
   // A message never sits on the pen bar
   await win.evaluate(() => Board.setTool('pen'));
   await win.waitForSelector('#penBar:not([hidden])');
