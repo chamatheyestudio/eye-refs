@@ -478,8 +478,15 @@
   const nextColor = () => { B.pen.color = PEN_COLORS[(PEN_COLORS.indexOf(B.pen.color) + 1) % PEN_COLORS.length]; savePen(); toast('Pen colour changed'); };
   $('#penEraser').addEventListener('click', () => B.setTool(B.tool === 'eraser' ? 'pen' : 'eraser'));
   function drawPenBar() {
-    const colors = $('#penColors'), sizes = $('#penSizes'), styles = $('#penStyles');
-    colors.innerHTML = ''; sizes.innerHTML = ''; styles.innerHTML = '';
+    const colors = $('#penColors'), sizes = $('#penSizes'), styles = $('#penStyles'), ops = $('#penOps');
+    colors.innerHTML = ''; sizes.innerHTML = ''; styles.innerHTML = ''; ops.innerHTML = '';
+    const op = B.pen.op == null ? 1 : B.pen.op;
+    for (const o of [1, 0.75, 0.5, 0.25]) {
+      const pct = Math.round(o * 100);
+      const b = el('button', { class: Math.abs(op - o) < 0.01 ? 'on' : '', 'aria-label': `Opacity ${pct} percent`, title: `Opacity ${pct} percent` }, el('span', { class: 'dot', style: `background:${B.pen.color};opacity:${o}` }));
+      b.onclick = () => { B.pen.op = o; if (B.tool === 'eraser') B.setTool('pen'); savePen(); };
+      ops.append(b);
+    }
     for (const [st, label] of PEN_STYLES) {
       const b = el('button', { class: B.pen.style === st && B.tool === 'pen' ? 'on' : '', 'aria-label': label, title: label, html: ICONS[st] });
       b.onclick = () => penStyle(st);

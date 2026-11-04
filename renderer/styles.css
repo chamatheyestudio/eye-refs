@@ -171,7 +171,7 @@ body.no-sidebar #title { left: 16px; padding-left: 4px; }
 body.has-sidebar #toolbar { left: calc(50% + 144px); }
 #penBar { position: fixed; bottom: 72px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 4px; padding: 4px 6px; height: 36px; z-index: 15; }
 body.has-sidebar #penBar { left: calc(50% + 144px); }
-#penBar .swatches, #penBar .sizes, #penBar .styles { display: flex; align-items: center; gap: 2px; }
+#penBar .swatches, #penBar .sizes, #penBar .ops, #penBar .styles { display: flex; align-items: center; gap: 2px; }
 #penBar .styles button, #penBar .tool { color: var(--soft); }
 #penBar .styles button svg, #penBar .tool svg { width: 15px; height: 15px; }
 #penBar .styles button.on, #penBar .tool.on { background: var(--hover); color: var(--text); }
@@ -182,6 +182,8 @@ body.has-sidebar #penBar { left: calc(50% + 144px); }
 #penBar .swatches .dot { width: 16px; height: 16px; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.18); }
 #penBar .swatches button.on .dot { box-shadow: 0 0 0 2px var(--bg-solid, #1c1b19), 0 0 0 3.5px var(--text); }
 #penBar .sizes .dot { background: var(--soft); }
+#penBar .ops .dot { width: 14px; height: 14px; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.18); }
+#penBar .ops button.on { background: var(--hover); }
 #penBar .sizes button.on { background: var(--hover); }
 #penBar .sizes button.on .dot { background: var(--text); }
 #penBar .sep { width: 1px; height: 18px; background: var(--line-strong); margin: 0 4px; }
@@ -332,7 +334,7 @@ body.clickthrough #canvas { outline: 2px solid rgba(215, 240, 74, 0.5); outline-
   #title, :is(body.ui-hidden, body.ui-auto:not(.board-empty)) #title { max-width: calc(100vw - 250px); }
   #share { padding: 0 14px; }
   .setpill { display: none; }
-  #penBar .styles, #penBar .styles + .sep { display: none; }
+  #penBar .styles, #penBar .styles + .sep, #penBar .ops, #penBar .ops + .sep { display: none; }
 }
 @media (max-width: 420px) {
   #share { display: none; }

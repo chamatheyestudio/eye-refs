@@ -37,7 +37,7 @@
     clip: null,
     clipMarker: null,
     onChange: () => {},
-    pen: { color: '#D7F04A', size: 4, style: 'solid' },
+    pen: { color: '#D7F04A', size: 4, style: 'solid', op: 1 },
   };
 
   // ---------- geometry ----------
@@ -225,6 +225,7 @@
         if (path.dataset.key !== key) { path.dataset.key = key; path.setAttribute('d', strokePath(parsePts(it.pts), it.style === 'arrow' ? (it.sw || 4) : 0)); }
         path.setAttribute('stroke', it.color || '#D7F04A');
         path.setAttribute('stroke-width', it.sw || 4);
+        path.setAttribute('stroke-opacity', it.op == null ? 1 : it.op);
         if (it.style === 'dotted') path.setAttribute('stroke-dasharray', `0 ${(it.sw || 4) * 2}`); else path.removeAttribute('stroke-dasharray');
         return;
       }
@@ -590,6 +591,7 @@
       // pictures at any zoom. Never thinner than one screen pixel while drawing.
       const sw = Math.max(B.pen.size, 1 / B.view.s);
       path.setAttribute('fill', 'none'); path.setAttribute('stroke', B.pen.color); path.setAttribute('stroke-width', sw);
+      path.setAttribute('stroke-opacity', B.pen.op == null ? 1 : B.pen.op);
       path.setAttribute('stroke-linecap', 'round'); path.setAttribute('stroke-linejoin', 'round');
       if (B.pen.style === 'dotted') path.setAttribute('stroke-dasharray', `0 ${sw * 2}`);
       live.append(path); world.append(live);
@@ -966,7 +968,7 @@
     const nw = r(x1 - x0), nh = r(y1 - y0);
     const id = uid();
     const on = hostForBox({ x: x0, y: y0, w: nw, h: nh });
-    commit([{ id, fields: { type: 'draw', on: on || null, pts, nw, nh, w: nw, x: x0, y: y0, sw: r(g.sw), color: B.pen.color, style: B.pen.style, z: maxZ() + 1, rot: 0, deleted: false, created: Date.now(), addedBy: B.me.name } }]);
+    commit([{ id, fields: { type: 'draw', on: on || null, pts, nw, nh, w: nw, x: x0, y: y0, sw: r(g.sw), color: B.pen.color, op: B.pen.op == null ? 1 : B.pen.op, style: B.pen.style, z: maxZ() + 1, rot: 0, deleted: false, created: Date.now(), addedBy: B.me.name } }]);
   }
 
   // Eraser: anything drawn that the pointer passes over goes, as one undo step
@@ -1571,6 +1573,7 @@
   }
 
   // ---------- context menu ----------
+  const PEN_OPACITY = [1, 0.75, 0.5, 0.25];
   function contextMenu(x, y) {
     if (!B.project) return;
     const hit = itemAt(x, y);
@@ -1592,6 +1595,11 @@
           { label: 'Loop', checked: one.loop !== false, onClick: toggleLoop, disabled: !ed },
           { label: v && !v.muted ? 'Mute' : 'Play sound', key: 'M', onClick: toggleMute },
         ] });
+    }
+    const lines = ids.filter((id) => B.items.get(id).type === 'draw');
+    if (lines.length) {
+      const cur = B.items.get(lines[0]).op == null ? 1 : B.items.get(lines[0]).op;
+      items.push({ label: 'Opacity', sub: PEN_OPACITY.map((o) => ({ label: Math.round(o * 100) + ' percent', checked: Math.abs(cur - o) < 0.01, disabled: !ed, onClick: () => commit(lines.map((id) => ({ id, fields: { op: o } }))) })) });
     }
     if (one && one.type === 'note') items.push({ label: 'Edit note', key: 'Enter', onClick: () => editNote(one.id), disabled: !ed });
     if (ids.length) {

@@ -140,6 +140,25 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const swOut = await swAt(0.5), swIn = await swAt(2);
   await win.evaluate((v) => { Object.assign(Board.view, v); Board.applyView(); }, v0);
   expect('pen width is the same on the board at any zoom', swOut.sw === swIn.sw && swOut.sw === swOut.size, { swOut, swIn });
+  // Line opacity: set on the pen bar, kept on the line, changeable later
+  await win.evaluate(() => Board.setTool('pen'));
+  await win.waitForSelector('#penBar:not([hidden])');
+  await win.click('#penOps button:nth-child(3)');
+  await win.mouse.move(600, 300); await win.mouse.down();
+  for (let i = 0; i <= 10; i++) await win.mouse.move(600 + i * 8, 300 + i * 3);
+  await win.mouse.up();
+  const opRes = await win.evaluate(() => {
+    const d = Board.live().filter((it) => it.type === 'draw').sort((a, b) => b.created - a.created)[0];
+    const attr = Board.els.get(d.id).querySelector('path').getAttribute('stroke-opacity');
+    const op = d.op;
+    Board.commit([{ id: d.id, fields: { op: 0.25 } }]);
+    const attr2 = Board.els.get(d.id).querySelector('path').getAttribute('stroke-opacity');
+    Board.undo(); Board.undo();
+    return { op, attr, attr2 };
+  });
+  await win.click('#penOps button:nth-child(1)');
+  await win.evaluate(() => Board.setTool('select'));
+  expect('line opacity', opRes.op === 0.5 && opRes.attr === '0.5' && opRes.attr2 === '0.25', opRes);
   // A line drawn on a picture sticks to it: drag, scale, delete and undo carry it along
   const host = await win.evaluate(() => { const it = Board.live().filter((x) => x.type === 'image').sort((a, b) => b.w - a.w)[0]; const r = Board.toScreen(it.x + it.w / 2, it.y + 40); return { id: it.id, sx: r.x, sy: r.y, x: it.x, w: it.w }; });
   await win.evaluate(() => Board.setTool('pen'));
