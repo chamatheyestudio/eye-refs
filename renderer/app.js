@@ -11,6 +11,13 @@
     here: [], filter: 'all', search: '', expanded: new Set(), sidebar: true,
     alwaysOnTop: false, clickThrough: false, lockedWindow: false,
   };
+  // Patterns mix freely: dots, grid and rulers, any of them together, or none
+  S.pat = new Set(['dots']);
+  try {
+    const saved = localStorage.getItem('bg');
+    if (saved != null) S.pat = new Set(saved.split(',').map((x) => (x === 'ruler' ? 'rulers' : x)).filter((x) => ['dots', 'grid', 'rulers'].includes(x)));
+  } catch (_) {}
+  S.bg = [...S.pat].join(',');
   try { S.expanded = new Set(JSON.parse(localStorage.getItem('expanded') || '[]')); } catch (_) {}
   $('#searchKbd').textContent = keyLabel('Mod+Shift+P');
   if (IS_MAC) document.body.classList.add('mac');
@@ -133,7 +140,7 @@
     S.pins = r.prefs.pins || [];
     S.transparent = !!r.prefs.transparent;
     document.body.classList.toggle('see', S.transparent);
-    setBg(S.bg, true);
+    applyPattern();
     S.sidebar = r.prefs.sidebar; S.browse = false; applySide();
     syncToolbar();
     renderSidebar();
@@ -475,6 +482,7 @@
     else bottomTimer = setTimeout(() => body.classList.remove('show-bottom'), 450);
   };
   window.addEventListener('pointermove', (e) => {
+    if (busy && !e.buttons) busy = false;
     if (!isClean() || busy || modalOpen() || menuOpen()) return;
     const H = window.innerHeight;
     showBottom(e.clientY > H - 28 || (body.classList.contains('show-bottom') && (e.clientY > H - 84 || !!inBottom(e.target))));
@@ -488,6 +496,7 @@
   const hideEdges = () => { showTop(false); showBottom(false); };
   document.documentElement.addEventListener('mouseleave', hideEdges);
   window.addEventListener('blur', hideEdges);
+  window.addEventListener('blur', () => { busy = false; });
   // Working in another app: the selection boxes step aside so only the pictures show.
   // The selection itself stays and comes back as soon as you return.
   window.addEventListener('blur', () => body.classList.add('away'));
@@ -717,10 +726,10 @@
         { label: 'Zoom in', key: 'Mod+Equal', onClick: () => B.zoomAt(innerWidth / 2, innerHeight / 2, 1.25) },
         { label: 'Zoom out', key: 'Mod+Minus', onClick: () => B.zoomAt(innerWidth / 2, innerHeight / 2, 0.8) },
         '-',
-        { label: 'Dots', checked: S.bg === 'dots', onClick: () => setBg('dots') },
-        { label: 'Grid', checked: S.bg === 'grid', onClick: () => setBg('grid') },
-        { label: 'Rulers', checked: S.bg === 'ruler', onClick: () => setBg('ruler') },
-        { label: 'No pattern', checked: S.bg === 'plain', onClick: () => setBg('plain') },
+        { label: 'Dots', checked: S.pat.has('dots'), onClick: () => setBg('dots') },
+        { label: 'Grid', checked: S.pat.has('grid'), onClick: () => setBg('grid') },
+        { label: 'Rulers', checked: S.pat.has('rulers'), onClick: () => setBg('rulers') },
+        { label: 'No pattern', checked: !S.pat.size, onClick: () => setBg('plain') },
         '-',
         { label: 'See through', checked: S.transparent, onClick: () => setTransparent(!S.transparent) },
         '-',
@@ -768,7 +777,7 @@
   // Board units along the top and left, like a design app. Labels sit about every
   // 80 pixels on screen, on round numbers (1, 2 or 5 times a power of ten).
   function drawRulers() {
-    if (S.bg !== 'ruler') return;
+    if (!S.pat || !S.pat.has('rulers')) return;
     const v = B.view, dpr = window.devicePixelRatio || 1, T = 22;
     const cs = getComputedStyle(body);
     const ink = cs.getPropertyValue('--muted').trim() || '#8A8780', line = cs.getPropertyValue('--line-strong').trim() || 'rgba(255,255,255,0.14)';
@@ -808,18 +817,25 @@
   window.addEventListener('resize', drawRulers);
 
   // ---------- background and see through ----------
-  S.bg = 'dots';
-  try { S.bg = localStorage.getItem('bg') || 'dots'; } catch (_) {}
-  function setBg(bg, quiet) {
-    S.bg = ['dots', 'grid', 'ruler', 'plain'].includes(bg) ? bg : 'dots';
+
+  function applyPattern() {
     const c = $('#canvas');
-    c.classList.toggle('bg-dots', S.bg === 'dots');
-    c.classList.toggle('bg-grid', S.bg === 'grid');
-    body.classList.toggle('rulers', S.bg === 'ruler');
+    c.classList.toggle('bg-dots', S.pat.has('dots'));
+    c.classList.toggle('bg-grid', S.pat.has('grid'));
+    body.classList.toggle('rulers', S.pat.has('rulers'));
     drawRulers();
     c.classList.remove('grid');
+    S.bg = [...S.pat].join(',');
     try { localStorage.setItem('bg', S.bg); } catch (_) {}
     drawSettings();
+  }
+  // 'plain' clears everything; a name turns that pattern on or off
+  function setBg(name) {
+    if (name === 'plain' || name == null) S.pat.clear();
+    else if (typeof name === 'string' && name.includes(',')) S.pat = new Set(name.split(','));
+    else if (S.pat.has(name)) S.pat.delete(name);
+    else S.pat.add(name === 'ruler' ? 'rulers' : name);
+    applyPattern();
   }
   // Only the board background goes clear; references, notes and drawings stay solid
   async function setTransparent(on) {
@@ -855,7 +871,9 @@
     p.append(
       el('div', { class: 'set-head' }, el('b', { text: 'Settings' }), el('span', { class: 'k', text: keyLabel('Mod+U') })),
       // Pattern and background are separate, so the pattern can change while see through is on
-      seg('Pattern', [['dots', 'Dots'], ['grid', 'Grid'], ['ruler', 'Rulers'], ['plain', 'None']], S.bg, (v) => setBg(v)),
+      el('div', { class: 'set-row' }, el('span', { class: 'set-label', text: 'Pattern' }),
+        el('div', { class: 'seg small' }, [['dots', 'Dots'], ['grid', 'Grid'], ['rulers', 'Rulers']].map(([v, t]) => el('button', { class: S.pat.has(v) ? 'on' : '', 'aria-pressed': String(S.pat.has(v)), text: t, onclick: () => setBg(v) })),
+          el('button', { class: !S.pat.size ? 'on' : '', text: 'None', onclick: () => setBg('plain') }))),
       seg('Background', [['solid', 'Solid'], ['see', 'See through']], S.transparent ? 'see' : 'solid', (v) => { if ((v === 'see') !== !!S.transparent) setTransparent(v === 'see'); }),
       seg('Controls', [['auto', 'Auto hide'], ['shown', 'Always'], ['hidden', 'Hidden']], uiMode, (v) => setUi(v, true)),
       seg('Opens with', [['new', 'New board'], ['last', 'Last board']], S.startWith || 'new', async (v) => { const r = await api.setPrefs({ startWith: v }); S.startWith = r.startWith; drawSettings(); }),
@@ -1164,6 +1182,8 @@
     }
     $('#startRecent').hidden = !r.boards.length;
   }
+  // Name a new board straight away, instead of starting as Untitled
+  $('#startNew').onclick = () => saveModal();
   $('#startBrowse').onclick = () => { S.sidebar = true; S.browse = true; applySide(); api.setSidebarPref(true); };
   $('#startOpen').onclick = async () => { const f = await api.openFileDialog(); if (f) confirmLeave(async () => openResult(await api.openProjectFile(f))); };
 

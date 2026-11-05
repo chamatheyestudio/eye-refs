@@ -610,6 +610,59 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   });
   expect('a section keeps its new height through undo and redo', holes.section.h1 > holes.section.h0 + 20 && Math.abs(holes.section.hu - holes.section.h0) < 0.5 && Math.abs(holes.section.hr - holes.section.h1) < 0.5 && holes.section.wOk, holes.section);
   expect('a version clears changes made after it, and nothing changes when it already matches', holes.version.op == null && holes.version.changed === 1 && holes.version.again === 0, holes.version);
+  // Patterns mix: dots and rulers together, then grid too, then none
+  const pats = await win.evaluate(async () => {
+    document.querySelector('#settingsBtn').click();
+    await new Promise((r) => setTimeout(r, 80));
+    const row = () => [...document.querySelectorAll('#settings .set-row')].find((r) => r.querySelector('.set-label').textContent === 'Pattern');
+    const click = (t) => [...row().querySelectorAll('button')].find((b) => b.textContent === t).click();
+    const c = document.querySelector('#canvas');
+    const state = () => ({ dots: c.classList.contains('bg-dots'), grid: c.classList.contains('bg-grid'), rulers: document.body.classList.contains('rulers'), on: [...row().querySelectorAll('button.on')].map((b) => b.textContent) });
+    click('None'); click('Dots'); click('Rulers');
+    const a = state();
+    click('Grid');
+    const b = state();
+    click('None');
+    const n = state();
+    click('Dots');
+    document.querySelector('#settingsBtn').click();
+    return { a, b, n };
+  });
+  expect('patterns can be mixed', pats.a.dots && pats.a.rulers && !pats.a.grid && pats.b.dots && pats.b.grid && pats.b.rulers && !pats.n.dots && !pats.n.grid && !pats.n.rulers && pats.n.on.join() === 'None', pats);
+  // A locked canvas still lets you draw
+  const lockDraw = await (async () => {
+    await win.evaluate(() => { Board.setLockedCanvas(true); Board.setTool('pen'); });
+    const n0 = await win.evaluate(() => Board.live().filter((x) => x.type === 'draw').length);
+    await win.mouse.move(600, 300); await win.mouse.down();
+    for (let i = 0; i <= 8; i++) await win.mouse.move(600 + i * 10, 300 + i * 4);
+    await win.mouse.up();
+    const n1 = await win.evaluate(() => Board.live().filter((x) => x.type === 'draw').length);
+    await win.evaluate(() => { Board.undo(); Board.setTool('select'); Board.setLockedCanvas(false); });
+    return { n0, n1 };
+  })();
+  expect('drawing works on a locked canvas', lockDraw.n1 === lockDraw.n0 + 1, lockDraw);
+  // A drag whose release got lost ends as soon as no button is held, so the window never sticks to the mouse
+  const stuck = await win.evaluate(() => {
+    const c = document.querySelector('#canvas');
+    c.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: 600, clientY: 400, button: 2, buttons: 2, pointerId: 9, pointerType: 'mouse', screenX: 600, screenY: 400 }));
+    const during = Board.gesture && Board.gesture.type;
+    c.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: 620, clientY: 410, buttons: 0, pointerId: 9, pointerType: 'mouse', screenX: 620, screenY: 410 }));
+    return { during, after: Board.gesture, menu: window.UI.menuOpen() };
+  });
+  expect('a lost release never leaves the window stuck to the mouse', stuck.during === 'right' && stuck.after === null && !stuck.menu, stuck);
+  // The edge bars still show after a click whose release got lost
+  const edge = await win.evaluate(async () => {
+    const c = document.querySelector('#canvas');
+    const clean = document.body.classList.contains('ui-auto') && !document.body.classList.contains('board-empty');
+    c.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: 700, clientY: 400, button: 0, buttons: 1, pointerId: 11, pointerType: 'mouse' }));
+    Board.clearSel();
+    window.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: 700, clientY: innerHeight - 5, buttons: 0, pointerType: 'mouse' }));
+    await new Promise((r) => setTimeout(r, 50));
+    const shown = document.body.classList.contains('show-bottom');
+    document.body.classList.remove('show-bottom');
+    return { clean, shown };
+  });
+  expect('edge bars still show after a lost release', !edge.clean || edge.shown, edge);
   // A message never sits on the pen bar
   await win.evaluate(() => Board.setTool('pen'));
   await win.waitForSelector('#penBar:not([hidden])');
@@ -881,6 +934,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await sleep(150);
   const tabStart = await win.evaluate(() => ({ hidden: document.body.classList.contains('ui-hidden'), start: getComputedStyle(document.querySelector('#start')).display !== 'none', bar: getComputedStyle(document.querySelector('#toolbar')).opacity }));
   expect('Tab leaves the start screen alone', !tabStart.hidden && tabStart.start && tabStart.bar === '1', tabStart);
+  const startNewBtn = await win.evaluate(() => { const b = document.querySelector('#startNew'); return !!b && getComputedStyle(b).display !== 'none' && b.getBoundingClientRect().width > 40; });
+  expect('the start screen has a New board button', startNewBtn);
   const startDrag = await win.evaluate(() => { const t = document.querySelector('#topbar'); const cs = getComputedStyle(t); return { region: cs.getPropertyValue('-webkit-app-region') || cs.webkitAppRegion, h: t.getBoundingClientRect().height, w: t.getBoundingClientRect().width }; });
   expect('start screen window can be moved from the top', startDrag.region === 'drag' && startDrag.h >= 40 && startDrag.w > 1000, startDrag);
   const fresh = await win.evaluate(() => Board.live().length);

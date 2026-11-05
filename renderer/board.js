@@ -608,7 +608,9 @@
       return;
     }
     const hit = itemAt(e.clientX, e.clientY);
-    if (B.tool === 'hand' || B.lockedCanvas || (e.altKey && !mod && !e.shiftKey) || (B.held.has(' ') && !hit)) {
+    // A locked canvas only stops moving pieces; drawing, typing and comments still work
+    const drawingTool = ['pen', 'eraser', 'text', 'comment'].includes(B.tool);
+    if (B.tool === 'hand' || (B.lockedCanvas && !drawingTool) || (e.altKey && !mod && !e.shiftKey) || (B.held.has(' ') && !hit)) {
       startGesture({ type: 'pan', v0: { ...B.view } }, e); canvas.classList.add('panning'); return;
     }
     if (B.tool === 'comment' && !B.held.has('z')) {
@@ -686,6 +688,9 @@
 
   canvas.addEventListener('pointermove', (e) => {
     const g = B.gesture;
+    // The release can get lost (a menu opened, the window moved under the pointer):
+    // if no button is held any more, the drag is over
+    if (g && e.buttons === 0 && e.pointerType === 'mouse') { if (g.type === 'right') g.moved = true; endGesture(e); return; }
     if (!g) {
       const id = itemAt(e.clientX, e.clientY);
       B.hoverId = id;
@@ -946,6 +951,8 @@
   }
   canvas.addEventListener('pointerup', endGesture);
   canvas.addEventListener('pointercancel', endGesture);
+  canvas.addEventListener('lostpointercapture', (e) => { if (B.gesture && B.gesture.type === 'right' && B.gesture.moved) endGesture(e); });
+  window.addEventListener('blur', () => { if (B.gesture && B.gesture.type === 'right') { B.gesture.moved = true; endGesture({}); } });
   canvas.addEventListener('contextmenu', (e) => e.preventDefault());
   canvas.addEventListener('auxclick', (e) => e.preventDefault());
 
