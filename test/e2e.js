@@ -346,8 +346,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await sleep(100);
   const picked = await win.evaluate(() => ({ color: Board.pen.color, hex: document.querySelector('#pkHex').value, dot: document.querySelector('#penColorDot').style.background }));
   await win.screenshot({ path: `${OUT}/03h-picker.png` });
-  const at700 = await win.evaluate(() => { const e = document.elementFromPoint(700, 300); return { el: e && (e.id || String(e.className && e.className.baseVal !== undefined ? e.className.baseVal : e.className)), w: innerWidth, h: innerHeight, sw: screen.width, sh: screen.height }; });
-  await win.mouse.click(700, 300); // drawing on the board leaves the picker open
+  // A spot on the board clear of the picker, whatever the screen size
+  const boardSpot = await win.evaluate(() => { const p = document.querySelector('#picker').getBoundingClientRect(); return { x: Math.max(40, p.left - 160), y: Math.max(120, p.top - 40) }; });
+  const at700 = await win.evaluate((b) => { const e = document.elementFromPoint(b.x, b.y); return { el: e && (e.id || String(e.className && e.className.baseVal !== undefined ? e.className.baseVal : e.className)), w: innerWidth, h: innerHeight, sw: screen.width, sh: screen.height }; }, boardSpot);
+  await win.mouse.click(boardSpot.x, boardSpot.y); // drawing on the board leaves the picker open
   await sleep(150);
   const stillOpen = await win.evaluate(() => !document.querySelector('#picker').hidden);
   await win.click('#penColor'); // the wheel button tucks it away
@@ -517,6 +519,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     await win.keyboard.press('Enter');
     await sleep(150);
     const sec = await win.evaluate(() => Board.sections()[0]);
+    // Bring the section label clear of the title bar on small screens
+    await win.evaluate((id) => { const r = Board.els.get(id).querySelector('.section-label').getBoundingClientRect(); if (r.top < 110) { Board.view.y += 140 - r.top; Board.applyView(); } }, sec.id);
+    await sleep(100);
     const lab = await win.evaluate((id) => { const r = Board.els.get(id).querySelector('.section-label').getBoundingClientRect(); return { x: r.left + 20, y: r.top + r.height / 2 }; }, sec.id);
     await win.screenshot({ path: `${OUT}/03l-section.png` });
     const labAt = await win.evaluate((p) => { const e = document.elementFromPoint(p.x, p.y); return { el: e && (e.id || String(e.className && e.className.baseVal !== undefined ? e.className.baseVal : e.className)), p, w: innerWidth, h: innerHeight, modal: !!document.querySelector('#modalWrap:not([hidden])') }; }, lab);
