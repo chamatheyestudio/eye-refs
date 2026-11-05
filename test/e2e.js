@@ -346,6 +346,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await sleep(100);
   const picked = await win.evaluate(() => ({ color: Board.pen.color, hex: document.querySelector('#pkHex').value, dot: document.querySelector('#penColorDot').style.background }));
   await win.screenshot({ path: `${OUT}/03h-picker.png` });
+  const at700 = await win.evaluate(() => { const e = document.elementFromPoint(700, 300); return { el: e && (e.id || String(e.className && e.className.baseVal !== undefined ? e.className.baseVal : e.className)), w: innerWidth, h: innerHeight, sw: screen.width, sh: screen.height }; });
   await win.mouse.click(700, 300); // drawing on the board leaves the picker open
   await sleep(150);
   const stillOpen = await win.evaluate(() => !document.querySelector('#picker').hidden);
@@ -359,7 +360,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const blue = rgb.length && parseInt(rgb[3], 16) > 200 && parseInt(rgb[1], 16) < 40 && parseInt(rgb[2], 16) < 40;
   expect('colour disc sits above the right end of the pen bar', Math.abs(geo.pRight - geo.bRight) < 12 && geo.pBottom < geo.bTop - 10, geo);
   expect('colour disc picks the colour under the pointer', blue && picked.hex === picked.color.slice(1), picked);
-  expect('picker stays open until the wheel is clicked, colour goes to Recent', kept.stillOpen && kept.closed && kept.recent && kept.recent.c === picked.color, kept);
+  expect('picker stays open until the wheel is clicked, colour goes to Recent', kept.stillOpen && kept.closed && kept.recent && kept.recent.c === picked.color, { kept, at700 });
   // Select typed text: the pen bar shows, and size and colour change that text
   const restyled = await win.evaluate(async () => {
     const t = Board.live().find((x) => x.plain && x.text);
@@ -518,6 +519,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     const sec = await win.evaluate(() => Board.sections()[0]);
     const lab = await win.evaluate((id) => { const r = Board.els.get(id).querySelector('.section-label').getBoundingClientRect(); return { x: r.left + 20, y: r.top + r.height / 2 }; }, sec.id);
     await win.screenshot({ path: `${OUT}/03l-section.png` });
+    const labAt = await win.evaluate((p) => { const e = document.elementFromPoint(p.x, p.y); return { el: e && (e.id || String(e.className && e.className.baseVal !== undefined ? e.className.baseVal : e.className)), p, w: innerWidth, h: innerHeight, modal: !!document.querySelector('#modalWrap:not([hidden])') }; }, lab);
     await win.mouse.move(lab.x, lab.y); await win.mouse.down(); await win.mouse.move(lab.x + 80, lab.y + 40, { steps: 6 }); await win.mouse.up();
     const after = await win.evaluate((ids) => ids.map((o) => ({ dx: Board.items.get(o.id).x - o.x, dy: Board.items.get(o.id).y - o.y })), ids);
     const secAfter = await win.evaluate((id) => Board.items.get(id), sec.id);
@@ -526,7 +528,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     const undone = await win.evaluate((ids) => ids.every((o) => Math.abs(Board.items.get(o.id).x - o.x) < 0.5), ids);
     // Remove the section again so later checks see the board as it was
     await win.evaluate((id) => { Board.commit([{ id, fields: { deleted: true } }]); }, sec.id);
-    return { title: sec.title, moved: after, secMoved: secAfter.x - sec.x, pill, undone, wraps: ids.length };
+    return { title: sec.title, moved: after, secMoved: secAfter.x - sec.x, pill, undone, wraps: ids.length, labAt };
   })();
   const sm = secRes.moved.every((m) => Math.abs(m.dx - secRes.secMoved) < 0.5 && Math.abs(secRes.secMoved) > 10);
   expect('a section holds pictures, has a name, and moves them with it', secRes.title === 'Lighting' && sm && secRes.pill.shown && secRes.pill.text === '1 section' && secRes.undone, secRes);
