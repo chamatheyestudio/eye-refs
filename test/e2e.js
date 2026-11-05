@@ -867,7 +867,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     await sleep(900);
     await win.click('#tree >> text=Brunch Edit');
     await win.waitForFunction(() => document.querySelector('#tName').textContent === 'Brunch Edit', null, { timeout: 20000 });
-    await setB({ x: 120, y: 90, width: 760, height: 520 });
+    await setB({ x: 120, y: 90, width: 800, height: 540 });
     await sleep(900);
     await win.click(`#tree >> text=${cur}`);
     await win.waitForFunction((n) => document.querySelector('#tName').textContent === n, cur, { timeout: 20000 });
