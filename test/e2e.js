@@ -762,13 +762,15 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await sleep(200);
   await win.mouse.move(cropSetup.pt.x, cropSetup.pt.y);
   await win.keyboard.down('c');
+  await win.waitForFunction(() => Board.held.has('c'), null, { timeout: 2000 }).catch(() => {});
+  const cropKey = await win.evaluate(() => ({ held: [...Board.held], active: document.activeElement && (document.activeElement.id || document.activeElement.className), editing: Board.editingId, focus: document.hasFocus() }));
   await win.mouse.down();
   await win.mouse.move(cropSetup.pt.x + cropSetup.w * 0.2, cropSetup.pt.y, { steps: 8 });
   await win.mouse.up();
   await win.keyboard.up('c');
   const cropRes = await win.evaluate((id) => { const r = Board.els.get(id).getBoundingClientRect(); return { left: r.left, right: r.right, crop: Board.items.get(id).crop }; }, cropSetup.id);
   const want = cropSetup.w * 0.2;
-  expect('crop flipped image moves the dragged edge', Math.abs(cropRes.left - cropSetup.left - want) < 4 && Math.abs(cropRes.right - cropSetup.right) < 2 && cropRes.crop.r > 0.1 && !cropRes.crop.l, { before: cropSetup, after: cropRes });
+  expect('crop flipped image moves the dragged edge', Math.abs(cropRes.left - cropSetup.left - want) < 4 && Math.abs(cropRes.right - cropSetup.right) < 2 && cropRes.crop.r > 0.1 && !cropRes.crop.l, { before: cropSetup, after: cropRes, cropKey });
   // Reset cropping keeps the flipped picture where it is
   const resetRes = await win.evaluate((id) => { Board.sel = new Set([id]); Board.resetCrop(); Board.clearSel(); const r = Board.els.get(id).getBoundingClientRect(); return { left: r.left, right: r.right }; }, cropSetup.id);
   expect('reset crop on flipped image stays put', Math.abs(resetRes.left - cropSetup.left) < 2 && Math.abs(resetRes.right - cropSetup.right) < 2, resetRes);
