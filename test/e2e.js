@@ -875,6 +875,12 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await win.screenshot({ path: `${OUT}/09c-hover.png` });
   expect('recent card hover lifts and zooms', hov.card !== 'none' && hov.mini !== 'none', hov);
   await win.mouse.move(720, 200);
+  // Tab does nothing on the start screen: it always shows in full
+  await win.mouse.click(720, 200);
+  await win.keyboard.press('Tab');
+  await sleep(150);
+  const tabStart = await win.evaluate(() => ({ hidden: document.body.classList.contains('ui-hidden'), start: getComputedStyle(document.querySelector('#start')).display !== 'none', bar: getComputedStyle(document.querySelector('#toolbar')).opacity }));
+  expect('Tab leaves the start screen alone', !tabStart.hidden && tabStart.start && tabStart.bar === '1', tabStart);
   const startDrag = await win.evaluate(() => { const t = document.querySelector('#topbar'); const cs = getComputedStyle(t); return { region: cs.getPropertyValue('-webkit-app-region') || cs.webkitAppRegion, h: t.getBoundingClientRect().height, w: t.getBoundingClientRect().width }; });
   expect('start screen window can be moved from the top', startDrag.region === 'drag' && startDrag.h >= 40 && startDrag.w > 1000, startDrag);
   const fresh = await win.evaluate(() => Board.live().length);

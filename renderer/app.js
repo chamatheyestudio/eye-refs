@@ -309,6 +309,7 @@
     document.body.classList.toggle('has-sidebar', on);
     document.body.classList.toggle('no-sidebar', !on);
     document.body.classList.toggle('browse', onStart() && !!S.browse);
+    try { syncStartUi(); } catch (_) {}
   }
   function setSidebar(on, quiet) {
     S.sidebar = on;
@@ -433,18 +434,20 @@
     uiMode = localStorage.getItem('ui') || (localStorage.getItem('clean') === '0' ? 'shown' : 'auto');
     if (!['auto', 'hidden', 'shown'].includes(uiMode)) uiMode = 'auto';
   } catch (_) {}
-  const isClean = () => uiMode === 'hidden' || (uiMode === 'auto' && !body.classList.contains('board-empty'));
+  // The start screen always shows in full: Tab does nothing there
+  const isClean = () => !onStart() && (uiMode === 'hidden' || (uiMode === 'auto' && !body.classList.contains('board-empty')));
+  function syncStartUi() { body.classList.toggle('ui-hidden', uiMode === 'hidden' && !onStart()); }
   function setUi(mode, quiet) {
     uiMode = mode;
     body.classList.toggle('ui-auto', mode === 'auto');
-    body.classList.toggle('ui-hidden', mode === 'hidden');
+    syncStartUi();
     try { localStorage.setItem('ui', mode); } catch (_) {}
     if (!quiet) toast(isClean() ? 'Only the board. Tab brings the controls back.' : 'Controls shown');
     if (!isClean()) body.classList.remove('show-top', 'show-bottom');
     try { B.applyView(); } catch (_) {}
     if (typeof drawSettings === 'function') drawSettings();
   }
-  const toggleUi = () => setUi(isClean() ? 'shown' : 'hidden');
+  const toggleUi = () => { if (onStart()) return; setUi(isClean() ? 'shown' : 'hidden'); };
   const setClean = (on) => setUi(on ? 'hidden' : 'shown');
   setUi(uiMode, true);
 
