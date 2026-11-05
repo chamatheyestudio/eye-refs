@@ -43,8 +43,12 @@ const PLAT = process.platform;
   await win.fill('#siCode', codeFor('chamath@eyestudio.ae'));
   await win.click('#screen >> text=Sign in');
   await win.waitForSelector('#title:not([hidden])');
-  await W(app, (w) => { w.setBounds({ x: 120, y: 120, width: 1000, height: 700 }); });
+  await W(app, (w) => { w.setBounds({ x: 120, y: 120, width: 900, height: 600 }); });
   await sleep(500);
+  // A picture filling the middle, so see through still has something solid to check
+  const SRC = process.env.REFSRC || path.join(os.tmpdir(), 'refsrc');
+  await win.evaluate(async (f) => { await Board.addPaths([f], { x: 0, y: 0 }); Board.focusAll(); Board.clearSel(); }, path.join(SRC, 'warm.jpg'));
+  await sleep(800);
 
   // ---------- always on top ----------
   await win.evaluate(() => document.querySelector('#canvas').focus());
@@ -61,7 +65,7 @@ const PLAT = process.platform;
 
   await W(app, (w) => { w.maximize(); });
   await sleep(600);
-  await W(app, (w) => { w.unmaximize(); w.setBounds({ x: 120, y: 120, width: 1000, height: 700 }); });
+  await W(app, (w) => { w.unmaximize(); w.setBounds({ x: 120, y: 120, width: 900, height: 600 }); });
   await sleep(600);
   expect('still on top after maximize', await W(app, (w) => w.isAlwaysOnTop()));
 
