@@ -1565,7 +1565,7 @@
     }
     const helpCombo = IS_MAC ? (e.ctrlKey && !e.metaKey && e.code === 'KeyH') : c === 'Mod+H';
     if (helpCombo) { e.preventDefault(); return shortcutsModal(); }
-    if (c === 'Escape') { if (S.clickThrough) return setThrough(false); if (drawing()) return B.setTool('select'); B.clearSel(); return; }
+    if (c === 'Escape') { if (S.clickThrough) return setThrough(false); if (!$('#settings').hidden) { $('#settings').hidden = true; return; } if (drawing()) return B.setTool('select'); B.clearSel(); return; }
     const fn = actions[c];
     if (fn) { e.preventDefault(); fn(); }
   });

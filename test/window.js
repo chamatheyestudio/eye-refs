@@ -115,6 +115,8 @@ const PLAT = process.platform;
   await win.evaluate(() => document.querySelector('#settingsBtn') && document.querySelector('#settingsBtn').click());
   await sleep(300);
   await win.keyboard.press('Escape');
+  await sleep(200);
+  expect('Escape closes settings', await win.evaluate(() => document.querySelector('#settings').hidden));
   expect('still on top after opening settings', await W(app, (w) => w.isAlwaysOnTop()));
 
   // See through rebuilds the window on Windows; it must stay on top
