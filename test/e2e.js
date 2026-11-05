@@ -731,10 +731,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     const { a, g } = rotSetup;
     // Start on the first item and swing a quarter turn around the group centre
     const R = Math.hypot(a.x - g.x, a.y - g.y), a0 = Math.atan2(a.y - g.y, a.x - g.x);
-    await win.keyboard.down('Control');
+    await win.keyboard.down('ControlOrMeta');
     await win.mouse.move(a.x, a.y); await win.mouse.down();
     for (let i = 1; i <= 12; i++) { const t = a0 + (Math.PI / 6) * (i / 12); await win.mouse.move(g.x + Math.cos(t) * R, g.y + Math.sin(t) * R); }
-    await win.mouse.up(); await win.keyboard.up('Control');
+    await win.mouse.up(); await win.keyboard.up('ControlOrMeta');
   }
   const rotRes = await win.evaluate((ids) => ids.map((id) => Board.items.get(id).rot || 0), rotSetup.ids);
   const deltas = rotRes.map((r, i) => (((r - rotSetup.rot0[i]) % 360) + 360) % 360);

@@ -152,6 +152,7 @@ const PLAT = process.platform;
   await win.evaluate(() => window.eyerefs.setOpacity(1));
 
   // ---------- moving the window ----------
+  await win.evaluate(() => { window.__ev = []; for (const t of ['pointerdown', 'pointermove', 'pointerup', 'contextmenu', 'lostpointercapture', 'pointercancel']) document.querySelector('#canvas').addEventListener(t, (e) => { if (window.__ev.length < 30) window.__ev.push([t, e.button, e.buttons, e.screenX, e.screenY, e.clientX, e.clientY].join(' ')); }, true); });
   const p0 = await W(app, (w) => w.getPosition());
   await win.mouse.move(500, 400);
   await win.mouse.down({ button: 'right' });
@@ -159,7 +160,7 @@ const PLAT = process.platform;
   await win.mouse.up({ button: 'right' });
   await sleep(300);
   const p1 = await W(app, (w) => w.getPosition());
-  expect('right drag moves the window', p1[0] !== p0[0] || p1[1] !== p0[1], { p0, p1 });
+  expect('right drag moves the window', p1[0] !== p0[0] || p1[1] !== p0[1], { p0, p1, ev: await win.evaluate(() => window.__ev) });
   const menuLeft = await win.evaluate(() => !!document.querySelector('.ctx, .menu:not([hidden])'));
   expect('right drag does not open the menu', !menuLeft);
   await win.keyboard.press('Escape');
