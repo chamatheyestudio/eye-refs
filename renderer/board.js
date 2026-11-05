@@ -1003,7 +1003,7 @@
   window.addEventListener('resize', () => applyView());
 
   // ---------- notes ----------
-  function editNote(id) {
+  function editNote(id, opts = {}) {
     if (!canEdit()) return;
     const node = B.els.get(id);
     if (!node) return;
@@ -1019,7 +1019,14 @@
     r.selectNodeContents(t); r.collapse(false);
     const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
     t.oninput = () => renderOverlay();
-    t.onblur = () => setTimeout(() => { if (B.editingId === id) stopEditing(); }, 0);
+    // The click that made a new text box can pull focus back as it finishes:
+    // keep typing in the box instead of closing it
+    const keepUntil = opts.fresh ? Date.now() + 400 : 0;
+    t.onblur = () => setTimeout(() => {
+      if (B.editingId !== id) return;
+      if (Date.now() < keepUntil && !document.querySelector('#modalWrap:not([hidden])')) { t.focus(); const r2 = document.createRange(); r2.selectNodeContents(t); r2.collapse(false); const s2 = window.getSelection(); s2.removeAllRanges(); s2.addRange(r2); return; }
+      stopEditing();
+    }, 0);
     renderOverlay();
   }
 
@@ -1167,7 +1174,8 @@
     const on = hostForBox({ x: at.x, y: at.y - fs * 0.7, w: fs, h: fs });
     commit([{ id, fields: { type: 'note', plain: true, color: B.pen.color, on: on || null, text: '', x: at.x - fs * 0.15, y: at.y - fs * 0.8, w: fs * 6, fs, z: maxZ() + 1, rot: 0, deleted: false, created: Date.now(), addedBy: B.me.name } }]);
     B.sel = new Set([id]);
-    setTimeout(() => editNote(id), 0);
+    // Ready to type at once, so the first letters of a fast typist aren't lost
+    editNote(id, { fresh: true });
     renderOverlay();
   }
 

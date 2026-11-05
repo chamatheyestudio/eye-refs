@@ -270,8 +270,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await win.waitForSelector('#penText');
   await win.click('#penText');
   await win.mouse.click(tHost.sx, tHost.sy);
-  await sleep(150);
-  await win.keyboard.type('Make it brighter');
+  await win.keyboard.type('Make it brighter'); // straight away, like a fast typist
   await win.screenshot({ path: `${OUT}/03f-text-typing.png` });
   await win.mouse.click(tHost.sx + 300, tHost.sy + 200);
   await sleep(200);
