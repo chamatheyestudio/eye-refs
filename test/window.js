@@ -160,7 +160,7 @@ const PLAT = process.platform;
   await win.mouse.up({ button: 'right' });
   await sleep(300);
   const p1 = await W(app, (w) => w.getPosition());
-  expect('right drag moves the window', p1[0] !== p0[0] || p1[1] !== p0[1], { p0, p1, ev: await win.evaluate(() => window.__ev) });
+  expect('right drag moves the window', p1[0] !== p0[0] || p1[1] !== p0[1], { p0, p1, ev: await win.evaluate(() => window.__ev), at: await win.evaluate(() => { const e = document.elementFromPoint(500, 400); return e ? (e.id || e.className) + '' : null; }), focus: await win.evaluate(() => document.hasFocus()), url: win.url(), pages: app.windows().length, wins: await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().map((w) => [w.id, w.isVisible(), w.isDestroyed() ? 'x' : w.webContents.getURL().slice(-30)])) });
   const menuLeft = await win.evaluate(() => !!document.querySelector('.ctx, .menu:not([hidden])'));
   expect('right drag does not open the menu', !menuLeft);
   await win.keyboard.press('Escape');
