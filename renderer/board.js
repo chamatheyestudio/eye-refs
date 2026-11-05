@@ -582,6 +582,22 @@
     try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
   }
 
+  // Middle click always moves the board: selected or not, over anything,
+  // even while typing. It runs first so nothing on the board can swallow it.
+  const startMiddlePan = (e) => {
+    if (B.editingId) stopEditing();
+    startGesture({ type: 'pan', mid: true, v0: { ...B.view } }, e);
+    canvas.classList.add('panning');
+  };
+  canvas.addEventListener('pointerdown', (e) => {
+    if (!B.project || e.button !== 1) return;
+    e.preventDefault(); e.stopPropagation();
+    if (B.gesture) { if (B.gesture.type === 'right') B.gesture.moved = true; endGesture(e); }
+    startMiddlePan(e);
+  }, true);
+  // Windows would start its own scrolling on a middle press
+  canvas.addEventListener('mousedown', (e) => { if (e.button === 1) e.preventDefault(); }, true);
+
   canvas.addEventListener('pointerdown', (e) => {
     if (!B.project) return;
     if (e.target.closest('.note-text[contenteditable]')) return;
@@ -594,7 +610,6 @@
     if (IS_MAC && e.ctrlKey && button === 0) button = 2;
 
     if (button === 2) { startGesture({ type: 'right', lastX: e.screenX, lastY: e.screenY, screen0: { x: e.screenX, y: e.screenY } }, e); return; }
-    if (button === 1) { e.preventDefault(); startGesture({ type: 'pan', v0: { ...B.view } }, e); canvas.classList.add('panning'); return; }
     if (button !== 0) return;
 
     const handle = e.target.closest && e.target.closest('#overlay .h');
@@ -691,6 +706,15 @@
     // The release can get lost (a menu opened, the window moved under the pointer):
     // if no button is held any more, the drag is over
     if (g && e.buttons === 0 && e.pointerType === 'mouse') { if (g.type === 'right') g.moved = true; endGesture(e); return; }
+    // A middle press while another button still counts as held only shows up
+    // as a move. Treat it as a middle click: stop what was going on and pan.
+    if (B.project && e.pointerType === 'mouse' && (e.buttons & 4) && !(g && g.mid)) {
+      if (g) { if (g.type === 'right') g.moved = true; endGesture(e); }
+      startMiddlePan(e);
+      return;
+    }
+    // ...and letting go of the middle button ends that pan
+    if (g && g.mid && e.pointerType === 'mouse' && !(e.buttons & 4)) { endGesture(e); return; }
     if (!g) {
       const id = itemAt(e.clientX, e.clientY);
       B.hoverId = id;

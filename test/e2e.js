@@ -320,6 +320,16 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const mv1 = await win.evaluate(() => ({ ...Board.view }));
   await win.evaluate((v) => { Object.assign(Board.view, v); Board.applyView(); }, mv0);
   expect('middle click drag moves the board', Math.abs(mv1.x - mv0.x - 80) < 2 && Math.abs(mv1.y - mv0.y - 50) < 2 && mv1.s === mv0.s, { mv0, mv1 });
+  // ...even with a picture selected and the left button still counted as held
+  {
+    const pic = await win.evaluate(() => { const id = [...Board.items.keys()].find((k) => Board.items.get(k).type === 'image'); Board.sel = new Set([id]); Board.render(); const r = Board.els.get(id).getBoundingClientRect(); return { id, x: r.x + r.width / 2, y: r.y + r.height / 2, ix: Board.items.get(id).x }; });
+    const c0 = await win.evaluate(() => ({ ...Board.view }));
+    await win.mouse.move(pic.x, pic.y); await win.mouse.down(); await win.mouse.down({ button: 'middle' });
+    await win.mouse.move(pic.x + 80, pic.y + 50, { steps: 6 }); await win.mouse.up({ button: 'middle' }); await win.mouse.up();
+    const c1 = await win.evaluate((id) => ({ ...Board.view, ix: Board.items.get(id).x }), pic.id);
+    await win.evaluate((v) => { Object.assign(Board.view, v); Board.applyView(); Board.clearSel(); }, c0);
+    expect('middle click pans even mid click on a selected picture', Math.abs(c1.x - c0.x - 80) < 2 && c1.ix === pic.ix, { c0, c1, pic });
+  }
   // Top bar goes away when you switch to another app
   const topAway = await win.evaluate(async () => { document.body.classList.add('show-top', 'show-bottom'); window.dispatchEvent(new Event('blur')); await new Promise((r) => setTimeout(r, 700)); const r = !document.body.classList.contains('show-top') && !document.body.classList.contains('show-bottom'); window.dispatchEvent(new Event('focus')); return r; });
   expect('top and bottom bars hide when another app is in front', topAway, topAway);
