@@ -14,6 +14,8 @@ const { Sync } = require('./sync');
 const { pack, unpack, isPacked } = require('./pack');
 const { randCode, initialsFrom, firstNameFrom, cleanFolderName } = require('../shared/names');
 const PKG = require('../package.json');
+// Tests keep their settings apart from the real app
+if (process.env.EYEREFS_DATA) app.setPath('userData', process.env.EYEREFS_DATA);
 
 let win = null;
 const SEE_ALWAYS = process.platform === 'darwin'; // Mac windows can always see through

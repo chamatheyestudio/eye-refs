@@ -6,8 +6,8 @@ const fs = require('fs');
 const os = require('os');
 const { createGas } = require('./gas-shim');
 
-const OUT = process.env.SHOTS || '/tmp/shots';
-const SRC = '/tmp/refsrc';
+const OUT = process.env.SHOTS || path.join(os.tmpdir(), 'shots');
+const SRC = process.env.REFSRC || path.join(os.tmpdir(), 'refsrc');
 fs.mkdirSync(OUT, { recursive: true });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -20,7 +20,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const app = await electron.launch({
     executablePath: require('electron'),
     args: [path.join(__dirname, '..'), '--no-sandbox'],
-    env: { ...process.env, EYEREFS_SERVER: srv.url, EYEREFS_ROOT: path.join(tmp, 'Documents', 'Eye Refs'), XDG_CONFIG_HOME: path.join(tmp, 'cfg') },
+    env: { ...process.env, EYEREFS_SERVER: srv.url, EYEREFS_ROOT: path.join(tmp, 'Documents', 'Eye Refs'), XDG_CONFIG_HOME: path.join(tmp, 'cfg'), EYEREFS_DATA: path.join(tmp, 'cfg', 'Eye Refs') },
   });
   const win = await app.firstWindow();
   const errors = [];
@@ -79,7 +79,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   // Search from clean view shows the controls, then focuses the search box
   await win.mouse.move(720, 450);
   await sleep(500);
-  await win.keyboard.press('Control+Shift+P');
+  await win.keyboard.press('ControlOrMeta+Shift+P');
   await sleep(200);
   const searchOk = await win.evaluate(() => ({ focused: document.activeElement && document.activeElement.id === 'search', clean: document.body.classList.contains('clean'), sidebar: getComputedStyle(document.querySelector('#sidebar')).display !== 'none' }));
   expect('search from clean view', searchOk.focused && !searchOk.clean && searchOk.sidebar, searchOk);
@@ -92,7 +92,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await win.screenshot({ path: `${OUT}/03a-video.png` });
   await win.evaluate(() => Board.clearSel());
   // Draw: circle a detail, then an arrow in another colour
-  await win.keyboard.press('Control+D');
+  await win.keyboard.press('ControlOrMeta+D');
   await win.waitForSelector('#penBar:not([hidden])');
   const circle = async (cx, cy, rx, ry) => {
     await win.mouse.move(cx + rx, cy);
@@ -133,7 +133,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     for (let i = 0; i <= 10; i++) await win.mouse.move(600 + i * 8, 300 + i * 3);
     await win.mouse.up();
     const sw = await win.evaluate(() => { const d = Board.live().filter((it) => it.type === 'draw').sort((a, b) => b.created - a.created)[0]; return { sw: d.sw, size: Board.pen.size }; });
-    await win.keyboard.press('Control+Z');
+    await win.keyboard.press('ControlOrMeta+Z');
     await win.keyboard.press('d');
     return sw;
   };
@@ -694,13 +694,13 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const n0 = await count();
   await app.evaluate(({ clipboard }, u) => clipboard.write({ html: `<meta charset="utf-8"><b id="docs-internal-guid-1"><img src="${u}" width="400"></b>`, text: '' }), imgUrl);
   await win.mouse.move(720, 450); await win.mouse.click(720, 450);
-  await win.keyboard.press('Control+V');
+  await win.keyboard.press('ControlOrMeta+V');
   await win.waitForFunction((n) => Board.live().filter((it) => it.type !== 'draw').length > n, n0, { timeout: 15000 });
   await app.evaluate(({ clipboard, nativeImage }, f) => clipboard.writeImage(nativeImage.createFromPath(f)), `${SRC}/night.jpg`);
-  await win.keyboard.press('Control+V');
+  await win.keyboard.press('ControlOrMeta+V');
   await win.waitForFunction((n) => Board.live().filter((it) => it.type !== 'draw').length > n + 1, n0, { timeout: 15000 });
   await app.evaluate(({ clipboard }) => clipboard.writeText('Warmer light, like the second shot'));
-  await win.keyboard.press('Control+V');
+  await win.keyboard.press('ControlOrMeta+V');
   await win.waitForFunction(() => Board.live().some((it) => it.type === 'note' && /Warmer light/.test(it.text || '')), null, { timeout: 15000 });
   console.log('pasted', (await count()) - n0);
   imgSrv.close();
@@ -920,7 +920,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   }, SRC);
   await sleep(300);
   // New board: back to a blank untitled one, saved board stays in the list
-  await win.keyboard.press('Control+K');
+  await win.keyboard.press('ControlOrMeta+K');
   await win.waitForFunction(() => document.querySelector('#tName').textContent === 'Untitled');
   await win.waitForFunction(() => window.__importDone, null, { timeout: 15000 });
   await win.evaluate(() => window.__importDone);
@@ -995,4 +995,5 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     errors,
   }, null, 1));
   srv.close();
+  process.exit(errors.length ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(1); });

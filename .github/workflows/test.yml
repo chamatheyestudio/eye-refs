@@ -1,0 +1,58 @@
+name: Bug test
+
+# Runs the whole app on real Windows and Mac machines: every board feature,
+# plus the window itself (always on top, see through, opacity, moving, lock).
+# Screenshots and logs are kept with each run.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-14, macos-13, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      SHOTS: ${{ github.workspace }}/shots
+      REFSRC: ${{ github.workspace }}/refsrc
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm ci
+      - run: npm i --no-save playwright@1.63.0
+      - run: node test/make-media.js
+      - name: Unit and server tests
+        run: npm test
+      - name: Window tests
+        id: window
+        continue-on-error: true
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then xvfb-run -a -s "-screen 0 1440x900x24" node test/window.js 2>&1 | tee window.log; else node test/window.js 2>&1 | tee window.log; fi
+          exit ${PIPESTATUS[0]}
+      - name: App tests
+        id: app
+        continue-on-error: true
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then xvfb-run -a -s "-screen 0 1440x900x24" node test/e2e.js 2>&1 | tee app.log; else node test/e2e.js 2>&1 | tee app.log; fi
+          exit ${PIPESTATUS[0]}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: results-${{ matrix.os }}
+          path: |
+            shots
+            window.log
+            app.log
+      - name: Result
+        if: steps.window.outcome != 'success' || steps.app.outcome != 'success'
+        shell: bash
+        run: |
+          grep -h "^check .* false\|PAGEERROR\|CONSOLEERR\|Error" window.log app.log | head -40
+          exit 1
