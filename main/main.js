@@ -717,6 +717,7 @@ handle('pluck:fetch', async (projectId, url, key) => {
 handle('pluck:cancel', (token) => { pluck.cancel(String(token || '')); return true; });
 handle('pluck:cleanup', async (token) => { await pluck.cleanup(String(token || '')); return true; });
 handle('pluck:get', () => { shell.openExternal(pluck.GET_PLUCK); return true; });
+handle('pluck:installed', () => pluck.installed());
 
 // Media as bytes for an export (a video gives the frame showing now)
 handle('media:bytes', async (projectId, src, time, kind) => {

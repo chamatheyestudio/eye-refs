@@ -1425,10 +1425,9 @@
     actions.innerHTML = '';
     if (r && r.missing && fallbackImg) { close(); return addUrl(fallbackImg, p); }
     if (r && r.missing) {
-      node.querySelector('.fc-phase').textContent = "Pluck isn't on this computer yet. Get it once, then paste the link again.";
-      const get = el('button', { class: 'fc-btn primary', text: 'Get Pluck' });
-      get.onclick = () => api.pluckGet();
-      actions.append(get);
+      close();
+      if (B.onNeedPluck) B.onNeedPluck(url, p);
+      return;
     } else {
       node.querySelector('.fc-phase').textContent = (r && r.error) || "Couldn't get that one.";
       const again = el('button', { class: 'fc-btn primary', text: 'Try again' });

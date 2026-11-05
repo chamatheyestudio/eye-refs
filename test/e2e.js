@@ -486,15 +486,15 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     // No Pluck on this computer: a button to get it
     await new Promise((r) => srv.close(r));
     await win.evaluate(() => { Board.addSocial('https://youtu.be/xyz', Board.toWorld(720, 300)); });
-    await win.waitForFunction(() => document.querySelector('.fetch-card.failed'), null, { timeout: 15000 }).catch(() => {});
-    const missing = await win.evaluate(() => { const c = document.querySelector('.fetch-card.failed'); const r = c && { text: c.querySelector('.fc-phase').textContent, get: [...c.querySelectorAll('.fc-btn')].map((b) => b.textContent) }; if (c) c.querySelector('.fc-btn:last-child').click(); return r; });
+    await win.waitForSelector('#modalWrap:not([hidden]) >> text=Download Pluck', { timeout: 15000 }).catch(() => {});
+    const missing = await win.evaluate(() => { const m = document.querySelector('#modalWrap'); const r = { title: m.querySelector('h2') && m.querySelector('h2').textContent, get: [...m.querySelectorAll('.btn')].map((b) => b.textContent), card: !!document.querySelector('.fetch-card') }; const no = [...m.querySelectorAll('.btn')].find((b) => b.textContent === 'Not now'); if (no) no.click(); return r; });
     // A pasted social link goes to Pluck, not into a note
     const routed = await win.evaluate(() => { const notes = Board.live().filter((x) => x.type === 'note').length; return notes; });
     return { cardSeen, added, cardGone, tmpLeft, errText, missing, routed };
   })();
   expect('a social link comes in as a video through Pluck', pluckRes.cardSeen && pluckRes.added === 1 && pluckRes.cardGone && pluckRes.tmpLeft === 0, pluckRes);
   expect('when Pluck says no, the card says why', /private/.test(pluckRes.errText || ''), pluckRes.errText);
-  expect('without Pluck, the card offers to get it', pluckRes.missing && pluckRes.missing.get.includes('Get Pluck'), pluckRes.missing);
+  expect('without Pluck, it asks to download Pluck', pluckRes.missing && pluckRes.missing.get.includes('Download Pluck') && !pluckRes.missing.card, pluckRes.missing);
   // The window strip at the top never covers the board while you work
   const stripRes = await win.evaluate(() => { const hit = document.elementFromPoint(innerWidth / 2, 30); return { id: hit && hit.id, cls: hit && hit.className && String(hit.className.baseVal !== undefined ? hit.className.baseVal : hit.className) }; });
   expect('the top of the board can be clicked while working', stripRes.id !== 'topbar', stripRes);

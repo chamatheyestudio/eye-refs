@@ -11,7 +11,10 @@ const { spawn } = require('child_process');
 const { app, net } = require('electron');
 
 const BASE = 'http://127.0.0.1:47821';
-const GET_PLUCK = 'https://github.com/chamatheyestudio/pluck/releases/latest';
+const RELEASES = 'https://github.com/chamatheyestudio/pluck/releases/latest';
+// The installer for this computer, straight from Pluck's latest release
+const GET_PLUCK = process.platform === 'darwin' ? `${RELEASES}/download/Pluck.dmg`
+  : process.platform === 'win32' ? `${RELEASES}/download/Pluck-Setup.exe` : RELEASES;
 
 // Links Pluck knows how to fetch (pages, not direct picture files)
 const SOCIAL = /^https?:\/\/(?:[a-z0-9-]+\.)*(?:instagram\.com|instagr\.am|tiktok\.com|youtube\.com|youtu\.be|x\.com|twitter\.com|facebook\.com|fb\.watch|vimeo\.com|reddit\.com|redd\.it|pinterest\.[a-z.]+|pin\.it|threads\.net|threads\.com|linkedin\.com|snapchat\.com|twitch\.tv|dailymotion\.com|dai\.ly|tumblr\.com|bsky\.app|imgur\.com|flickr\.com)\/\S*$/i;
@@ -38,7 +41,7 @@ async function running() {
 
 function where() {
   if (process.platform === 'darwin') {
-    for (const p of ['/Applications/Pluck.app', path.join(app.getPath('home'), 'Applications', 'Pluck.app')]) if (fs.existsSync(p)) return { mac: p };
+    for (const p of ['/Applications/Pluck.app', path.join(app.getPath('home'), 'Applications', 'Pluck.app'), path.join(app.getPath('home'), 'Downloads', 'Pluck.app')]) if (fs.existsSync(p)) return { mac: p };
     return null;
   }
   if (process.platform === 'win32') {
@@ -57,9 +60,15 @@ async function ensure(onStatus) {
   const w = where();
   if (!w) return false;
   onStatus && onStatus('Starting Pluck');
+  // Only Pluck's engine, in the background: no window, nothing in the way.
+  // It closes itself again a little while after the last download.
+  const env = { ...process.env, PLUCK_NO_WINDOW: '1' };
   try {
-    if (w.mac) spawn('open', ['-g', '-j', w.mac], { detached: true, stdio: 'ignore' }).unref();
-    else spawn(w.exe, [], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
+    if (w.mac) {
+      const sh = path.join(w.mac, 'Contents', 'Resources', 'launch.sh');
+      if (fs.existsSync(sh)) spawn('/bin/bash', [sh], { detached: true, stdio: 'ignore', env }).unref();
+      else spawn('open', ['-g', '-j', w.mac], { detached: true, stdio: 'ignore' }).unref();
+    } else spawn(w.exe, [], { detached: true, stdio: 'ignore', windowsHide: true, env }).unref();
   } catch (_) { return false; }
   for (let i = 0; i < 90; i++) {
     await new Promise((r) => setTimeout(r, 500));
@@ -147,4 +156,7 @@ async function cleanup(token) {
   if (j) await fsp.rm(j.dir, { recursive: true, force: true }).catch(() => {});
 }
 
-module.exports = { isSocial, fetchLink, cancel, cleanup, GET_PLUCK, SOCIAL };
+// Is Pluck on this computer (installed, not necessarily running)?
+const installed = () => !!where();
+
+module.exports = { isSocial, fetchLink, cancel, cleanup, installed, GET_PLUCK, SOCIAL };

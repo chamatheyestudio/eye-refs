@@ -894,6 +894,30 @@
 
   async function toggleWindowLock() { S.lockedWindow = !S.lockedWindow; await api.lockWindow(S.lockedWindow); toast(S.lockedWindow ? 'Window locked in place' : 'Window unlocked'); }
 
+  // A social link needs Pluck. Ask once, download it, and bring the link in by
+  // itself as soon as Pluck is installed.
+  let pluckWait = null;
+  B.onNeedPluck = (url, at) => {
+    const pid = S.current && S.current.id;
+    openModal((close) => [
+      el('h2', { text: 'Get Pluck for videos from links' }),
+      el('p', { text: "Eye Refs uses Pluck to bring in videos and posts from Instagram, TikTok, YouTube and more. It's free, and also made by Matte Black. Install it once and it runs quietly in the background from then on." }),
+      el('div', { class: 'actions' },
+        el('button', { class: 'btn ghost', text: 'Not now', onclick: close }),
+        el('button', { class: 'btn', text: 'Download Pluck', onclick: () => {
+          close();
+          api.pluckGet();
+          toast('Downloading Pluck. Open it once to install, and the link comes in by itself.');
+          clearInterval(pluckWait);
+          const until = Date.now() + 20 * 60 * 1000;
+          pluckWait = setInterval(async () => {
+            if (Date.now() > until || !S.current || S.current.id !== pid) return clearInterval(pluckWait);
+            if (await api.pluckInstalled()) { clearInterval(pluckWait); toast('Pluck is ready'); B.addSocial(url, at); }
+          }, 4000);
+        } })),
+    ]);
+  };
+
   // Palette of a picture: click a colour to copy it, or add the strip to the board
   B.onPalette = (it, colors) => {
     openModal((close) => [

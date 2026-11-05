@@ -28,6 +28,7 @@ contextBridge.exposeInMainWorld('eyerefs', {
   pluckCancel: call('pluck:cancel'),
   pluckCleanup: call('pluck:cleanup'),
   pluckGet: call('pluck:get'),
+  pluckInstalled: call('pluck:installed'),
   onPluck: on('pluck:progress'),
   mediaBytes: call('media:bytes'),
   exportSave: call('export:save'),
