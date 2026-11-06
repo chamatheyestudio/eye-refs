@@ -860,7 +860,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
     // Shift+V zooms inside the crop; the frame stays put
     await win.evaluate((i) => { Board.sel = new Set([i]); Board.render(); }, pic);
-    const zp = await win.evaluate((i) => window.__freePoint(i, 0.5, 0.5), pic);
+    const zp = await win.evaluate((i) => { for (const fx of [0.5, 0.3, 0.7, 0.15, 0.85]) for (const fy of [0.5, 0.3, 0.7]) { const p = window.__freePoint(i, fx, fy); if (p) return p; } return null; }, pic);
     const z0 = await st(pic), zb0 = await box();
     await win.keyboard.down('Shift'); await win.keyboard.down('v');
     await win.mouse.move(zp.x, zp.y); await win.mouse.down(); await win.mouse.move(zp.x + 120, zp.y, { steps: 8 }); await win.mouse.up();
@@ -892,7 +892,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       return { a, b, ra: { l: ra.left, r: ra.right, t: ra.top }, rb: { l: rb.left, r: rb.right, t: rb.top } };
     });
     if (snap) {
-      const sp = await win.evaluate((i) => window.__freePoint(i, 0.5, 0.5), snap.a);
+      const sp = await win.evaluate((i) => { for (const fx of [0.5, 0.3, 0.7, 0.15, 0.85]) for (const fy of [0.5, 0.3, 0.7]) { const p = window.__freePoint(i, fx, fy); if (p) return p; } return null; }, snap.a);
       // Aim to land the left edge 5px off the other picture's left edge
       const want = snap.rb.l + 5 - snap.ra.l;
       await win.keyboard.down('Shift'); await win.keyboard.down('Space');
