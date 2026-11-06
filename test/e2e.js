@@ -763,7 +763,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await win.mouse.move(cropSetup.pt.x, cropSetup.pt.y);
   await win.keyboard.down('c');
   await win.waitForFunction(() => Board.held.has('c'), null, { timeout: 2000 }).catch(() => {});
-  const cropKey = await win.evaluate(() => ({ held: [...Board.held], active: document.activeElement && (document.activeElement.id || document.activeElement.className), editing: Board.editingId, focus: document.hasFocus() }));
+  const cropKey = await win.evaluate((p) => ({ tool: Board.tool, at: (() => { const e = document.elementFromPoint(p.x, p.y); return e && (e.id || String(e.className && e.className.baseVal !== undefined ? e.className.baseVal : e.className)); })(), sel: [...Board.sel].length, locked: Board.lockedCanvas, held: [...Board.held], active: document.activeElement && (document.activeElement.id || document.activeElement.className), editing: Board.editingId, focus: document.hasFocus() }), cropSetup.pt);
   await win.mouse.down();
   await win.mouse.move(cropSetup.pt.x + cropSetup.w * 0.2, cropSetup.pt.y, { steps: 8 });
   await win.mouse.up();
