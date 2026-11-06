@@ -334,6 +334,8 @@
     if (B.onSel) B.onSel();
     overlay.innerHTML = '';
     const ids = [...B.sel].filter((id) => B.items.get(id) && !B.items.get(id).deleted);
+    // Crop mode ends when the picture is no longer the only thing selected
+    if (B.cropMode && (ids.length !== 1 || ids[0] !== B.cropMode)) B.cropMode = null;
     if (!ids.length || (B.gesture && B.gesture.type === 'pan')) { syncVideoBar(); return; }
     const s = B.view.s;
     const box = (it, multi) => {
@@ -347,10 +349,24 @@
       b.style.transform = `rotate(${it.rot || 0}deg)`;
       return b;
     };
-    const handles = (b) => { if (!B.readOnly) for (const k of ['nw', 'ne', 'sw', 'se']) b.append(el('div', { class: 'h ' + k, 'data-h': k })); };
-    if (ids.length === 1) {
+    // Corner handles resize; just outside each corner, grab to rotate (like PureRef)
+    const turnable = (list) => list.some((id) => { const t = B.items.get(id); return t && t.type !== 'section' && !t.locked; });
+    const handles = (b, list) => {
+      if (B.readOnly) return;
+      for (const k of ['nw', 'ne', 'sw', 'se']) {
+        if (turnable(list)) b.append(el('div', { class: 'r ' + k, 'data-r': k }));
+        b.append(el('div', { class: 'h ' + k, 'data-h': k }));
+      }
+    };
+    // Crop mode: handles on every edge and corner crop the picture instead
+    if (ids.length === 1 && B.cropMode === ids[0]) {
       const b = box(B.items.get(ids[0]), false);
-      handles(b);
+      b.classList.add('cropping');
+      for (const k of ['n', 's', 'e', 'w', 'nw', 'ne', 'sw', 'se']) b.append(el('div', { class: 'ch ' + k, 'data-c': k }));
+      overlay.append(b);
+    } else if (ids.length === 1) {
+      const b = box(B.items.get(ids[0]), false);
+      handles(b, ids);
       overlay.append(b);
     } else {
       for (const id of ids) overlay.append(box(B.items.get(id), true));
@@ -358,7 +374,7 @@
       const a = toScreen(bb.x, bb.y);
       const g = el('div', { class: 'sel' });
       Object.assign(g.style, { left: a.x + 'px', top: a.y + 'px', width: bb.w * s + 'px', height: bb.h * s + 'px' });
-      handles(g);
+      handles(g, ids);
       overlay.append(g);
     }
     syncVideoBar();
@@ -613,7 +629,30 @@
     if (button !== 0) return;
 
     const handle = e.target.closest && e.target.closest('#overlay .h');
+    const turn = e.target.closest && e.target.closest('#overlay .r');
+    const cropH = e.target.closest && e.target.closest('#overlay .ch');
     const unlocked = (ids) => ids.filter((id) => B.items.get(id) && !B.items.get(id).locked);
+    // Just outside a corner: turn the selection. Shift for 45° steps, Shift+Alt
+    // turns each piece around its own centre.
+    if (turn && canEdit(true)) {
+      const ids = noSections(unlocked([...B.sel]));
+      if (!ids.length) return;
+      const bb = bbox(ids);
+      startGesture({ type: 'rotate', ids, own: e.shiftKey && e.altKey, start: ids.map((id) => clone(B.items.get(id))), before: snapshot(ids, ['rot', 'x', 'y']), c: { x: bb.x + bb.w / 2, y: bb.y + bb.h / 2 } }, e);
+      return;
+    }
+    // Crop mode handles: drag an edge or corner to crop. Shift keeps the shape,
+    // Shift+Alt makes it square.
+    if (cropH && canEdit(true) && B.cropMode && B.items.get(B.cropMode)) {
+      const it = B.items.get(B.cropMode);
+      const k = cropH.dataset.c;
+      // The handle is on screen; the crop edge is in the picture, which may be flipped
+      const edges = { l: k.includes('w'), r: k.includes('e'), t: k.includes('n'), b: k.includes('s') };
+      if (it.flipX) [edges.l, edges.r] = [edges.r, edges.l];
+      if (it.flipY) [edges.t, edges.b] = [edges.b, edges.t];
+      startGesture({ type: 'crop', id: it.id, edges, gizmo: true, start: clone(it), before: snapshot([it.id], ['x', 'y', 'w', 'crop']) }, e);
+      return;
+    }
     if (handle && canEdit(true)) {
       let ids = unlocked([...B.sel]);
       // A section only resizes on its own; with other pieces it stays as it is
@@ -672,17 +711,31 @@
 
     if (hit) {
       const hitItem = B.items.get(hit);
-      if ((B.held.has('c') || B.held.has('v')) && hitItem.type !== 'note' && hitItem.type !== 'draw' && hitItem.type !== 'section' && !hitItem.locked && canEdit()) {
+      const croppable = hitItem.type !== 'note' && hitItem.type !== 'draw' && hitItem.type !== 'section' && !hitItem.locked;
+      // Shift+V and drag left or right: zoom the picture inside its crop
+      if (B.held.has('v') && e.shiftKey && croppable && canEdit()) {
+        B.sel = new Set([hit]);
+        startGesture({ type: 'cropzoom', id: hit, start: clone(hitItem), before: snapshot([hit], ['crop']) }, e);
+        renderOverlay(); return;
+      }
+      if ((B.held.has('c') || B.held.has('v')) && croppable && canEdit()) {
         B.sel = new Set([hit]);
         startGesture({ type: 'crop', id: hit, pan: B.held.has('v'), start: clone(hitItem), before: snapshot([hit], ['x', 'y', 'w', 'crop']) }, e);
         renderOverlay(); return;
       }
-      if (!B.sel.has(hit)) { if (!e.shiftKey) B.sel.clear(); B.sel.add(hit); }
-      else if (e.shiftKey && !mod) { B.sel.delete(hit); renderOverlay(); return; }
+      const snapMove = e.shiftKey && B.held.has(' ');
+      if (!B.sel.has(hit)) { if (!e.shiftKey || snapMove) B.sel.clear(); B.sel.add(hit); }
+      else if (e.shiftKey && !mod && !snapMove) { B.sel.delete(hit); renderOverlay(); return; }
       const ids = [...B.sel];
       const all = unlocked(ids);
       // Turning, scaling and flipping are for pictures; a section only moves and resizes
       const free = noSections(all);
+      // Cmd/Ctrl+Alt+Shift and drag left or right: opacity
+      if (mod && e.altKey && e.shiftKey && canEdit()) {
+        const fade = all.filter((id) => B.items.get(id).type !== 'section');
+        if (fade.length) startGesture({ type: 'opacity', ids: fade, start: fade.map((id) => ({ id, op: B.items.get(id).op == null ? 1 : B.items.get(id).op })), before: snapshot(fade, ['op']) }, e);
+        renderOverlay(); return;
+      }
       if (mod && e.altKey && canEdit()) { if (free.length) startGesture({ type: 'scale', ids: free, start: free.map((id) => clone(B.items.get(id))), before: snapshot(free, ['x', 'y', 'w', 'fs']), bb: bbox(free) }, e); renderOverlay(); return; }
       if (mod && canEdit()) {
         // One turn for the whole selection, around the centre of its box
@@ -749,7 +802,7 @@
     g.moved = true;
     const p = toWorld(e.clientX, e.clientY);
     const dx = p.x - g.w0.x, dy = p.y - g.w0.y;
-    const mz = ['move', 'resize', 'scale', 'rotate', 'crop'].includes(g.type) ? minZ() : 0;
+    const mz = ['move', 'resize', 'scale', 'rotate', 'crop', 'cropzoom', 'opacity'].includes(g.type) ? minZ() : 0;
 
     switch (g.type) {
       case 'right': {
@@ -767,7 +820,19 @@
       }
       case 'move': {
         let mx = dx, my = dy;
-        if (e.shiftKey) { if (Math.abs(dx) > Math.abs(dy)) my = 0; else mx = 0; }
+        if (e.shiftKey && B.held.has(' ')) {
+          // Shift+Space: line up with the edges of nearby pieces
+          if (!g.snap) {
+            const mine = new Set(g.ids);
+            const xs = [], ys = [];
+            for (const o of live()) { if (mine.has(o.id)) continue; const b = bbox([o.id]); xs.push(b.x, b.x + b.w, b.x + b.w / 2); ys.push(b.y, b.y + b.h, b.y + b.h / 2); }
+            g.snap = { xs, ys, bb: bbox(g.ids) };
+          }
+          const thr = 8 / B.view.s, bb = g.snap.bb;
+          const near = (mine, list, d) => { let best = null; for (const m of mine) for (const o of list) { const k = o - (m + d); if (Math.abs(k) < thr && (best === null || Math.abs(k) < Math.abs(best))) best = k; } return best; };
+          const sx = near([bb.x, bb.x + bb.w, bb.x + bb.w / 2], g.snap.xs, mx); if (sx !== null) mx += sx;
+          const sy = near([bb.y, bb.y + bb.h, bb.y + bb.h / 2], g.snap.ys, my); if (sy !== null) my += sy;
+        } else if (e.shiftKey) { if (Math.abs(dx) > Math.abs(dy)) my = 0; else mx = 0; }
         for (const s of g.start) { const it = B.items.get(s.id); it.x = s.x + mx; it.y = s.y + my; updateEl(B.els.get(s.id), it, mz); }
         renderOverlay();
         break;
@@ -788,7 +853,23 @@
           renderOverlay();
           break;
         }
-        if (g.ids.length === 1 && (g.start[0].rot || 0) % 360 !== 0) {
+        if (e.altKey && g.start[0].type !== 'section') {
+          // Alt: grow from the centre. Shift+Alt: each piece from its own centre.
+          const cx = bb.x + bb.w / 2, cy = bb.y + bb.h / 2;
+          f = Math.max(0.01, Math.max(Math.abs(p.x - cx) / Math.max(1, bb.w / 2), Math.abs(p.y - cy) / Math.max(1, bb.h / 2)));
+          const own = e.shiftKey;
+          g.start.forEach((s0) => {
+            const it = B.items.get(s0.id);
+            const d0 = dims(s0);
+            it.w = Math.max(MIN_SIZE, s0.w * f);
+            if (s0.fs) it.fs = Math.max(4, s0.fs * f);
+            const k = it.w / s0.w;
+            const ox = s0.x + d0.w / 2, oy = s0.y + d0.h / 2;
+            const nx = own ? ox : cx + (ox - cx) * k, ny = own ? oy : cy + (oy - cy) * k;
+            it.x = nx - (d0.w * k) / 2; it.y = ny - (d0.h * k) / 2;
+            updateEl(B.els.get(s0.id), it, mz);
+          });
+        } else if (g.ids.length === 1 && (g.start[0].rot || 0) % 360 !== 0) {
           const cx = bb.x + bb.w / 2, cy = bb.y + bb.h / 2;
           f = Math.hypot(p.x - cx, p.y - cy) / Math.max(1, Math.hypot(g.w0.x - cx, g.w0.y - cy));
           g.start.forEach((s0) => { const it = B.items.get(s0.id); const d0 = dims(s0); it.w = Math.max(MIN_SIZE, s0.w * f); if (s0.fs) it.fs = s0.fs * f; it.x = cx - (d0.w * f) / 2; it.y = cy - (d0.h * f) / 2; updateEl(B.els.get(s0.id), it, mz); });
@@ -825,15 +906,18 @@
         const G = g.c;
         const a0 = Math.atan2(g.w0.y - G.y, g.w0.x - G.x), a1 = Math.atan2(p.y - G.y, p.x - G.x);
         let delta = ((a1 - a0) * 180) / Math.PI;
-        if (e.shiftKey) {
-          // One item snaps its own angle, a group snaps the turn
-          if (g.start.length === 1) { const r0 = g.start[0].rot || 0; delta = Math.round((r0 + delta) / 15) * 15 - r0; }
-          else delta = Math.round(delta / 15) * 15;
+        // Shift+Alt on the gizmo: each piece turns around its own centre
+        const own = g.own || (g.ids.length > 1 && e.shiftKey && e.altKey);
+        if (e.shiftKey && !own) {
+          // 45° steps, like PureRef. One item snaps its own angle, a group snaps the turn.
+          if (g.start.length === 1) { const r0 = g.start[0].rot || 0; delta = Math.round((r0 + delta) / 45) * 45 - r0; }
+          else delta = Math.round(delta / 45) * 45;
         }
         const rad = (delta * Math.PI) / 180, cos = Math.cos(rad), sin = Math.sin(rad);
         g.start.forEach((s0) => {
           const it = B.items.get(s0.id);
           const d = dims(s0);
+          if (own) { it.rot = ((((s0.rot || 0) + delta) % 360) + 360) % 360; it.x = s0.x; it.y = s0.y; updateEl(B.els.get(s0.id), it, mz); return; }
           const ox = s0.x + d.w / 2 - G.x, oy = s0.y + d.h / 2 - G.y;
           it.rot = ((((s0.rot || 0) + delta) % 360) + 360) % 360;
           it.x = G.x + ox * cos - oy * sin - d.w / 2;
@@ -850,7 +934,29 @@
         commit(g.ids.map((id) => ({ id, fields: { [key]: !B.items.get(id)[key] } })));
         break;
       }
-      case 'crop': cropMove(g, dx, dy, p, mz); break;
+      case 'crop': cropMove(g, dx, dy, p, mz, e); break;
+      case 'cropzoom': {
+        // Right zooms in, left zooms out. The frame stays put; the picture inside grows.
+        const it = B.items.get(g.id), s0 = g.start;
+        const c0 = { ...ZC, ...(s0.crop || {}) };
+        const cw0 = 1 - c0.l - c0.r, ch0 = 1 - c0.t - c0.b;
+        const q = Math.min(1 / cw0, 1 / ch0, Math.max(0.02 / Math.min(cw0, ch0), Math.exp(-dxS / 250)));
+        const cw = cw0 * q, ch = ch0 * q;
+        const mx = c0.l + cw0 / 2, my = c0.t + ch0 / 2;
+        const l = Math.max(0, Math.min(1 - cw, mx - cw / 2)), t = Math.max(0, Math.min(1 - ch, my - ch / 2));
+        it.crop = { l, t, r: Math.max(0, 1 - l - cw), b: Math.max(0, 1 - t - ch) };
+        // Same frame on the board: keep its width, so the picture scales inside
+        it.w = s0.w; it.x = s0.x; it.y = s0.y;
+        updateEl(B.els.get(g.id), it, mz);
+        renderOverlay();
+        break;
+      }
+      case 'opacity': {
+        const d = dxS / 300;
+        for (const s0 of g.start) { const it = B.items.get(s0.id); it.op = Math.round(Math.max(0.05, Math.min(1, s0.op + d)) * 100) / 100; updateEl(B.els.get(s0.id), it, mz); }
+        if (B.onHint) B.onHint('Opacity ' + Math.round(B.items.get(g.start[0].id).op * 100));
+        break;
+      }
       case 'marquee': {
         const x = Math.min(g.sx0, e.clientX), y = Math.min(g.sy0, e.clientY);
         const w = Math.abs(dxS), h = Math.abs(dyS);
@@ -900,7 +1006,7 @@
     return { u, v };
   }
 
-  function cropMove(g, dx, dy, p, mz) {
+  function cropMove(g, dx, dy, p, mz, e) {
     const s0 = g.start;
     const it = B.items.get(g.id);
     const d0 = dims(s0);
@@ -928,6 +1034,32 @@
       if (g.edges.r) c.r = Math.max(0, Math.min(1 - c0.l - MINF, c0.r - nx));
       if (g.edges.t) c.t = Math.max(0, Math.min(1 - c0.b - MINF, c0.t + ny));
       if (g.edges.b) c.b = Math.max(0, Math.min(1 - c0.t - MINF, c0.b - ny));
+      // Shift keeps the shape of the frame, Shift+Alt makes it square
+      if (e && e.shiftKey) {
+        const W = s0.nw, H = s0.nh;
+        const R = e.altKey ? 1 : (1 - c0.l - c0.r) * W / Math.max(1e-6, (1 - c0.t - c0.b) * H);
+        const cw = 1 - c.l - c.r, ch = 1 - c.t - c.b;
+        const horiz = g.edges.l || g.edges.r, vert = g.edges.t || g.edges.b;
+        const byWidth = () => {
+          const o = { ...c }, nh = (cw * W) / R / H;
+          if (vert) { if (g.edges.t) o.t = 1 - o.b - nh; else o.b = 1 - o.t - nh; }
+          else { const mid = o.t + ch / 2; o.t = mid - nh / 2; o.b = 1 - mid - nh / 2; }
+          return o;
+        };
+        const byHeight = () => {
+          const o = { ...c }, nw = (ch * H * R) / W;
+          if (horiz) { if (g.edges.l) o.l = 1 - o.r - nw; else o.r = 1 - o.l - nw; }
+          else { const mid = o.l + cw / 2; o.l = mid - nw / 2; o.r = 1 - mid - nw / 2; }
+          return o;
+        };
+        const fits = (o) => o.l > -1e-6 && o.r > -1e-6 && o.t > -1e-6 && o.b > -1e-6;
+        // A corner follows the side that keeps the frame inside the picture
+        const tries = !vert ? [byWidth] : !horiz ? [byHeight] : ((cw * W) / R >= ch * H ? [byHeight, byWidth] : [byWidth, byHeight]);
+        const ok = tries.map((f) => f()).find(fits);
+        // Past the picture's edge: hold where it was
+        if (!ok) return;
+        for (const k of ['l', 'r', 't', 'b']) c[k] = Math.max(0, ok[k]);
+      }
     }
     it.crop = c;
     // Keep the picture itself still while its frame changes
@@ -967,6 +1099,13 @@
         break;
       case 'crop':
         if (g.moved) { const it = B.items.get(g.id); commit([{ id: g.id, fields: { x: it.x, y: it.y, w: it.w, crop: it.crop } }], g.before); }
+        break;
+      case 'cropzoom':
+        if (g.moved) commit([{ id: g.id, fields: { crop: B.items.get(g.id).crop } }], g.before);
+        break;
+      case 'opacity':
+        if (g.moved) commit(g.ids.map((id) => ({ id, fields: { op: B.items.get(id).op } })), g.before);
+        if (B.onHint) B.onHint('');
         break;
     }
     followBase.clear();
@@ -2242,6 +2381,7 @@
           { label: 'Flip horizontal', key: 'Alt+Shift+H', onClick: () => toggleField('flipX'), disabled: !ed },
           { label: 'Flip vertical', key: 'Alt+Shift+V', onClick: () => toggleField('flipY'), disabled: !ed },
           '-',
+          { label: 'Crop with handles', key: 'Mod+Alt+Shift+C', onClick: () => { B.sel = new Set([one.id]); toggleCropMode(true); }, disabled: !ed || !one || (one.type !== 'image' && one.type !== 'video') },
           { label: 'Reset cropping', key: 'Mod+Shift+C', onClick: resetCrop, disabled: !ed },
           { label: 'Reset transform', key: 'Mod+Shift+T', onClick: resetTransform, disabled: !ed },
         ] },
@@ -2334,13 +2474,23 @@
   function setGrayCanvas(on) { B.grayCanvas = on; world.classList.toggle('gray', on); }
   function setLockedCanvas(on) { B.lockedCanvas = on; B.onChange('lock'); }
 
+  // Crop with handles on one picture (Cmd/Ctrl+Alt+Shift+C toggles, like PureRef)
+  function toggleCropMode(on) {
+    const ids = selIds();
+    const it = ids.length === 1 && B.items.get(ids[0]);
+    const can = it && (it.type === 'image' || it.type === 'video') && !it.locked && canEdit();
+    B.cropMode = (on === undefined ? !B.cropMode : on) && can ? it.id : null;
+    renderOverlay();
+    return !!B.cropMode;
+  }
+
   function binItems() { return [...B.items.values()].filter((it) => it.deleted && it.type && it.type !== 'comment').sort((a, b) => (b._t || 0) - (a._t || 0)); }
   function restore(ids) { commit(ids.map((id) => ({ id, fields: { deleted: false } }))); B.sel = new Set(ids); renderOverlay(); }
 
   Object.assign(B, {
     startComment, openThread, closeThread, setShowResolved, commentCount, comments, versionItems, restoreVersion, addSection, sectionFromSelection, sections, goToSection, editSectionTitle, addSocial, addText, restyle, restyleDone, getPalette, addPaletteStrip, renderExport, exportAs, load, unload, applyRemote, render, applyView, zoomAt, fitRect, toWorld, toScreen,
     commit, undo, redo, addPaths, addBytes, addUrl, addNote, editNote, stopEditing,
-    copySelection, pasteInternal, pasteNative, pasteKey, deleteSelection, duplicate, toggleField, resetCrop, resetTransform, front, back,
+    copySelection, pasteInternal, pasteNative, pasteKey, deleteSelection, duplicate, toggleField, resetCrop, resetTransform, toggleCropMode, front, back,
     align, normalize, arrange, focusSelection, focusAll, focusStep, selectAll, clearSel, selIds,
     togglePlay, setInOut, toggleLoop, cycleSpeed, toggleMute, step, grabFrame, activeVideoId,
     setTool, setGrid, setGrayCanvas, setLockedCanvas, binItems, restore, mediaUrl, contextMenu, live,

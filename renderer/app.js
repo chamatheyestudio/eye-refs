@@ -540,6 +540,7 @@
   const sizeOf = (it) => (it.type === 'draw' ? (it.sw || 4) * lineK(it) : ((it.fs || 16) * B.view.s - 12) / 2);
   const textFs = (size) => (12 + size * 2) / B.view.s;
   let selKey = '';
+  B.onHint = (text) => { const h = $('#hint'); h.textContent = text || ''; h.hidden = !text; };
   B.onSel = () => {
     const k = (B.selIds ? B.selIds().join(',') : '') + '|' + (B.editingId || '');
     if (k === selKey) return;
@@ -1417,7 +1418,7 @@
 
   const SHORTCUTS = [
     ['Board', [['Pan', 'Alt + drag, or middle mouse'], ['Zoom', 'Scroll, or hold Z and drag'], ['Move window', 'Right mouse drag'], ['Menu', 'Right click'], ['Focus image', 'Space'], ['Focus canvas', 'Mod+Space'], ['Reset zoom', 'Mod+0'], ['Zoom in / out', 'Mod+=  /  Mod+-'], ['Next or previous image', '→  ←'], ['Lock canvas', 'Mod+R'], ['Grayscale canvas', 'Mod+Alt+G'], ['Hide or show controls', 'Tab'], ['Select all', 'Mod+A']]],
-    ['Items', [['Crop', 'Hold C and drag'], ['Pan cropping', 'Hold V and drag'], ['Reset cropping', 'Mod+Shift+C'], ['Rotate', 'Mod + drag'], ['Scale', 'Mod+Alt + drag'], ['Flip', 'Alt+Shift+H  /  Alt+Shift+V'], ['Grayscale', 'Alt+G'], ['Toggle locked', 'Alt+L'], ['Reset transform', 'Mod+Shift+T'], ['Arrange optimal', 'Mod+P'], ['Align', 'Mod + arrows'], ['Normalize', 'Mod+Alt + arrows'], ['Send to front / back', '↑  ↓'], ['Note', 'Mod+N'], ['Copy / Cut / Paste', 'Mod+C  /  Mod+X  /  Mod+V'], ['Delete', 'Del'], ['Undo / Redo', 'Mod+Z  /  Mod+Shift+Z']]],
+    ['Items', [['Crop', 'Hold C and drag'], ['Crop with handles', 'Mod+Alt+Shift+C'], ['Keep shape / square while cropping', 'Shift  /  Shift+Alt'], ['Pan cropping', 'Hold V and drag'], ['Zoom cropping', 'Shift+V and drag'], ['Reset cropping', 'Mod+Shift+C'], ['Rotate', 'Mod + drag, or just outside a corner'], ['Rotate in 45° steps', 'Mod+Shift + drag'], ['Scale', 'Mod+Alt + drag'], ['Scale from the centre', 'Alt + corner'], ['Each from its own centre', 'Shift+Alt + corner'], ['Opacity', 'Mod+Alt+Shift + drag'], ['Move in a straight line', 'Shift + drag'], ['Snap to other pieces', 'Shift+Space + drag'], ['Flip', 'Alt+Shift+H  /  Alt+Shift+V'], ['Flip by dragging', 'Alt+Shift + drag'], ['Grayscale', 'Alt+G'], ['Toggle locked', 'Alt+L'], ['Reset transform', 'Mod+Shift+T'], ['Arrange optimal', 'Mod+P'], ['Align', 'Mod + arrows'], ['Normalize', 'Mod+Alt + arrows'], ['Send to front / back', '↑  ↓'], ['Note', 'Mod+N'], ['Copy / Cut / Paste', 'Mod+C  /  Mod+X  /  Mod+V'], ['Delete', 'Del'], ['Undo / Redo', 'Mod+Z  /  Mod+Shift+Z']]],
     ['Draw', [['Draw', 'Mod+D'], ['Pen / Eraser', 'D  /  E'], ['Text', 'T'], ['Straight line', 'Hold Shift while drawing'], ['Line opacity', 'Pen bar, or right click a line'], ['Solid / Dotted / Arrow', '1  /  2  /  3'], ['Pen colour', 'Mod+T'], ['Stop drawing', 'Esc']]],
     ['Video', [['Play or pause', 'K'], ['Set start / end', 'I  /  O'], ['Step a frame', ',  .'], ['Grab frame', 'F'], ['Sound', 'M']]],
     ['Window', [['Always on top', 'Mod+Shift+A'], ['Transparent to mouse', 'Mod+T'], ['Opacity', 'Mod+Shift+-  /  Mod+Shift+='], ['Lock window', 'Mod+W'], ['Minimize / Maximize', 'Mod+M  /  Mod+F'], ['Close', 'Mod+Q']]],
@@ -1486,6 +1487,7 @@
     'Alt+Shift+H': () => B.toggleField('flipX'),
     'Alt+Shift+V': () => B.toggleField('flipY'),
     'Mod+Shift+C': () => B.resetCrop(),
+    'Mod+Alt+Shift+C': () => { const was = !!B.cropMode; if (!B.toggleCropMode() && !was) toast('Select one picture to crop.'); },
     'Mod+Shift+T': () => B.resetTransform(),
     'Mod+R': () => B.setLockedCanvas(!B.lockedCanvas),
     'Mod+W': toggleWindowLock,
@@ -1526,7 +1528,7 @@
     '1': () => { if (drawing()) penStyle('solid'); },
     '2': () => { if (drawing()) penStyle('dotted'); },
     '3': () => { if (drawing()) penStyle('arrow'); },
-    'Enter': () => { const ids = B.selIds(); if (ids.length === 1 && B.items.get(ids[0]).type === 'note') B.editNote(ids[0]); },
+    'Enter': () => { if (B.cropMode) return B.toggleCropMode(false); const ids = B.selIds(); if (ids.length === 1 && B.items.get(ids[0]).type === 'note') B.editNote(ids[0]); },
     'K': () => B.togglePlay(),
     'I': () => B.setInOut('in'),
     'O': () => B.setInOut('out'),
@@ -1565,7 +1567,7 @@
     }
     const helpCombo = IS_MAC ? (e.ctrlKey && !e.metaKey && e.code === 'KeyH') : c === 'Mod+H';
     if (helpCombo) { e.preventDefault(); return shortcutsModal(); }
-    if (c === 'Escape') { if (S.clickThrough) return setThrough(false); if (!$('#settings').hidden) { $('#settings').hidden = true; return; } if (drawing()) return B.setTool('select'); B.clearSel(); return; }
+    if (c === 'Escape') { if (S.clickThrough) return setThrough(false); if (!$('#settings').hidden) { $('#settings').hidden = true; return; } if (B.cropMode) { B.toggleCropMode(false); return; } if (drawing()) return B.setTool('select'); B.clearSel(); return; }
     const fn = actions[c];
     if (fn) { e.preventDefault(); fn(); }
   });

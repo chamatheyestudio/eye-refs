@@ -779,6 +779,132 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const cropUndone = await win.evaluate((id) => { const it = Board.items.get(id); return !it.flipX && !(it.crop && it.crop.r); }, cropSetup.id);
   expect('crop test undone', cropUndone);
 
+  // ---------- PureRef transform controls ----------
+  {
+    const pic = await win.evaluate(() => {
+      const it = Board.live().find((i) => i.type === 'image' && !i.locked);
+      Board.sel = new Set([it.id]); Board.focusSelection(); Board.render();
+      return it.id;
+    });
+    await sleep(200);
+    const centreOf = (id) => win.evaluate((i) => { const r = Board.els.get(i).getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; }, id);
+    const st = (id) => win.evaluate((i) => { const it = Board.items.get(i); const c = it.crop || {}; return { x: it.x, y: it.y, w: it.w, rot: it.rot || 0, op: it.op == null ? 1 : it.op, crop: { l: c.l || 0, t: c.t || 0, r: c.r || 0, b: c.b || 0 } }; }, id);
+    const box = () => win.evaluate(() => { const b = document.querySelector('#overlay .sel:not(.multi-item)').getBoundingClientRect(); return { l: b.left, t: b.top, r: b.right, b: b.bottom }; });
+
+    // Rotate by grabbing just outside a corner
+    await win.screenshot({ path: `${OUT}/t1-gizmo.png` });
+    const zone = await win.evaluate(() => { const z = document.querySelector('#overlay .r.se'); if (!z) return null; const r = z.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
+    const c0 = await centreOf(pic), r0 = await st(pic);
+    const R = Math.hypot(zone.x - c0.x, zone.y - c0.y), a0 = Math.atan2(zone.y - c0.y, zone.x - c0.x);
+    await win.mouse.move(zone.x, zone.y); await win.mouse.down();
+    for (let i = 1; i <= 10; i++) { const t = a0 + (Math.PI / 6) * (i / 10); await win.mouse.move(c0.x + Math.cos(t) * R, c0.y + Math.sin(t) * R); }
+    await win.mouse.up();
+    const r1 = await st(pic);
+    expect('grabbing outside a corner rotates', zone && Math.abs(((r1.rot - r0.rot + 360) % 360) - 30) < 4, { zone, r0: r0.rot, r1: r1.rot });
+    await win.evaluate(() => Board.undo());
+
+    // ...with Shift, in 45 degree steps
+    await win.mouse.move(zone.x, zone.y); await win.mouse.down(); await win.keyboard.down('Shift');
+    for (let i = 1; i <= 10; i++) { const t = a0 + (Math.PI / 3.4) * (i / 10); await win.mouse.move(c0.x + Math.cos(t) * R, c0.y + Math.sin(t) * R); }
+    await win.mouse.up(); await win.keyboard.up('Shift');
+    const r2 = await st(pic);
+    expect('Shift rotates in 45 degree steps', Math.abs(r2.rot % 45) < 0.01 && r2.rot !== r0.rot, { rot: r2.rot });
+    await win.evaluate(() => Board.undo());
+
+    // Alt on a corner: grows from the centre
+    await win.evaluate((i) => { Board.sel = new Set([i]); Board.render(); }, pic);
+    const h = await win.evaluate(() => { const r = document.querySelector('#overlay .h.se').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
+    const cBefore = await centreOf(pic), sBefore = await st(pic);
+    await win.keyboard.down('Alt'); await win.mouse.move(h.x, h.y); await win.mouse.down(); await win.mouse.move(h.x + 60, h.y + 40, { steps: 6 }); await win.mouse.up(); await win.keyboard.up('Alt');
+    const cAfter = await centreOf(pic), sAfter = await st(pic);
+    expect('Alt on a corner scales from the centre', sAfter.w > sBefore.w * 1.05 && Math.abs(cAfter.x - cBefore.x) < 2 && Math.abs(cAfter.y - cBefore.y) < 2, { cBefore, cAfter, w0: sBefore.w, w1: sAfter.w });
+    await win.evaluate(() => Board.undo());
+
+    // Shift+Alt with two pictures: each grows around its own centre
+    const two = await win.evaluate(() => { const ids = Board.live().filter((i) => i.type === 'image' && !i.locked).slice(0, 2).map((i) => i.id); Board.sel = new Set(ids); Board.focusSelection(); Board.render(); return ids; });
+    await sleep(200);
+    const cc0 = await Promise.all(two.map(centreOf));
+    const gh = await win.evaluate(() => { const hs = [...document.querySelectorAll('#overlay .h.se')]; const r = hs[hs.length - 1].getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
+    await win.keyboard.down('Shift'); await win.keyboard.down('Alt');
+    await win.mouse.move(gh.x, gh.y); await win.mouse.down(); await win.mouse.move(gh.x - 50, gh.y - 30, { steps: 6 }); await win.mouse.up();
+    await win.keyboard.up('Alt'); await win.keyboard.up('Shift');
+    const cc1 = await Promise.all(two.map(centreOf));
+    const ws = await win.evaluate((ids) => ids.map((i) => Board.items.get(i).w), two);
+    expect('Shift+Alt scales each piece from its own centre', cc0.every((c, i) => Math.abs(c.x - cc1[i].x) < 2 && Math.abs(c.y - cc1[i].y) < 2), { cc0, cc1, ws });
+    await win.evaluate(() => Board.undo());
+
+    // Crop with handles
+    await win.evaluate((i) => { Board.sel = new Set([i]); Board.focusSelection(); Board.render(); }, pic);
+    await sleep(200);
+    await win.evaluate(() => document.querySelector('#canvas').focus());
+    await win.keyboard.press('ControlOrMeta+Alt+Shift+C');
+    await sleep(150);
+    const handlesOn = await win.evaluate(() => document.querySelectorAll('#overlay .ch').length);
+    expect('Cmd/Ctrl+Alt+Shift+C shows crop handles', handlesOn === 8, { handlesOn });
+    await win.screenshot({ path: `${OUT}/t2-crop-mode.png` });
+    const before = await st(pic), bx0 = await box();
+    const eH = await win.evaluate(() => { const r = document.querySelector('#overlay .ch.e').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
+    await win.mouse.move(eH.x, eH.y); await win.mouse.down(); await win.mouse.move(eH.x - 70, eH.y, { steps: 6 }); await win.mouse.up();
+    const after = await st(pic), bx1 = await box();
+    const croppedSide = after.crop.r > 0.02 || after.crop.l > 0.02;
+    expect('dragging the right handle crops that side', croppedSide && Math.abs(bx1.l - bx0.l) < 2 && bx1.r < bx0.r - 40, { before: before.crop, after: after.crop, bx0, bx1 });
+    const sq = await win.evaluate(() => { const r = document.querySelector('#overlay .ch.se').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
+    await win.keyboard.down('Shift'); await win.keyboard.down('Alt');
+    await win.mouse.move(sq.x - 2, sq.y - 2); await win.mouse.down(); await win.mouse.move(sq.x - 40, sq.y - 25, { steps: 6 }); await win.mouse.up();
+    await win.keyboard.up('Alt'); await win.keyboard.up('Shift');
+    const bsq = await box();
+    expect('Shift+Alt makes the crop square', Math.abs((bsq.r - bsq.l) - (bsq.b - bsq.t)) < 3, bsq);
+    await win.keyboard.press('Escape');
+    expect('Escape leaves crop mode', await win.evaluate(() => !Board.cropMode && !document.querySelector('#overlay .ch')));
+    await win.evaluate(() => { Board.undo(); Board.undo(); });
+
+    // Shift+V zooms inside the crop; the frame stays put
+    await win.evaluate((i) => { Board.sel = new Set([i]); Board.render(); }, pic);
+    const zp = await win.evaluate((i) => window.__freePoint(i, 0.5, 0.5), pic);
+    const z0 = await st(pic), zb0 = await box();
+    await win.keyboard.down('Shift'); await win.keyboard.down('v');
+    await win.mouse.move(zp.x, zp.y); await win.mouse.down(); await win.mouse.move(zp.x + 120, zp.y, { steps: 8 }); await win.mouse.up();
+    await win.keyboard.up('v'); await win.keyboard.up('Shift');
+    const z1 = await st(pic), zb1 = await box();
+    const win1 = 1 - z1.crop.l - z1.crop.r;
+    expect('Shift+V drag zooms inside the crop', win1 < 0.8 && Math.abs(z1.w - z0.w) < 0.5 && Math.abs(zb1.l - zb0.l) < 2, { z0: z0.crop, z1: z1.crop, zb0, zb1 });
+    await win.evaluate(() => Board.undo());
+
+    // Cmd/Ctrl+Alt+Shift drag: opacity
+    await win.keyboard.down('ControlOrMeta'); await win.keyboard.down('Alt'); await win.keyboard.down('Shift');
+    await win.mouse.move(zp.x, zp.y); await win.mouse.down(); await win.mouse.move(zp.x - 120, zp.y, { steps: 8 });
+    const hint = await win.evaluate(() => !document.querySelector('#hint').hidden && document.querySelector('#hint').textContent);
+    await win.mouse.up();
+    await win.keyboard.up('Shift'); await win.keyboard.up('Alt'); await win.keyboard.up('ControlOrMeta');
+    const o1 = await st(pic);
+    expect('Cmd/Ctrl+Alt+Shift drag changes opacity', o1.op < 0.7 && o1.op > 0.5, { op: o1.op, hint });
+    expect('opacity readout shows while dragging', /Opacity \d+/.test(hint || ''), { hint });
+    await win.evaluate(() => Board.undo());
+
+    // Shift+Space while moving snaps to the edges of other pieces
+    const snap = await win.evaluate(() => {
+      const ids = Board.live().filter((i) => i.type === 'image' && !i.locked && !(i.rot % 360)).slice(0, 2).map((i) => i.id);
+      if (ids.length < 2) return null;
+      const [a, b] = ids;
+      Board.commit([{ id: a, fields: { rot: 0 } }, { id: b, fields: { rot: 0 } }]);
+      Board.sel = new Set([a, b]); Board.focusSelection(); Board.clearSel(); Board.sel = new Set([a]); Board.render();
+      const ra = Board.els.get(a).getBoundingClientRect(), rb = Board.els.get(b).getBoundingClientRect();
+      return { a, b, ra: { l: ra.left, r: ra.right, t: ra.top }, rb: { l: rb.left, r: rb.right, t: rb.top } };
+    });
+    if (snap) {
+      const sp = await win.evaluate((i) => window.__freePoint(i, 0.5, 0.5), snap.a);
+      // Aim to land the left edge 5px off the other picture's left edge
+      const want = snap.rb.l + 5 - snap.ra.l;
+      await win.keyboard.down('Shift'); await win.keyboard.down('Space');
+      await win.mouse.move(sp.x, sp.y); await win.mouse.down(); await win.mouse.move(sp.x + want, sp.y + 7, { steps: 10 }); await win.mouse.up();
+      await win.keyboard.up('Space'); await win.keyboard.up('Shift');
+      const landed = await win.evaluate((s) => { const ra = Board.els.get(s.a).getBoundingClientRect(), rb = Board.els.get(s.b).getBoundingClientRect(); return { al: ra.left, bl: rb.left, held: [...Board.held], sel: [...Board.sel] }; }, snap);
+      expect('Shift+Space snaps to other pieces', Math.abs(landed.al - landed.bl) < 1.5, { landed, sp, want, snap });
+      await win.evaluate(() => { Board.undo(); Board.undo(); });
+    }
+    await win.evaluate(() => Board.clearSel());
+  }
+
   await win.screenshot({ path: `${OUT}/03b-untitled.png` });
   // Share asks for a name first, then saves into Documents/Eye Refs
   await win.click('#share');
