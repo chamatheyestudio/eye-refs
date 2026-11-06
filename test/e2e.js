@@ -751,9 +751,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const cropSetup = await win.evaluate(() => {
     for (const it of Board.live().filter((i) => i.type === 'image' && !(i.crop && (i.crop.l || i.crop.r || i.crop.t || i.crop.b)))) {
       Board.sel = new Set([it.id]); Board.focusSelection();
-      const pt = window.__freePoint(it.id, 0.08, 0.5);
-      if (!pt) continue;
+      // Pick the spot after flipping: text stuck to the picture flips along with it
       Board.toggleField('flipX'); Board.clearSel();
+      const pt = window.__freePoint(it.id, 0.08, 0.5);
+      if (!pt) { Board.sel = new Set([it.id]); Board.toggleField('flipX'); Board.clearSel(); continue; }
       const r = Board.els.get(it.id).getBoundingClientRect();
       return { id: it.id, pt, left: r.left, right: r.right, top: r.top, bottom: r.bottom, w: r.width, h: r.height };
     }
