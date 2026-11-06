@@ -45,7 +45,8 @@ jobs:
 
   mac:
     needs: prepare
-    runs-on: macos-15
+    # Intel Macs build both versions; GitHub often runs short of Apple chip machines
+    runs-on: macos-15-intel
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       CSC_IDENTITY_AUTO_DISCOVERY: 'false'
@@ -74,12 +75,17 @@ jobs:
           rm "$RUNNER_TEMP/cert.p12"
           echo "EYEREFS_SIGN_IDENTITY=Eye Refs by Matte Black" >> "$GITHUB_ENV"
           echo "EYEREFS_SIGN_KEYCHAIN=$KC" >> "$GITHUB_ENV"
-      - name: Apple Silicon build
-        run: npx electron-builder --mac dmg pkg --arm64 --publish ${{ needs.prepare.outputs.publish }}
+      - name: Apple Silicon build (with the Apple chip copy of ffmpeg)
+        run: |
+          rm -f node_modules/ffmpeg-static/ffmpeg
+          npm_config_arch=arm64 node node_modules/ffmpeg-static/install.js
+          file node_modules/ffmpeg-static/ffmpeg | grep -q arm64
+          npx electron-builder --mac dmg pkg --arm64 --publish ${{ needs.prepare.outputs.publish }}
       - name: Intel build (with the Intel copy of ffmpeg)
         run: |
           rm -f node_modules/ffmpeg-static/ffmpeg
           npm_config_arch=x64 node node_modules/ffmpeg-static/install.js
+          file node_modules/ffmpeg-static/ffmpeg | grep -q x86_64
           npx electron-builder --mac dmg pkg --x64 --publish ${{ needs.prepare.outputs.publish }}
       - uses: actions/upload-artifact@v4
         with:
