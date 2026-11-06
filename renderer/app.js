@@ -1208,9 +1208,8 @@
       c.onclick = () => switchTo(b.id);
       return c;
     };
-    // Four recent boards, then a New board tile in the same row. The rest open below.
+    // A New board tile first, then four recent boards in the same row. The rest open below.
     const boards = r.boards;
-    for (const b of boards.slice(0, 4)) cards.append(card(b));
     const add = el('button', { class: 'start-card start-new', id: 'startNew', title: 'New board' },
       el('span', { class: 'mini' }, el('span', { class: 'plus', html: window.ICONS.plus })),
       el('span', { class: 'nm', text: 'New board' }),
@@ -1218,6 +1217,7 @@
     // Name a new board straight away, instead of starting as Untitled
     add.onclick = () => saveModal();
     cards.append(add);
+    for (const b of boards.slice(0, 4)) cards.append(card(b));
     const more = $('#startMore');
     more.hidden = boards.length <= 4;
     more.querySelector('.lbl').textContent = S.startAll ? 'Fewer' : `All recent (${boards.length})`;
