@@ -1110,9 +1110,12 @@
   async function opening(name, fn) {
     const g = ++openGen;
     const box = $('#opening');
-    const show = setTimeout(() => { if (g !== openGen) return; $('#openingName').textContent = name || 'Your board'; box.hidden = false; requestAnimationFrame(() => body.classList.add('is-opening')); }, 80);
+    let done = false;
+    // The fade in waits for the next frame; if the board is already open by then
+    // (a slow or busy computer), it must not bring the card back
+    const show = setTimeout(() => { if (g !== openGen || done) return; $('#openingName').textContent = name || 'Your board'; box.hidden = false; requestAnimationFrame(() => { if (g === openGen && !done) body.classList.add('is-opening'); }); }, 80);
     let res;
-    try { res = await fn(); } finally { clearTimeout(show); }
+    try { res = await fn(); } finally { clearTimeout(show); done = true; }
     if (g !== openGen) return res;
     openResult(res);
     // Give the first pictures a moment to appear before the note goes
@@ -1120,7 +1123,7 @@
       const imgs = [...document.querySelectorAll('#world img')].slice(0, 12);
       await Promise.race([Promise.all(imgs.map((i) => (i.decode ? i.decode().catch(() => {}) : null))), new Promise((r) => setTimeout(r, 1200))]);
     }
-    if (g === openGen) { body.classList.remove('is-opening'); setTimeout(() => { if (!body.classList.contains('is-opening')) box.hidden = true; }, 220); }
+    if (g === openGen) { body.classList.remove('is-opening'); setTimeout(() => { if (g === openGen || !body.classList.contains('is-opening')) { body.classList.remove('is-opening'); box.hidden = true; } }, 220); }
     return res;
   }
 
