@@ -959,7 +959,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     await sleep(400);
     const cardInfo = await win.evaluate((ids) => ids.map((i) => { const it = Board.items.get(i); const n = Board.els.get(i); return { type: it.type, name: n.querySelector('.fc-name') && n.querySelector('.fc-name').textContent, meta: n.querySelector('.fc-meta') && n.querySelector('.fc-meta').textContent, ext: it.ext, size: it.size }; }), cards);
     expect('other files come in as cards with name, kind and size', cardInfo.length === 3 && cardInfo.every((c) => c.type === 'file' && c.name && /·/.test(c.meta)) && cardInfo[1].name === 'deck.key' && /KEY/.test(cardInfo[1].meta) && cardInfo[1].size === 2048, cardInfo);
-    if (process.platform === 'darwin' || process.platform === 'win32') {
+    // Mac previews text files itself; Windows only does for apps that add their own previews
+    if (process.platform === 'darwin') {
       const pre = await win.evaluate((id) => { const it = Board.items.get(id); const im = Board.els.get(id).querySelector('.fc-pre'); return { preview: it.preview, shown: !!(im && im.naturalWidth) }; }, cards[0]);
       expect('a text file gets a real preview from the computer', !!pre.preview, pre);
     }
