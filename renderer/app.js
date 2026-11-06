@@ -1457,7 +1457,7 @@
   const keyName = (e) => {
     if (e.code.startsWith('Key')) return e.code.slice(3);
     if (e.code.startsWith('Digit')) return e.code.slice(5);
-    const map = { ArrowUp: 'Up', ArrowDown: 'Down', ArrowLeft: 'Left', ArrowRight: 'Right', Minus: 'Minus', Equal: 'Equal', NumpadAdd: 'Equal', NumpadSubtract: 'Minus', Comma: 'Comma', Period: 'Period', Space: 'Space', Delete: 'Delete', Backspace: 'Backspace', Escape: 'Escape', Enter: 'Enter', NumpadEnter: 'Enter', Tab: 'Tab' };
+    const map = { ArrowUp: 'Up', ArrowDown: 'Down', ArrowLeft: 'Left', ArrowRight: 'Right', Minus: 'Minus', Equal: 'Equal', NumpadAdd: 'Equal', NumpadSubtract: 'Minus', Comma: 'Comma', Period: 'Period', Space: 'Space', Delete: 'Delete', Backspace: 'Backspace', Escape: 'Escape', Enter: 'Enter', NumpadEnter: 'Enter', Tab: 'Tab', PageUp: 'PageUp', PageDown: 'PageDown' };
     return map[e.code] || e.key;
   };
   const combo = (e) => {
@@ -1553,6 +1553,8 @@
     'F': () => B.grabFrame(),
     'M': () => B.toggleMute(),
     'Comma': () => B.step(-1),
+    'PageUp': () => B.pdfStep(-1),
+    'PageDown': () => B.pdfStep(1),
     'Period': () => B.step(1),
   };
 

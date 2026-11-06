@@ -187,6 +187,14 @@
         v.addEventListener('error', () => markMissing(it.id));
         clip.append(v);
         node.append(clip, el('div', { class: 'play-badge', html: ICONS.smallPlay }));
+      } else if (it.type === 'pdf') {
+        node.classList.add('pdf');
+        clip.append(el('canvas', { class: 'media' }));
+        node.append(clip);
+      } else if (it.type === 'file') {
+        node.classList.add('filecard');
+        clip.append(el('div', { class: 'media file-card' }));
+        node.append(clip);
       } else {
         const img = el('img', { class: 'media', draggable: 'false', decoding: 'async', alt: '' });
         img.addEventListener('error', () => markMissing(it.id));
@@ -254,6 +262,8 @@
         if (it.style === 'dotted') path.setAttribute('stroke-dasharray', `0 ${(it.sw || 4) * 2}`); else path.removeAttribute('stroke-dasharray');
         return;
       }
+      if (it.type === 'pdf') { queuePdf(it.id); return; }
+      if (it.type === 'file') { fillCard(m, it); return; }
       const url = mediaUrl(it.src);
       if (m.dataset.src !== url && !node.classList.contains('missing')) { m.dataset.src = url; m.src = url; }
       if (it.type === 'video') m.playbackRate = it.speed || 1;
@@ -365,9 +375,25 @@
       for (const k of ['n', 's', 'e', 'w', 'nw', 'ne', 'sw', 'se']) b.append(el('div', { class: 'ch ' + k, 'data-c': k }));
       overlay.append(b);
     } else if (ids.length === 1) {
-      const b = box(B.items.get(ids[0]), false);
+      const one = B.items.get(ids[0]);
+      const b = box(one, false);
       handles(b, ids);
       overlay.append(b);
+      if (one.type === 'pdf' && (one.pages || 1) > 1) {
+        // Page arrows under the PDF, at screen size
+        const d = dims(one);
+        const c = toScreen(one.x + d.w / 2, one.y + d.h / 2);
+        const r = (Math.abs(Math.sin(((one.rot || 0) * Math.PI) / 180)) * d.w + Math.abs(Math.cos(((one.rot || 0) * Math.PI) / 180)) * d.h) * B.view.s / 2;
+        const n = one.page || 1, total = one.pages || 1;
+        const prev = el('button', { class: 'pg-btn', 'data-pg': '-1', title: 'Previous page', html: ICONS.chev, disabled: n <= 1 || B.readOnly });
+        const next = el('button', { class: 'pg-btn', 'data-pg': '1', title: 'Next page', html: ICONS.chev, disabled: n >= total || B.readOnly });
+        const bar = el('div', { class: 'pdf-pages' }, prev, el('span', { class: 'pg-n', text: `${n} / ${total}` }), next);
+        // Always reachable: on screen and clear of the toolbar, even when the page fills the view
+        bar.style.left = Math.max(80, Math.min(innerWidth - 80, c.x)) + 'px';
+        bar.style.top = Math.max(70, Math.min(innerHeight - 110, c.y + r + 14)) + 'px';
+        for (const btn of [prev, next]) btn.addEventListener('pointerdown', (e) => { e.stopPropagation(); e.preventDefault(); if (!btn.disabled) setPdfPage(one.id, n + Number(btn.dataset.pg)); });
+        overlay.append(bar);
+      }
     } else {
       for (const id of ids) overlay.append(box(B.items.get(id), true));
       const bb = bbox(ids);
@@ -395,6 +421,7 @@
     clearTimeout(viewTimer);
     viewTimer = setTimeout(() => {
       pauseOffscreen();
+      refreshPdfs();
       if (B.project) try { localStorage.setItem('view:' + B.project.id, JSON.stringify(B.view)); } catch (_) {}
     }, 250);
   }
@@ -711,7 +738,7 @@
 
     if (hit) {
       const hitItem = B.items.get(hit);
-      const croppable = hitItem.type !== 'note' && hitItem.type !== 'draw' && hitItem.type !== 'section' && !hitItem.locked;
+      const croppable = hitItem.type !== 'note' && hitItem.type !== 'draw' && hitItem.type !== 'section' && hitItem.type !== 'file' && !hitItem.locked;
       // Shift+V and drag left or right: zoom the picture inside its crop
       if (B.held.has('v') && e.shiftKey && croppable && canEdit()) {
         B.sel = new Set([hit]);
@@ -1124,6 +1151,7 @@
     const it = id && B.items.get(id);
     if (it && it.type === 'note') editNote(id);
     else if (it && it.type === 'video') togglePlay(id);
+    else if (it && (it.type === 'file' || it.type === 'pdf')) openFile(id);
   });
 
   // Mouse wheel zooms like PureRef; trackpad two finger scroll pans, pinch zooms.
@@ -1330,7 +1358,157 @@
   }
 
   // ---------- adding media ----------
-  function measure(src, kind) {
+  // ---------- PDFs: one item, any page, sharp at any zoom ----------
+  let pdfLib = null;
+  const pdfjs = () => (pdfLib = pdfLib || import('./vendor/pdfjs/pdf.min.mjs').then((lib) => {
+    lib.GlobalWorkerOptions.workerSrc = './vendor/pdfjs/pdf.worker.min.mjs';
+    return lib;
+  }));
+  const pdfDocs = new Map(); // board + file -> loading document
+  function pdfDoc(src) {
+    const key = (B.project ? B.project.id : '') + '|' + src;
+    if (!pdfDocs.has(key)) {
+      const pid = B.project && B.project.id;
+      pdfDocs.set(key, (async () => {
+        const bytes = await api.mediaBytes(pid, src, 0, 'pdf');
+        if (!bytes) { pdfDocs.delete(key); throw new Error('missing'); }
+        const lib = await pdfjs();
+        return lib.getDocument({
+          data: new Uint8Array(bytes), isEvalSupported: false,
+          cMapUrl: './vendor/pdfjs/cmaps/', cMapPacked: true, standardFontDataUrl: './vendor/pdfjs/standard_fonts/',
+        }).promise;
+      })().catch((e) => { pdfDocs.delete(key); throw e; }));
+    }
+    return pdfDocs.get(key);
+  }
+  const pdfJobs = new Map(); // id -> { key, task }
+  let pdfQueued = new Set(), pdfTimer = null;
+  function queuePdf(id) {
+    pdfQueued.add(id);
+    if (!pdfTimer) pdfTimer = requestAnimationFrame(() => { pdfTimer = null; const ids = pdfQueued; pdfQueued = new Set(); for (const i of ids) renderPdf(i); });
+  }
+  async function renderPdf(id) {
+    const it = B.items.get(id), node = B.els.get(id);
+    if (!it || !node || it.type !== 'pdf') return;
+    const cv = node.querySelector('canvas.media');
+    if (!cv) return;
+    const d = dims(it);
+    // Pixels for how big the page shows right now, in steps so a small zoom doesn't redraw
+    const want = it.nw * d.k * B.view.s * (window.devicePixelRatio || 1);
+    const step = Math.pow(1.5, Math.ceil(Math.log(Math.max(64, want)) / Math.log(1.5)));
+    const scaleK = Math.min(step, 4096 * Math.min(1, it.nw / Math.max(it.nw, it.nh))) / it.nw;
+    const key = `${it.src}|${it.page || 1}|${Math.round(scaleK * 1000)}`;
+    const job = pdfJobs.get(id);
+    if (job && job.key === key) return;
+    if (job && job.task) try { job.task.cancel(); } catch (_) {}
+    const mine = { key, task: null };
+    pdfJobs.set(id, mine);
+    try {
+      const doc = await pdfDoc(it.src);
+      if (pdfJobs.get(id) !== mine) return;
+      const page = await doc.getPage(Math.min(doc.numPages, Math.max(1, it.page || 1)));
+      const base = page.getViewport({ scale: 1 });
+      const vp = page.getViewport({ scale: scaleK * (it.nw / base.width) });
+      const off = document.createElement('canvas');
+      off.width = Math.max(1, Math.round(vp.width)); off.height = Math.max(1, Math.round(vp.height));
+      const ctx = off.getContext('2d');
+      ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, off.width, off.height);
+      mine.task = page.render({ canvasContext: ctx, viewport: vp });
+      await mine.task.promise;
+      if (pdfJobs.get(id) !== mine) return;
+      // Swap in the finished page in one go, so it never flashes blank
+      cv.width = off.width; cv.height = off.height;
+      cv.getContext('2d').drawImage(off, 0, 0);
+      cv.dataset.drawn = key;
+      node.classList.remove('missing');
+    } catch (e) {
+      if (e && e.name === 'RenderingCancelledException') return;
+      if (pdfJobs.get(id) === mine) { pdfJobs.delete(id); node.classList.add('missing'); }
+    }
+  }
+  function refreshPdfs() {
+    const W = window.innerWidth, H = window.innerHeight;
+    for (const [id, node] of B.els) {
+      if (!node.classList.contains('pdf')) continue;
+      const r = node.getBoundingClientRect();
+      if (r.right < 0 || r.bottom < 0 || r.left > W || r.top > H) continue;
+      renderPdf(id);
+    }
+  }
+  // Turn to another page. The page keeps the width it has on the board.
+  async function setPdfPage(id, n) {
+    const it = B.items.get(id);
+    if (!it || it.type !== 'pdf' || !canEdit()) return;
+    try {
+      const doc = await pdfDoc(it.src);
+      const p = Math.min(doc.numPages, Math.max(1, n));
+      if (p === (it.page || 1)) return;
+      const vp = (await doc.getPage(p)).getViewport({ scale: 1 });
+      const cur = B.items.get(id);
+      if (!cur) return;
+      const before = [{ id, fields: pick(cur, ['page', 'nw', 'nh', 'crop', 'pages']) }];
+      commit([{ id, fields: { page: p, pages: doc.numPages, nw: Math.round(vp.width * 2), nh: Math.round(vp.height * 2), crop: { ...ZC } } }], before);
+      renderOverlay();
+    } catch (_) { toast("That PDF hasn't arrived on this computer yet.", true); }
+  }
+  function pdfStep(dir) {
+    const ids = selIds();
+    const it = ids.length === 1 && B.items.get(ids[0]);
+    if (!it || it.type !== 'pdf') return false;
+    setPdfPage(it.id, (it.page || 1) + dir);
+    return true;
+  }
+  // The page you're on, as a picture of its own beside the PDF
+  async function pdfPageAsPicture(id) {
+    const it = B.items.get(id);
+    if (!it || !canEdit()) return;
+    try {
+      const doc = await pdfDoc(it.src);
+      const page = await doc.getPage(it.page || 1);
+      const base = page.getViewport({ scale: 1 });
+      const vp = page.getViewport({ scale: Math.min(4, 3000 / Math.max(base.width, base.height)) });
+      const c = document.createElement('canvas');
+      c.width = Math.round(vp.width); c.height = Math.round(vp.height);
+      const ctx = c.getContext('2d');
+      ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, c.width, c.height);
+      await page.render({ canvasContext: ctx, viewport: vp }).promise;
+      const blob = await new Promise((r) => c.toBlob(r, 'image/png'));
+      const name = `${String(it.original || 'PDF').replace(/\.pdf$/i, '')} page ${it.page || 1}.png`;
+      const d = dims(it);
+      await addBytes([new File([blob], name, { type: 'image/png' })], { x: it.x + d.w + 40, y: it.y }, { exact: true, width: d.w });
+    } catch (_) { toast("Couldn't make a picture of that page.", true); }
+  }
+
+  // ---------- file cards: anything else, opening in its own app ----------
+  const sizeText = (n) => (n >= 1e9 ? (n / 1e9).toFixed(1) + ' GB' : n >= 1e6 ? (n / 1e6).toFixed(1) + ' MB' : n >= 1e3 ? Math.round(n / 1e3) + ' KB' : (n || 0) + ' bytes');
+  function fillCard(m, it) {
+    const key = [it.src, it.preview || '', it.original || ''].join('|');
+    if (m.dataset.key === key) return;
+    m.dataset.key = key;
+    m.innerHTML = '';
+    const ext = String(it.ext || (it.original || '').split('.').pop() || 'file').toUpperCase().slice(0, 6);
+    const top = el('div', { class: 'fc-top' });
+    if (it.preview) {
+      const img = el('img', { class: 'fc-pre', draggable: 'false', alt: '' });
+      img.onerror = () => { img.remove(); top.append(el('div', { class: 'fc-ext', text: ext })); };
+      img.src = mediaUrl(it.preview);
+      top.append(img);
+    } else top.append(el('div', { class: 'fc-ext', text: ext }));
+    m.append(top, el('div', { class: 'fc-foot' },
+      el('div', { class: 'fc-name', text: it.original || it.src }),
+      el('div', { class: 'fc-meta', text: `${ext}  ·  ${sizeText(it.size)}` })));
+  }
+  async function openFile(id) {
+    const it = B.items.get(id);
+    if (!it || !B.project) return;
+    const r = await api.openMedia(B.project.id, it.src, it.original);
+    if (r && r.error) toast(r.error, true);
+    else if (r && r.shown) toast('Shown in its folder. Files that run programs never open straight from a board.');
+  }
+
+  function measure(src, kind, r) {
+    if (kind === 'pdf') return pdfDoc(src).then(async (doc) => { const vp = (await doc.getPage(1)).getViewport({ scale: 1 }); return { nw: Math.round(vp.width * 2), nh: Math.round(vp.height * 2), pages: doc.numPages }; }).catch(() => ({ nw: 1224, nh: 1584, pages: 1, failed: true }));
+    if (kind === 'file') return Promise.resolve({ nw: 640, nh: 520 });
     return new Promise((resolve) => {
       const url = mediaUrl(src);
       if (kind === 'video') {
@@ -1369,8 +1547,8 @@
       ok.push({ r, m });
     }
     if (!ok.length || leftBoard(pid)) return [];
-    const sizes = ok.map(({ m }) => {
-      const f = Math.min(1, MAX_PLACE / Math.max(m.nw, m.nh));
+    const sizes = ok.map(({ r, m }) => {
+      const f = Math.min(1, (r.kind === 'file' ? 400 : r.kind === 'pdf' ? 700 : MAX_PLACE) / Math.max(m.nw, m.nh));
       return { w: (opts.width ? opts.width : m.nw * f), h: (opts.width ? opts.width * (m.nh / m.nw) : m.nh * f) };
     });
     const gap = 20;
@@ -1394,6 +1572,8 @@
         crop: { ...ZC }, rot: 0, flipX: false, flipY: false, gray: false, locked: false, deleted: false,
         z: ++z, created: Date.now(), addedBy: B.me.name,
         ...(r.kind === 'video' ? { vin: 0, vout: m.duration || r.duration || 0, loop: true, speed: 1 } : {}),
+        ...(r.kind === 'pdf' ? { page: 1, pages: m.pages || 1 } : {}),
+        ...(r.kind === 'file' ? { size: r.size || 0, ext: r.ext || '', preview: (r.preview && r.preview.src) || (r.reused ? (live().find((o) => o.src === r.src && o.preview) || {}).preview || null : null) } : {}),
       },
     }));
     commit(changes);
@@ -1830,7 +2010,7 @@
     v.muted = !unmute;
     syncVideoBar();
   }
-  function step(dir) { const id = activeVideoId(); const v = id && videoEl(id); if (v) { v.pause(); v.currentTime = Math.max(0, v.currentTime + dir / 30); } }
+  function step(dir) { if (pdfStep(dir)) return; const id = activeVideoId(); const v = id && videoEl(id); if (v) { v.pause(); v.currentTime = Math.max(0, v.currentTime + dir / 30); } }
   async function grabFrame() {
     const id = activeVideoId(); const v = id && videoEl(id);
     if (!v || !canEdit()) return;
@@ -2263,6 +2443,51 @@
           x.drawImage(img, c.l * iw, c.t * ih, iw * (1 - c.l - c.r), ih * (1 - c.t - c.b), 0, 0, d.w, d.h);
           x.restore();
         } else { missingN++; x.fillStyle = '#2A2927'; x.fillRect(0, 0, d.w, d.h); }
+      } else if (it.type === 'pdf') {
+        // The page as drawn on the board, sharpened for the export size first
+        x.globalAlpha = op;
+        if (it.gray) x.filter = 'grayscale(1)';
+        let pg = null;
+        try {
+          const doc = await pdfDoc(it.src);
+          const page = await doc.getPage(it.page || 1);
+          const base = page.getViewport({ scale: 1 });
+          const vp = page.getViewport({ scale: Math.min(4096 / Math.max(base.width, base.height), (it.nw * k * 1.2) / base.width) });
+          pg = document.createElement('canvas'); pg.width = Math.round(vp.width); pg.height = Math.round(vp.height);
+          const pc = pg.getContext('2d'); pc.fillStyle = '#fff'; pc.fillRect(0, 0, pg.width, pg.height);
+          await page.render({ canvasContext: pc, viewport: vp }).promise;
+        } catch (_) { pg = null; }
+        if (pg) {
+          const c = { ...ZC, ...(it.crop || {}) };
+          x.save();
+          x.translate(d.w / 2, d.h / 2); x.scale(it.flipX ? -1 : 1, it.flipY ? -1 : 1); x.translate(-d.w / 2, -d.h / 2);
+          x.drawImage(pg, c.l * pg.width, c.t * pg.height, pg.width * (1 - c.l - c.r), pg.height * (1 - c.t - c.b), 0, 0, d.w, d.h);
+          x.restore();
+        } else { missingN++; x.fillStyle = '#2A2927'; x.fillRect(0, 0, d.w, d.h); }
+      } else if (it.type === 'file') {
+        x.globalAlpha = op;
+        const u = d.w / 100; // the card is laid out in hundredths of its width
+        const foot = 18 * u;
+        x.fillStyle = '#232220'; x.fillRect(0, 0, d.w, d.h);
+        x.fillStyle = '#1b1a18'; x.fillRect(0, 0, d.w, d.h - foot);
+        let pre = null;
+        if (it.preview) pre = await loadImg({ ...it, type: 'image', src: it.preview });
+        const ext = String(it.ext || (it.original || '').split('.').pop() || 'file').toUpperCase().slice(0, 6);
+        if (pre) {
+          const ah = d.h - foot, f = Math.min(d.w / pre.naturalWidth, ah / pre.naturalHeight);
+          x.drawImage(pre, (d.w - pre.naturalWidth * f) / 2, (ah - pre.naturalHeight * f) / 2, pre.naturalWidth * f, pre.naturalHeight * f);
+        } else {
+          x.fillStyle = '#D7F04A'; x.font = `700 ${9 * u}px Inter, system-ui, sans-serif`; x.textAlign = 'center'; x.textBaseline = 'middle';
+          x.fillText(ext, d.w / 2, (d.h - foot) / 2); x.textAlign = 'left';
+        }
+        x.textBaseline = 'top';
+        x.fillStyle = '#F4F3EE'; x.font = `600 ${4.6 * u}px Inter, system-ui, sans-serif`;
+        let nm = String(it.original || it.src);
+        while (nm.length > 4 && x.measureText(nm).width > d.w - 8 * u) nm = nm.slice(0, -2);
+        if (nm !== String(it.original || it.src)) nm = nm.slice(0, -1) + '…';
+        x.fillText(nm, 4 * u, d.h - foot + 3.4 * u);
+        x.fillStyle = '#8F8D86'; x.font = `500 ${3.3 * u}px Inter, system-ui, sans-serif`;
+        x.fillText(`${ext}  ·  ${sizeText(it.size)}`, 4 * u, d.h - foot + 10 * u);
       } else if (it.type === 'draw') {
         const kk = d.k || (it.nw ? it.w / it.nw : 1);
         x.scale(kk, kk);
@@ -2355,6 +2580,16 @@
     const ed = !B.readOnly;
     const items = [];
     // Kept short like PureRef: the main actions on top, the rest in side menus
+    if (one && one.type === 'pdf') {
+      const n = one.page || 1, total = one.pages || 1;
+      items.push(
+        { label: 'Next page', key: 'Period', onClick: () => setPdfPage(one.id, n + 1), disabled: !ed || n >= total },
+        { label: 'Previous page', key: 'Comma', onClick: () => setPdfPage(one.id, n - 1), disabled: !ed || n <= 1 },
+        { label: 'Page as picture', onClick: () => pdfPageAsPicture(one.id), disabled: !ed },
+        { label: 'Open in its app', onClick: () => openFile(one.id) },
+        '-');
+    }
+    if (one && one.type === 'file') items.push({ label: 'Open', onClick: () => openFile(one.id) }, '-');
     if (one && one.type === 'video') {
       const v = videoEl(one.id);
       items.push(
@@ -2450,6 +2685,10 @@
     for (const svg of world.querySelectorAll('svg.live')) svg.remove();
     for (const node of B.els.values()) { const vv = node.querySelector('video'); if (vv) { vv.pause(); vv.removeAttribute('src'); vv.load(); } node.remove(); }
     B.els.clear(); B.items.clear(); B.sel.clear();
+    for (const j of pdfJobs.values()) if (j.task) try { j.task.cancel(); } catch (_) {}
+    pdfJobs.clear();
+    for (const d of pdfDocs.values()) d.then((doc) => doc.destroy()).catch(() => {});
+    pdfDocs.clear();
     B.project = null; B.editingId = null; B.gesture = null; B.pendingRemote = null; B.hoverId = null;
     draft = null; openRoot = null; thread.hidden = true; thread.innerHTML = ''; pins.innerHTML = '';
     for (const c of fetchCards.values()) { if (c.token) api.pluckCancel(c.token); c.node.remove(); }
@@ -2478,7 +2717,7 @@
   function toggleCropMode(on) {
     const ids = selIds();
     const it = ids.length === 1 && B.items.get(ids[0]);
-    const can = it && (it.type === 'image' || it.type === 'video') && !it.locked && canEdit();
+    const can = it && (it.type === 'image' || it.type === 'video' || it.type === 'pdf') && !it.locked && canEdit();
     B.cropMode = (on === undefined ? !B.cropMode : on) && can ? it.id : null;
     renderOverlay();
     return !!B.cropMode;
@@ -2493,7 +2732,7 @@
     copySelection, pasteInternal, pasteNative, pasteKey, deleteSelection, duplicate, toggleField, resetCrop, resetTransform, toggleCropMode, front, back,
     align, normalize, arrange, focusSelection, focusAll, focusStep, selectAll, clearSel, selIds,
     togglePlay, setInOut, toggleLoop, cycleSpeed, toggleMute, step, grabFrame, activeVideoId,
-    setTool, setGrid, setGrayCanvas, setLockedCanvas, binItems, restore, mediaUrl, contextMenu, live,
+    setTool, setGrid, setGrayCanvas, setLockedCanvas, binItems, restore, mediaUrl, contextMenu, live, setPdfPage, pdfStep, pdfPageAsPicture, openFile,
   });
   window.Board = B;
 })();

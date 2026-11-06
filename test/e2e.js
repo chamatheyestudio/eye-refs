@@ -912,6 +912,76 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     await win.evaluate(() => Board.clearSel());
   }
 
+
+  // ---------- PDFs and other files ----------
+  {
+    const SRCD = SRC;
+    const pdfId = await win.evaluate(async (f) => { const before = new Set(Board.items.keys()); await Board.addPaths([f]); return [...Board.items.keys()].find((k) => !before.has(k)); }, path.join(SRCD, 'brief.pdf'));
+    const drawn = (id, page) => win.waitForFunction(([i, p]) => { const n = Board.els.get(i); const c = n && n.querySelector('canvas.media'); return c && c.dataset.drawn && c.dataset.drawn.split('|')[1] === String(p); }, [id, page], { timeout: 20000 }).catch(() => {});
+    await drawn(pdfId, 1);
+    const colour = (id) => win.evaluate((i) => { const c = Board.els.get(i).querySelector('canvas.media'); const px = c.getContext('2d').getImageData(Math.round(c.width * 0.9), Math.round(c.height * 0.9), 1, 1).data; return [px[0], px[1], px[2]]; }, id);
+    const near = (a, b) => a.every((v, i) => Math.abs(v - b[i]) < 12);
+    const p1 = await win.evaluate((i) => { const it = Board.items.get(i); return { type: it.type, page: it.page, pages: it.pages, nw: it.nw, nh: it.nh }; }, pdfId);
+    const c1 = await colour(pdfId);
+    expect('a PDF comes in as one item with its pages', p1.type === 'pdf' && p1.pages === 3 && p1.page === 1 && near(c1, [255, 217, 102]), { p1, c1 });
+    await win.evaluate((i) => { Board.sel = new Set([i]); Board.focusSelection(); Board.render(); }, pdfId);
+    await sleep(400);
+    await win.screenshot({ path: `${OUT}/f1-pdf.png` });
+    const pill = await win.evaluate(() => { const b = document.querySelector('#overlay .pdf-pages'); if (!b) return null; const n = b.querySelector('[data-pg="1"]').getBoundingClientRect(); return { text: b.querySelector('.pg-n').textContent, x: n.left + n.width / 2, y: n.top + n.height / 2 }; });
+    expect('page arrows show under a selected PDF', pill && pill.text === '1 / 3', pill);
+    await win.mouse.click(pill.x, pill.y);
+    await win.waitForFunction((i) => Board.items.get(i).page === 2, pdfId, { timeout: 5000 }).catch(() => {});
+    await drawn(pdfId, 2);
+    const c2 = await colour(pdfId);
+    expect('the next arrow turns the page', await win.evaluate((i) => Board.items.get(i).page, pdfId) === 2 && near(c2, [153, 204, 255]), { c2 });
+    await win.evaluate(() => document.querySelector('#canvas').focus());
+    await win.keyboard.press('Period');
+    await win.waitForFunction((i) => Board.items.get(i).page === 3, pdfId, { timeout: 5000 }).catch(() => {});
+    const p3 = await win.evaluate((i) => { const it = Board.items.get(i); return { page: it.page, land: it.nw > it.nh }; }, pdfId);
+    expect('Period goes to the next page, and a wide page stays wide', p3.page === 3 && p3.land, p3);
+    await win.evaluate(() => Board.undo());
+    expect('undo goes back a page', await win.evaluate((i) => Board.items.get(i).page, pdfId) === 2);
+    // Sharp when zoomed in
+    const w0 = await win.evaluate((i) => Board.els.get(i).querySelector('canvas.media').width, pdfId);
+    await win.evaluate(() => { const v = Board.view; Board.zoomAt(innerWidth / 2, innerHeight / 2, 3); });
+    await sleep(900);
+    const w1 = await win.evaluate((i) => Board.els.get(i).querySelector('canvas.media').width, pdfId);
+    expect('the page redraws sharper when you zoom in', w1 > w0 * 1.8, { w0, w1 });
+    await win.evaluate((i) => { Board.sel = new Set([i]); Board.focusSelection(); }, pdfId);
+    // A page as its own picture
+    const nImg = await win.evaluate(() => Board.live().filter((i) => i.type === 'image').length);
+    await win.evaluate((i) => Board.pdfPageAsPicture(i), pdfId);
+    await win.waitForFunction((n) => Board.live().filter((i) => i.type === 'image').length > n, nImg, { timeout: 10000 }).catch(() => {});
+    const pic = await win.evaluate(() => { const it = Board.live().filter((i) => i.type === 'image').sort((a, b) => b.z - a.z)[0]; return { name: it.original, nw: it.nw }; });
+    expect('Page as picture adds the page as a picture', /page 2\.png$/.test(pic.name) && pic.nw > 1000, pic);
+    // Any other file: a card with its name, kind and size
+    const cards = await win.evaluate(async (fs) => { const before = new Set(Board.items.keys()); await Board.addPaths(fs); return [...Board.items.keys()].filter((k) => !before.has(k)); }, ['notes.txt', 'deck.key', 'setup.sh'].map((n) => path.join(SRCD, n)));
+    await sleep(400);
+    const cardInfo = await win.evaluate((ids) => ids.map((i) => { const it = Board.items.get(i); const n = Board.els.get(i); return { type: it.type, name: n.querySelector('.fc-name') && n.querySelector('.fc-name').textContent, meta: n.querySelector('.fc-meta') && n.querySelector('.fc-meta').textContent, ext: it.ext, size: it.size }; }), cards);
+    expect('other files come in as cards with name, kind and size', cardInfo.length === 3 && cardInfo.every((c) => c.type === 'file' && c.name && /·/.test(c.meta)) && cardInfo[1].name === 'deck.key' && /KEY/.test(cardInfo[1].meta) && cardInfo[1].size === 2048, cardInfo);
+    if (process.platform === 'darwin' || process.platform === 'win32') {
+      const pre = await win.evaluate((id) => { const it = Board.items.get(id); const im = Board.els.get(id).querySelector('.fc-pre'); return { preview: it.preview, shown: !!(im && im.naturalWidth) }; }, cards[0]);
+      expect('a text file gets a real preview from the computer', !!pre.preview, pre);
+    }
+    await win.evaluate((ids) => { Board.sel = new Set(ids); Board.focusSelection(); Board.render(); }, cards);
+    await sleep(300);
+    await win.screenshot({ path: `${OUT}/f2-cards.png` });
+    // On Linux, showing a folder starts a helper that outlives the test, so the rule is checked on its own there
+    if (process.platform !== 'linux') {
+      const opened = await win.evaluate(async (id) => { const it = Board.items.get(id); return window.eyerefs.openMedia(Board.project.id, it.src, it.original); }, cards[2]);
+      expect('a file that runs code is only shown in its folder, never opened', opened && opened.shown === true, opened);
+    } else {
+      const media = require('../main/media');
+      expect('a file that runs code is only shown in its folder, never opened', media.runsCode('setup.sh') && media.runsCode('Report.docm') && media.runsCode('noext') && !media.runsCode('deck.key') && !media.runsCode('brief.pdf'));
+    }
+    const sneaky = await win.evaluate(async () => window.eyerefs.openMedia(Board.project.id, '../../etc/passwd', 'x.txt'));
+    expect('a card can only open files inside its board', sneaky && sneaky.error, sneaky);
+    // They export with the board
+    const ex = await win.evaluate(async (ids) => { const r = await Board.renderExport(ids); return r && { w: r.w, h: r.h, missing: r.missing }; }, [pdfId, ...cards]);
+    expect('PDFs and cards export with the board', ex && ex.missing === 0 && ex.w > 100, ex);
+    await win.evaluate((ids) => { Board.sel = new Set(ids); Board.deleteSelection(); Board.clearSel(); }, [pdfId, ...cards]);
+    await win.evaluate(() => { const it = Board.live().filter((i) => i.type === 'image').sort((a, b) => b.z - a.z)[0]; Board.sel = new Set([it.id]); Board.deleteSelection(); Board.clearSel(); });
+  }
   await win.screenshot({ path: `${OUT}/03b-untitled.png` });
   // Share asks for a name first, then saves into Documents/Eye Refs
   await win.click('#share');

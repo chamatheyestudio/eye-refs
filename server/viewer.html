@@ -18,6 +18,13 @@
   .item .clip { position: absolute; inset: 0; overflow: hidden; }
   .item .media { position: absolute; display: block; max-width: none; pointer-events: none; -webkit-user-drag: none; }
   .item.gray .clip { filter: grayscale(1); }
+  .fcard { position: absolute; inset: 0; display: flex; flex-direction: column; background: #232220; border: 1px solid #34332f; border-radius: 14px; overflow: hidden; container-type: size; color: #F4F3EE; }
+  .fcard .fc-top { flex: 1; min-height: 0; display: grid; place-items: center; background: #1b1a18; overflow: hidden; }
+  .fcard .fc-pre { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
+  .fcard .fc-ext { font-weight: 700; font-size: 9cqw; letter-spacing: 0.06em; color: #D7F04A; padding: 0.6em 1em; border: 0.35cqw solid rgba(215, 240, 74, 0.5); border-radius: 0.5em; }
+  .fcard .fc-foot { padding: 3.2cqw 4cqw; display: flex; flex-direction: column; gap: 0.8cqw; }
+  .fcard .fc-name { font-size: 4.6cqw; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .fcard .fc-meta { font-size: 3.3cqw; color: #8F8D86; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .item .wait { position: absolute; inset: 0; background: #262523; }
   .item .wait::after { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, rgba(255,255,255,0.05), transparent); animation: shine 1.4s infinite; }
   @keyframes shine { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
@@ -175,6 +182,17 @@
         p.setAttribute('stroke-linecap', 'round'); p.setAttribute('stroke-linejoin', 'round');
         if (it.style === 'dotted') p.setAttribute('stroke-dasharray', '0 ' + (it.sw || 4) * 2);
         svg.appendChild(p); node.appendChild(svg);
+      } else if (it.type === 'pdf' || it.type === 'file') {
+        // A card: the file's preview (if it has one), its name and kind
+        var ext = String(it.type === 'pdf' ? 'pdf' : (it.ext || String(it.original || '').split('.').pop() || 'file')).toUpperCase().slice(0, 6);
+        var card = el('div', 'fcard');
+        var top = el('div', 'fc-top'); var badge = el('div', 'fc-ext'); badge.textContent = ext; top.appendChild(badge);
+        var foot = el('div', 'fc-foot');
+        var nm = el('div', 'fc-name'); nm.textContent = it.original || it.src;
+        var meta = el('div', 'fc-meta'); meta.textContent = it.type === 'pdf' ? ((it.pages || 1) + (it.pages > 1 ? ' pages' : ' page') + '  ·  open the board in Eye Refs to read it') : ext + '  ·  in the board in Eye Refs';
+        foot.appendChild(nm); foot.appendChild(meta); card.appendChild(top); card.appendChild(foot);
+        node.appendChild(card);
+        if (it.type === 'file' && it.preview) it._preview = top;
       } else {
         var c = it.crop || { l: 0, t: 0, r: 0, b: 0 };
         var clip = el('div', 'clip');
@@ -220,9 +238,17 @@
   function loadAll(media) {
     var queue = items.filter(function (it) { return it.type === 'image' || it.type === 'video'; });
     var cache = {};
+    // File card previews come in the same way, shown inside their card
+    items.forEach(function (it) { if (it._preview) queue.push({ type: 'image', src: it.preview, _card: it._preview }); });
     function worker() {
       var it = queue.shift();
       if (!it) return Promise.resolve();
+      if (it._card) {
+        var psize = media[it.src];
+        if (psize == null || psize > MAX_PREVIEW) return worker();
+        var pp = cache[it.src] || (cache[it.src] = fetchFile(it.src, psize));
+        return pp.then(function (url) { var im = el('img', 'fc-pre'); im.src = url; it._card.innerHTML = ''; it._card.appendChild(im); }, function () {}).then(worker);
+      }
       var size = media[it.src];
       if (size == null) { showBig(it, 'Still uploading'); return worker(); }
       if (size > MAX_PREVIEW) { showBig(it, it.type === 'video' ? 'This video is too big to preview here. Open the board in Eye Refs.' : 'Too big to preview here'); return worker(); }

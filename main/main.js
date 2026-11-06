@@ -722,6 +722,18 @@ handle('pluck:get', () => { shell.openExternal(pluck.GET_PLUCK); return true; })
 handle('pluck:installed', () => pluck.installed());
 
 // Media as bytes for an export (a video gives the frame showing now)
+// A file card opens in its own app. Anything that could run code is only shown
+// in its folder, so a shared board can never start a program on this computer.
+handle('media:open', async (projectId, src, original) => {
+  if (!session || session.rec.id !== projectId) return { error: 'That board is closed.' };
+  let file;
+  try { file = media.inMedia(session.mediaDir, src); } catch (e) { return { error: e.message }; }
+  if (!(await exists(file))) return { error: "That file hasn't arrived on this computer yet." };
+  if (media.runsCode(src) || media.runsCode(original || src)) { shell.showItemInFolder(file); return { shown: true }; }
+  const err = await shell.openPath(file);
+  return err ? { error: "This computer doesn't have an app for that file." } : { opened: true };
+});
+
 handle('media:bytes', async (projectId, src, time, kind) => {
   if (!session || session.rec.id !== projectId) return null;
   const file = path.join(session.mediaDir, path.basename(String(src || '')));
@@ -777,7 +789,7 @@ handle('dialog:openImages', async () => {
   const r = await dialog.showOpenDialog(win, {
     title: 'Add images and videos',
     properties: ['openFile', 'multiSelections'],
-    filters: [{ name: 'Images and videos', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'bmp', 'svg', 'heic', 'heif', 'tif', 'tiff', 'mp4', 'm4v', 'mov', 'webm', 'mkv', 'avi', 'wmv', 'mts', 'm2ts', '3gp'] }],
+    filters: [{ name: 'Images, videos and PDFs', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'bmp', 'svg', 'heic', 'heif', 'tif', 'tiff', 'mp4', 'm4v', 'mov', 'webm', 'mkv', 'avi', 'wmv', 'mts', 'm2ts', '3gp', 'pdf'] }, { name: 'All files', extensions: ['*'] }],
   });
   return r.canceled ? [] : r.filePaths;
 });

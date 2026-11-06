@@ -55,6 +55,7 @@ contextBridge.exposeInMainWorld('eyerefs', {
   write: call('board:write'),
   flush: call('board:flush'),
   importPaths: call('media:importPaths'),
+  openMedia: call('media:open'),
   importBytes: call('media:importBytes'),
   importUrl: call('media:importUrl'),
   readClipboard: call('clipboard:read'),

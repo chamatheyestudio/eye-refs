@@ -52,6 +52,36 @@ function kindOf(name) {
   return null;
 }
 
+// Anything can go on a board: pictures and videos show as they are, a PDF gets
+// its pages, and every other file becomes a card that opens in its own app.
+function kindForImport(name) {
+  return kindOf(name) || (extOf(name) === 'pdf' ? 'pdf' : 'file');
+}
+
+// Files that run something when opened. On a shared board they are only ever
+// shown in their folder, never opened straight from the board.
+const RUNS_CODE = new Set(['exe', 'msi', 'msix', 'appx', 'bat', 'cmd', 'com', 'scr', 'pif', 'cpl', 'ps1', 'psm1', 'vbs', 'vbe', 'js', 'jse', 'wsf', 'wsh', 'hta', 'lnk', 'url', 'reg', 'jar', 'sh', 'bash', 'zsh', 'command', 'tool', 'app', 'pkg', 'mpkg', 'dmg', 'scpt', 'applescript', 'workflow', 'py', 'pyw', 'rb', 'pl', 'php', 'apk', 'deb', 'rpm', 'run', 'bin', 'elf', 'out', 'xll', 'docm', 'xlsm', 'pptm', 'dotm', 'xlam', 'ppam', 'iso', 'img', 'vhd', 'vhdx', 'library-ms', 'settingcontent-ms', 'desktop', 'appimage']);
+const runsCode = (name) => RUNS_CODE.has(extOf(name)) || !extOf(name);
+
+// A preview of the first page, made by the computer the way Finder or
+// File Explorer makes theirs. Not every computer or file has one.
+async function filePreview(file, mediaDir, original, initials) {
+  if (process.platform !== 'darwin' && process.platform !== 'win32') return null;
+  try {
+    const { nativeImage } = require('electron');
+    const img = await nativeImage.createThumbnailFromPath(file, { width: 800, height: 800 });
+    if (!img || img.isEmpty()) return null;
+    const { name, p } = await uniqueMediaPath(mediaDir, original.replace(/\.[^.]*$/, '') + ' preview', initials, 'png');
+    const part = path.join(mediaDir, `.${name}.${randCode(5)}.part`);
+    await fsp.writeFile(part, img.toPNG());
+    await fsp.rename(part, p);
+    const sz = img.getSize();
+    return { src: name, w: sz.width, h: sz.height };
+  } catch (_) {
+    return null;
+  }
+}
+
 // Fast content fingerprint: size plus the first and last megabyte.
 async function quickHash(file) {
   const st = await fsp.stat(file);
@@ -246,17 +276,26 @@ async function convertImage(src, dest) {
 // Import one file from disk into the project. known: Map(hash -> src) for reuse.
 async function importFile(mediaDir, file, me, known, onProgress, asName) {
   const original = asName || path.basename(file);
-  const kind = kindOf(original);
-  if (!kind) return { error: `${original} isn't an image or video Eye Refs can open.` };
+  const kind = kindForImport(original);
+  const st0 = await fsp.stat(file);
+  if (!st0.isFile()) return { error: `${original} is a folder. Drop the files inside it instead.` };
   const hash = await quickHash(file);
   const reuse = known && known.has(hash) && safeSrc(known.get(hash));
-  if (reuse && (await exists(path.join(mediaDir, reuse)))) {
-    return { kind, src: reuse, hash, reused: true, original };
+  if (reuse && (await exists(path.join(mediaDir, reuse))) && kindForImport(reuse) === kind) {
+    return { kind, src: reuse, hash, reused: true, original, size: st0.size, ext: extOf(original) };
   }
   // The board's media folder must already exist. Never recreate it: if the board
   // was removed while this import ran, the file has nowhere to go.
   if (!(await exists(mediaDir))) throw new Error('That board was closed before the file finished.');
   const ext = extOf(original);
+
+  if (kind === 'pdf' || kind === 'file') {
+    // Kept exactly as it is, with its own extension so it opens in the right app
+    const { name, p } = await uniqueMediaPath(mediaDir, original, me.initials, ext || 'bin');
+    await copyAtomic(file, p);
+    const preview = kind === 'file' ? await filePreview(p, mediaDir, original, me.initials) : null;
+    return { kind, src: name, hash, original, size: st0.size, ext, preview };
+  }
 
   if (kind === 'image') {
     if (CONVERT_IMAGE_EXT.has(ext)) {
@@ -379,4 +418,4 @@ async function grabFrame(mediaDir, src, time, me) {
 }
 
 module.exports = {
-  palette, frameBytes, fullSizeUrl, safeSrc, inMedia, importFile, importBytes, importUrl, grabFrame, kindOf, quickHash, probeInfo, COMPRESS_OVER_BYTES, ffmpegPath };
+  kindForImport, runsCode, palette, frameBytes, fullSizeUrl, safeSrc, inMedia, importFile, importBytes, importUrl, grabFrame, kindOf, quickHash, probeInfo, COMPRESS_OVER_BYTES, ffmpegPath };
