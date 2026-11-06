@@ -1202,6 +1202,41 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const openingGone = await win.evaluate(() => !document.body.classList.contains('is-opening'));
   expect('switching boards shows what is opening, then clears', !slowed || (openingSeen && openingSeen.on && openingSeen.text === 'Spring Campaign' && openingGone), { slowed, openingSeen, openingGone });
   expect('leaving an unsaved board asks, and Don\'t save removes it', startGone && asked && unsavedLeft === 0, { startGone, asked, unsavedLeft });
+  // ---------- deleting boards ----------
+  {
+    const rowOf = (name) => win.evaluate((n) => { const r = [...document.querySelectorAll('#tree .row')].find((x) => x.querySelector('.name') && x.querySelector('.name').textContent === n); if (!r) return null; const b = r.getBoundingClientRect(); return { x: b.left + 40, y: b.top + b.height / 2 }; }, name);
+    const menuItems = () => win.evaluate(() => [...document.querySelectorAll('#menu button')].map((b) => b.textContent.trim()));
+    // A board of your own goes to the Trash
+    // Made behind the app's back, so open the current board again in the main process
+    await win.evaluate(async () => { const cur = Board.project.id; await window.eyerefs.createProject('Throwaway'); await window.eyerefs.openProject(cur); });
+    await win.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await win.waitForFunction(() => [...document.querySelectorAll('#tree .row .name')].some((n) => n.textContent === 'Throwaway'), null, { timeout: 8000 }).catch(() => {});
+    let row = await rowOf('Throwaway');
+    if (!row) { await win.keyboard.press('Escape'); await sleep(200); row = await rowOf('Throwaway'); }
+    await win.mouse.click(row.x, row.y, { button: 'right' });
+    await sleep(200);
+    const items1 = await menuItems();
+    expect('right clicking a board in the sidebar opens its menu', items1.includes('Pin to top') && items1.includes('Rename') && items1.includes('Delete board'), items1);
+    await win.click('#menu >> text=Delete board');
+    await win.waitForSelector('#modalWrap:not([hidden]) >> text=Delete "Throwaway"?');
+    const askText = await win.evaluate(() => document.querySelector('#modalWrap p').textContent);
+    await win.click('#modalWrap >> button.danger');
+    await win.waitForFunction(() => ![...document.querySelectorAll('#tree .row .name')].some((n) => n.textContent === 'Throwaway'), null, { timeout: 10000 }).catch(() => {});
+    const throwDir = path.join(tmp, 'Documents', 'Eye Refs', 'Throwaway');
+    expect('deleting your own board moves it to the Trash', !fs.existsSync(throwDir) && /Trash|Recycle Bin/.test(askText) && !(await rowOf('Throwaway')), { askText, still: fs.existsSync(throwDir) });
+    // A board shared with you: you leave it, everyone else keeps it
+    row = await rowOf('Brunch Edit');
+    await win.mouse.click(row.x, row.y, { button: 'right' });
+    await sleep(200);
+    const items2 = await menuItems();
+    await win.click('#menu >> text=Leave board');
+    await win.waitForSelector('#modalWrap:not([hidden]) >> text=Leave "Brunch Edit"?');
+    await win.click('#modalWrap >> text=Leave and remove');
+    await win.waitForFunction(() => ![...document.querySelectorAll('#tree .row .name')].some((n) => n.textContent === 'Brunch Edit'), null, { timeout: 10000 }).catch(() => {});
+    const stillMember = gas.call({ action: 'projects.members', token: tB, id: 'nousaiba-board-0001' }).data.members.map((m) => m.email);
+    expect('leaving a shared board removes you only; the owner keeps it', items2.includes('Leave board') && !stillMember.includes('chamath@eyestudio.ae') && stillMember.length >= 1 && !(await rowOf('Brunch Edit')), { items2, stillMember });
+    await win.screenshot({ path: `${OUT}/d1-after-delete.png` });
+  }
   const result = await win.evaluate((fresh) => ({ fresh, items: Board.live().length, status: document.querySelector('#tStatus').textContent, rows: [...document.querySelectorAll('#tree .row')].map((r) => r.textContent) }), fresh);
   await syncB.stop(); await sB.close();
   await app.close();

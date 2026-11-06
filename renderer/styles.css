@@ -591,3 +591,10 @@ body.ui-hidden #pins { display: none; }
 .file-card .fc-foot { padding: 3.2cqw 4cqw; display: flex; flex-direction: column; gap: 0.8cqw; }
 .file-card .fc-name { font-size: 4.6cqw; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .file-card .fc-meta { font-size: 3.3cqw; color: var(--muted); letter-spacing: 0.02em; }
+
+/* Deleting: a warm red, used only where something leaves for good */
+.menu button.danger:not(:disabled) { color: #FF8A7A; }
+.menu button.danger:not(:disabled):hover, .menu button.danger:not(:disabled):focus-visible { background: rgba(255, 110, 90, 0.12); }
+.btn.danger { background: #FF6E5A; color: #141414; }
+.btn.danger:hover { background: #FF8A7A; }
+.btn.danger:disabled { opacity: 0.6; }

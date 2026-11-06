@@ -60,7 +60,7 @@
     for (const it of items) {
       if (!it) continue;
       if (it === '-') { if (m.lastChild && m.lastChild.tagName !== 'HR') m.append(el('hr')); continue; }
-      const b = el('button', { role: 'menuitem', disabled: it.disabled, 'aria-haspopup': it.sub ? 'menu' : null },
+      const b = el('button', { role: 'menuitem', class: it.danger ? 'danger' : null, disabled: it.disabled, 'aria-haspopup': it.sub ? 'menu' : null },
         el('span', null, it.checked ? el('span', { class: 'check', text: '✓ ' }) : null, it.label),
         it.sub ? el('span', { class: 'k sub', text: '›' }) : it.key ? el('span', { class: 'k', text: keyLabel(it.key) }) : null);
       if (it.sub) {

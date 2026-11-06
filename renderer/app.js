@@ -241,10 +241,12 @@
         pr.append(pinBtn);
         pr.addEventListener('contextmenu', (e) => {
           e.preventDefault();
-          openMenu(e.clientX, e.clientY, [
+          openMenu([
             { label: isPinned ? 'Unpin' : 'Pin to top', onClick: () => togglePin(p.id) },
             { label: 'Rename', onClick: () => { if (p.cloudOnly || (!p.mine && !p.scratch)) return toast('Only the owner can rename this board.', true); renameInline(pr.querySelector('.name'), p); } },
-          ]);
+            '-',
+            { label: p.shared && !p.mine ? 'Leave board' : 'Delete board', danger: true, onClick: () => deleteModal(p) },
+          ], e.clientX, e.clientY);
         });
         // One click opens, a double click renames in place
         let clickTimer = null;
@@ -764,6 +766,7 @@
         ] },
         { label: 'Share', onClick: () => shareModal(), disabled: S.readOnly },
         { label: 'Show in folder', onClick: () => api.reveal(), disabled: cur && cur.scratch },
+        { label: cur && cur.shared && !cur.mine ? 'Leave board' : 'Delete board', danger: true, disabled: !cur || cur.scratch, onClick: () => deleteModal(S.projects.find((x) => x.id === cur.id) || cur) },
         '-',
         { label: `Bin (${B.binItems().length})`, onClick: () => B.onChange('bin') },
       ] },
@@ -1091,6 +1094,42 @@
   // PureRef style: start on a blank untitled board, name it when saving.
   // Leaving an untitled board with something on it always asks first, so
   // unsaved boards never pile up.
+  // Delete a board, with a clear word on where it goes and who it affects
+  function deleteModal(p) {
+    if (!p) return;
+    const shared = !!p.shared;
+    const owns = !!p.mine;
+    const name = p.name || 'Untitled';
+    const title = shared && !owns ? `Leave "${name}"?` : `Delete "${name}"?`;
+    const text = !shared
+      ? `It moves to your computer's ${IS_MAC ? 'Trash' : 'Recycle Bin'}, so you can still get it back from there.`
+      : owns
+        ? `Everyone it's shared with loses it too. It goes to the trash in ${p.mine ? 'your' : "the owner's"} Google Drive, where it can be brought back for 30 days.`
+        : `You leave the board and it's removed from this computer. Everyone else keeps it, and the owner can share it with you again.`;
+    const go = async (btn, close) => {
+      btn.disabled = true; btn.textContent = shared && !owns ? 'Leaving' : 'Deleting';
+      const isOpen = S.current && S.current.id === p.id;
+      if (isOpen) { B.unload(); S.current = null; openResult(await api.newBoard()); }
+      const r = await api.deleteBoard(p.id, shared && owns ? 'everyone' : 'leave');
+      close();
+      if (r && r.error) { toast(r.error, true); if (isOpen) switchTo(p.id); }
+      else {
+        if (S.pins && S.pins.includes(p.id)) S.pins = S.pins.filter((x) => x !== p.id);
+        toast(shared && !owns ? `You left ${name}.` : `${name} deleted.`);
+      }
+      rescan(); renderStart();
+    };
+    openModal((close) => {
+      const del = el('button', { class: 'btn danger', text: shared && !owns ? 'Leave and remove' : shared ? 'Delete for everyone' : 'Delete' });
+      del.onclick = () => go(del, close);
+      return [
+        el('h2', { text: title }),
+        el('p', { text }),
+        el('div', { class: 'actions' }, el('button', { class: 'btn ghost', text: 'Cancel', onclick: close }), del),
+      ];
+    });
+  }
+
   function confirmLeave(go) {
     const cur = S.current;
     if (!(cur && cur.scratch && B.live().length && !S.readOnly)) return go();
@@ -1207,6 +1246,17 @@
         el('span', { class: 'nm', text: b.name }),
         el('span', { class: 'when', text: b.scratch ? 'Not saved' : ago(b.modified) }));
       c.onclick = () => switchTo(b.id);
+      c.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        const p = S.projects.find((x) => x.id === b.id) || b;
+        const pinned = (S.pins || []).includes(b.id);
+        openMenu([
+          { label: 'Open', onClick: () => switchTo(b.id) },
+          { label: pinned ? 'Unpin' : 'Pin to top', onClick: () => togglePin(b.id) },
+          '-',
+          { label: p.shared && !p.mine ? 'Leave board' : 'Delete board', danger: true, onClick: () => deleteModal(p) },
+        ], e.clientX, e.clientY);
+      });
       return c;
     };
     // A New board tile first, then four recent boards in the same row. The rest open below.

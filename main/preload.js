@@ -24,6 +24,7 @@ contextBridge.exposeInMainWorld('eyerefs', {
   versionSave: call('versions:save'),
   versionGet: call('versions:get'),
   versionDelete: call('versions:delete'),
+  deleteBoard: call('projects:delete'),
   pluckFetch: call('pluck:fetch'),
   pluckCancel: call('pluck:cancel'),
   pluckCleanup: call('pluck:cleanup'),

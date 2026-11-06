@@ -241,6 +241,9 @@ async function allProjects(online = true) {
   const fresh = online && remote.length ? news(remote) : null;
   const byShared = new Map(local.filter((p) => p.shared).map((p) => [p.shared.id, p]));
   for (const r of remote) {
+    // A board you left stays out of your list, even as an admin, until it's shared with you again
+    const left = settings.left && settings.left[r.id];
+    if (left && !(r.sharedAt && r.sharedAt > left)) continue;
     const l = byShared.get(r.id) || local.find((p) => p.id === r.id);
     if (l) {
       Object.assign(l, { shared: l.shared || { id: r.id }, role: r.role, requests: r.requests, members: r.members, ownerName: r.ownerName });
@@ -454,6 +457,49 @@ handle('projects:discard', (id) => serial(async () => {
   const p = (await lib.scanProjects(SCRATCH(), me)).find((x) => x.id === id);
   if (!p || importing.has(id)) return { ok: false };
   await fsp.rm(p.dir, { recursive: true, force: true });
+  return { ok: true };
+}));
+
+// Delete a board. Never permanent: a board on this computer goes to the Trash
+// (or a Deleted boards folder if there's no Trash), and a shared board the owner
+// deletes goes to the Trash in their Google Drive. Someone it was shared with
+// only leaves it; everyone else keeps it.
+handle('projects:delete', (id, mode) => serial(async () => {
+  if (session && session.rec.id === id) return { error: 'Close the board first.' };
+  if (importing.has(id)) return { error: "It's still being saved. Try again in a moment." };
+  const all = await allProjects(true);
+  const p = all.find((x) => x.id === id);
+  if (!p) return { error: "That board isn't here any more." };
+  if (p.shared) {
+    try {
+      if (mode === 'everyone') {
+        if (!p.mine) return { error: 'Only the owner can delete this board for everyone.' };
+        await cloud.call('projects.delete', { id: p.shared.id });
+      } else if (!p.mine) {
+        await cloud.call('projects.remove', { id: p.shared.id, email: me.email });
+        settings.left = { ...(settings.left || {}), [p.shared.id]: Date.now() };
+        saveSettings();
+      } else return { error: 'Choose how to delete a shared board.' };
+    } catch (e) {
+      return { error: (e && e.message) || "Couldn't reach the server. Check your connection and try again." };
+    }
+  }
+  if (p.dir && (await exists(p.dir))) {
+    let moved = false;
+    try { await shell.trashItem(p.dir); moved = true; } catch (_) {}
+    if (!moved) {
+      // No Trash on this computer: keep it in the app's own Deleted boards folder
+      const bin = path.join(app.getPath('userData'), 'Deleted boards');
+      await fsp.mkdir(bin, { recursive: true });
+      const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+      await fsp.rename(p.dir, path.join(bin, `${path.basename(p.dir)} ${stamp}`)).catch(async () => {
+        await fsp.cp(p.dir, path.join(bin, `${path.basename(p.dir)} ${stamp}`), { recursive: true });
+        await fsp.rm(p.dir, { recursive: true, force: true });
+      });
+    }
+  }
+  if (Array.isArray(settings.pins) && settings.pins.includes(id)) { settings.pins = settings.pins.filter((x) => x !== id); saveSettings(); }
+  if (settings.boardWin && settings.boardWin[id]) { delete settings.boardWin[id]; saveSettings(); }
   return { ok: true };
 }));
 
