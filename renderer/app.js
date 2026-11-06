@@ -1200,19 +1200,33 @@
     if (g !== startGen || !r || r.error) return;
     const cards = $('#startCards');
     cards.innerHTML = '';
-    for (const b of r.boards) {
+    const card = (b) => {
       const c = el('button', { class: 'start-card', title: b.name },
         miniBoard(b.shapes),
         el('span', { class: 'nm', text: b.name }),
         el('span', { class: 'when', text: b.scratch ? 'Not saved' : ago(b.modified) }));
       c.onclick = () => switchTo(b.id);
-      cards.append(c);
-    }
-    $('#startRecent').hidden = !r.boards.length;
+      return c;
+    };
+    // Four recent boards, then a New board tile in the same row. The rest open below.
+    const boards = r.boards;
+    for (const b of boards.slice(0, 4)) cards.append(card(b));
+    const add = el('button', { class: 'start-card start-new', id: 'startNew', title: 'New board' },
+      el('span', { class: 'mini' }, el('span', { class: 'plus', html: window.ICONS.plus })),
+      el('span', { class: 'nm', text: 'New board' }),
+      el('span', { class: 'when', text: 'Name it and start' }));
+    // Name a new board straight away, instead of starting as Untitled
+    add.onclick = () => saveModal();
+    cards.append(add);
+    const more = $('#startMore');
+    more.hidden = boards.length <= 4;
+    more.querySelector('.lbl').textContent = S.startAll ? 'Fewer' : `All recent (${boards.length})`;
+    more.setAttribute('aria-expanded', S.startAll ? 'true' : 'false');
+    $('#startRecent').classList.toggle('open', !!S.startAll);
+    if (S.startAll) for (const b of boards.slice(4)) cards.append(card(b));
+    $('#startRecent').querySelector('h3').textContent = boards.length ? 'Recent' : 'Start a board';
   }
-  // Name a new board straight away, instead of starting as Untitled
-  $('#startNew').onclick = () => saveModal();
-  $('#startBrowse').onclick = () => { S.sidebar = true; S.browse = true; applySide(); api.setSidebarPref(true); };
+  $('#startMore').onclick = () => { S.startAll = !S.startAll; renderStart(); };
   $('#startOpen').onclick = async () => { const f = await api.openFileDialog(); if (f) confirmLeave(async () => openResult(await api.openProjectFile(f))); };
 
   function saveModal(then) {
