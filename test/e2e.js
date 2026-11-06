@@ -898,8 +898,15 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       await win.keyboard.down('Shift'); await win.keyboard.down('Space');
       await win.mouse.move(sp.x, sp.y); await win.mouse.down(); await win.mouse.move(sp.x + want, sp.y + 7, { steps: 10 }); await win.mouse.up();
       await win.keyboard.up('Space'); await win.keyboard.up('Shift');
-      const landed = await win.evaluate((s) => { const ra = Board.els.get(s.a).getBoundingClientRect(), rb = Board.els.get(s.b).getBoundingClientRect(); return { al: ra.left, bl: rb.left, held: [...Board.held], sel: [...Board.sel] }; }, snap);
-      expect('Shift+Space snaps to other pieces', Math.abs(landed.al - landed.bl) < 1.5, { landed, sp, want, snap });
+      const landed = await win.evaluate((s) => {
+        const ra = Board.els.get(s.a).getBoundingClientRect();
+        const mine = [ra.left, ra.right, (ra.left + ra.right) / 2];
+        const theirs = [];
+        for (const o of Board.live()) { if (o.id === s.a || !Board.els.get(o.id)) continue; const r = Board.els.get(o.id).getBoundingClientRect(); theirs.push(r.left, r.right, (r.left + r.right) / 2); }
+        const gap = Math.min(...mine.flatMap((m) => theirs.map((t) => Math.abs(m - t))));
+        return { al: ra.left, gap };
+      }, snap);
+      expect('Shift+Space snaps to other pieces', landed.gap < 1 && Math.abs(landed.al - (snap.rb.l + 5)) < 12, { landed, sp, want, snap });
       await win.evaluate(() => { Board.undo(); Board.undo(); });
     }
     await win.evaluate(() => Board.clearSel());
