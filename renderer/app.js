@@ -1194,7 +1194,8 @@
     const show = !!(S.current && S.current.scratch && !S.readOnly);
     $('#start').hidden = !show;
     applySide();
-    if (!show) return;
+    // Always opens on the short view: New board plus four recent
+    if (!show) { S.startAll = false; return; }
     const g = ++startGen;
     const r = await api.recent();
     if (g !== startGen || !r || r.error) return;

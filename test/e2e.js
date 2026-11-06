@@ -1089,6 +1089,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const startNewBtn = await win.evaluate(() => { const b = document.querySelector('#startNew'); return !!b && getComputedStyle(b).display !== 'none' && b.getBoundingClientRect().width > 40; });
   expect('the start screen has a New board button', startNewBtn);
   const tiles = await win.evaluate(() => { const cs = [...document.querySelectorAll('#startCards .start-card')]; const n = document.querySelector('#startNew'); const r0 = cs[0].getBoundingClientRect(), rn = n.getBoundingClientRect(); return { count: cs.length, newIndex: cs.indexOf(n), sameRow: Math.abs(r0.top - rn.top) < 2, more: !document.querySelector('#startMore').hidden }; });
+  expect('start screen opens on the short view', await win.evaluate(() => !document.querySelector('#startRecent').classList.contains('open')));
   expect('New board is the first tile, beside up to four recent boards', tiles.newIndex === 0 && tiles.sameRow && tiles.count <= 5, tiles);
   await win.evaluate(() => { const c = document.querySelector('#startCards'); const f = c.querySelector('.start-card:not(.start-new)'); for (let i = 0; i < 7; i++) c.append(f.cloneNode(true)); document.querySelector('#startMore').hidden = false; document.querySelector('#startMore .lbl').textContent = 'Fewer'; document.querySelector('#startRecent').classList.add('open'); });
   await win.screenshot({ path: `${OUT}/s2-start-open.png` });
