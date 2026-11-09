@@ -25,6 +25,9 @@ jobs:
         with: { node-version: 22 }
       - run: npm ci
       - run: npm i --no-save playwright@1.63.0
+      - name: LibreOffice on Linux, for decks and documents
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends libreoffice-impress libreoffice-writer libreoffice-calc
       - run: node test/make-media.js
       - name: Unit and server tests
         run: npm test

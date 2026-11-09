@@ -7,6 +7,7 @@ const { readJson, writeJson, exists } = require('./fsutil');
 const { mergeFiles } = require('../shared/merge');
 const lib = require('./library');
 const media = require('./media');
+const office = require('./office');
 const pluck = require('./pluck');
 const { Session } = require('./session');
 const { Cloud } = require('./cloud');
@@ -672,6 +673,87 @@ handle('media:importPaths', async (projectId, paths) => {
     send('import:progress', { ...job, done: true });
   }
   return out;
+  });
+});
+
+// ---------- decks and documents, page by page ----------
+handle('doc:get', () => { shell.openExternal(office.GET_LIBREOFFICE); return true; });
+handle('doc:can', (name) => office.isOffice(name) ? { office: true, can: office.canConvert(name), getUrl: office.GET_LIBREOFFICE } : { office: false });
+
+// Turn a deck or document already on the board into pages, and take out its
+// videos with the spot each one sits on its slide.
+handle('doc:pages', async (projectId, src, original) => {
+  const s = sessionFor(projectId);
+  if (s.readOnly) return { error: 'This project is view only.' };
+  let file;
+  try { file = media.inMedia(s.mediaDir, src); } catch (e) { return { error: e.message }; }
+  if (!(await exists(file))) return { error: "That file hasn't arrived on this computer yet." };
+  if (media.runsCode(src)) return { error: "Files that can run code aren't opened." };
+  return tracked(s.rec, async () => {
+    const work = path.join(app.getPath('temp'), 'eye-refs-doc', Math.random().toString(36).slice(2, 10));
+    try {
+      // A plain copy with its proper name, so the converter knows what it is
+      const ext = office.extOf(src);
+      const base = String(path.basename(original || '') || 'document').replace(/[\\/:*?"<>|]/g, '_').replace(/\.[^.]*$/, '').slice(0, 80) + '.' + ext;
+      const inDir = path.join(work, 'in');
+      await fsp.mkdir(inDir, { recursive: true });
+      const copy = path.join(inDir, base);
+      await fsp.copyFile(file, copy);
+      const conv = await office.toPdf(copy, path.join(work, 'out'), path.join(app.getPath('userData'), 'office-profile'));
+      if (!conv.pdf) return conv;
+      const known = knownHashes();
+      const pdf = await media.importFile(s.mediaDir, conv.pdf, me, known, null, path.basename(copy, path.extname(copy)) + ' pages.pdf');
+      if (pdf.error) return { error: pdf.error };
+      const videos = [];
+      const seen = new Map();
+      for (const v of await office.deckVideos(copy).catch(() => [])) {
+        if (!seen.has(v.part)) {
+          const out = await office.extract(copy, v.part, path.join(work, 'media'));
+          const r = out ? await media.importFile(s.mediaDir, out, me, known).catch(() => null) : null;
+          seen.set(v.part, r && r.kind === 'video' ? r : null);
+          if (r && r.hash && r.src) known.set(r.hash, r.src);
+        }
+        const r = seen.get(v.part);
+        if (r) videos.push({ page: v.page, src: r.src, x: v.x, y: v.y, w: v.w, h: v.h, duration: r.duration || 0 });
+      }
+      return { pdf: pdf.src, videos };
+    } catch (e) {
+      return { error: "Couldn't turn that file into pages." };
+    } finally {
+      fsp.rm(work, { recursive: true, force: true }).catch(() => {});
+    }
+  });
+});
+
+// Every picture and video inside a deck or document, as they are, in slide order
+handle('doc:media', async (projectId, src) => {
+  const s = sessionFor(projectId);
+  if (s.readOnly) return { error: 'This project is view only.' };
+  let file;
+  try { file = media.inMedia(s.mediaDir, src); } catch (e) { return { error: e.message }; }
+  if (!(await exists(file))) return { error: "That file hasn't arrived on this computer yet." };
+  return tracked(s.rec, async () => {
+    const work = path.join(app.getPath('temp'), 'eye-refs-doc', Math.random().toString(36).slice(2, 10));
+    const list = await office.innerMedia(file).catch(() => []);
+    const closer = list.length && list[list.length - 1].close ? list.pop() : null;
+    const out = [];
+    try {
+      await fsp.mkdir(work, { recursive: true });
+      const known = knownHashes();
+      for (let i = 0; i < list.length; i++) {
+        const to = path.join(work, `${i}-${path.posix.basename(list[i].part).replace(/[^\w.\- ]/g, '_')}`);
+        if (!(await list[i].save(to))) continue;
+        send('import:progress', { index: i, total: list.length, name: path.basename(to) });
+        const r = await media.importFile(s.mediaDir, to, me, known, (f, mode) => send('import:progress', { index: i, total: list.length, name: path.basename(to), fraction: f, mode })).catch((e) => ({ error: e.message }));
+        if (r && r.hash && r.src) known.set(r.hash, r.src);
+        if (r && !r.error && (r.kind === 'image' || r.kind === 'video')) out.push({ ...r, page: list[i].page });
+        send('import:progress', { index: i, total: list.length, done: true });
+      }
+    } finally {
+      if (closer) closer.close();
+      fsp.rm(work, { recursive: true, force: true }).catch(() => {});
+    }
+    return { results: out };
   });
 });
 

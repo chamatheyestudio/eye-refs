@@ -980,6 +980,55 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     // They export with the board
     const ex = await win.evaluate(async (ids) => { const r = await Board.renderExport(ids); return r && { w: r.w, h: r.h, missing: r.missing }; }, [pdfId, ...cards]);
     expect('PDFs and cards export with the board', ex && ex.missing === 0 && ex.w > 100, ex);
+    // ---------- decks and documents, page by page ----------
+    const can = await win.evaluate(() => window.eyerefs.docCan('x.pptx'));
+    const deckCard = await win.evaluate(async (f) => { const before = new Set(Board.items.keys()); await Board.addPaths([f]); return [...Board.items.keys()].find((k) => !before.has(k)); }, path.join(__dirname, 'fixtures', 'deck.pptx'));
+    if (can.can) {
+      await win.waitForFunction(() => Board.live().some((i) => i.type === 'pdf' && i.doc), null, { timeout: 60000 }).catch(() => {});
+      const deck = await win.evaluate(() => { const it = Board.live().find((i) => i.type === 'pdf' && i.doc); return it && { id: it.id, pages: it.pages, videos: it.videos, original: it.original, ext: it.ext }; });
+      const cardGone = await win.evaluate((id) => !Board.items.get(id) || Board.items.get(id).deleted, deckCard);
+      expect('a dropped deck turns into pages', deck && deck.pages === 3 && cardGone && deck.original === 'deck.pptx', deck);
+      const v = deck && deck.videos && deck.videos[0];
+      expect('the video in the deck is found on its slide, in its spot', v && v.page === 2 && Math.abs(v.x - 0.4875) < 0.01 && Math.abs(v.y - 0.2667) < 0.01 && Math.abs(v.w - 0.42) < 0.01, deck && deck.videos);
+      await win.evaluate((id) => { Board.sel = new Set([id]); Board.focusSelection(); Board.render(); }, deck.id);
+      await sleep(300);
+      const strip = await win.evaluate(() => [...document.querySelectorAll('#overlay .pg-th')].map((t) => ({ on: t.classList.contains('on'), vid: !!t.querySelector('.pg-vid') })));
+      expect('a strip of pages shows, with the video slide marked', strip.length === 3 && strip[0].on && strip[1].vid && !strip[0].vid, strip);
+      const second = await win.evaluate(() => { const t = document.querySelectorAll('#overlay .pg-th')[1].getBoundingClientRect(); return { x: t.left + t.width / 2, y: t.top + t.height / 2 }; });
+      await win.mouse.click(second.x, second.y);
+      await win.waitForFunction((id) => Board.items.get(id).page === 2, deck.id, { timeout: 5000 }).catch(() => {});
+      await win.waitForFunction((id) => { const v = Board.els.get(id).querySelector('.slide-vid video'); return v && v.readyState >= 1; }, deck.id, { timeout: 10000 }).catch(() => {});
+      const sv = await win.evaluate((id) => { const n = Board.els.get(id); const w = n.querySelector('.slide-vid'); const page = n.querySelector('canvas.media').getBoundingClientRect(); if (!w) return null; const r = w.getBoundingClientRect(); return { fx: (r.left - page.left) / page.width, fw: r.width / page.width, x: r.left + r.width / 2, y: r.top + r.height / 3, ready: w.querySelector('video').readyState }; }, deck.id);
+      expect('on its slide, the video sits where the deck put it', sv && Math.abs(sv.fx - 0.4875) < 0.02 && Math.abs(sv.fw - 0.42) < 0.02 && sv.ready >= 1, sv);
+      await win.screenshot({ path: `${OUT}/f3-deck.png` });
+      await win.mouse.click(sv.x, sv.y);
+      await sleep(700);
+      const playing = await win.evaluate((id) => { const v = Board.els.get(id).querySelector('.slide-vid video'); return { paused: v.paused, t: v.currentTime }; }, deck.id);
+      expect('clicking the video plays it right on the slide', !playing.paused && playing.t > 0, playing);
+      await win.screenshot({ path: `${OUT}/f4-deck-playing.png` });
+      await win.evaluate((id) => Board.els.get(id).querySelector('.slide-vid video').pause(), deck.id);
+      // Everything inside, in slide order, in a section named after the deck
+      const before = await win.evaluate(() => Board.live().length);
+      await win.evaluate((id) => Board.pullOutMedia(id), deck.id);
+      await win.waitForFunction((n) => Board.live().length > n + 1, before, { timeout: 20000 }).catch(() => {});
+      const pulled = await win.evaluate(() => { const v = Board.live().filter((i) => i.tag).map((i) => ({ type: i.type, tag: i.tag })); const sec = Board.live().find((i) => i.type === 'section' && i.title === 'deck'); return { v, sec: !!sec }; });
+      expect('Pull out puts the deck video on the board, tagged with its slide, in a section', pulled.sec && pulled.v.length === 1 && pulled.v[0].type === 'video' && pulled.v[0].tag === 'Slide 2', pulled);
+      await win.evaluate(() => { const ids = Board.live().filter((i) => i.tag || (i.type === 'section' && i.title === 'deck')).map((i) => i.id); Board.sel = new Set(ids); Board.deleteSelection(); });
+      // A Word file, page by page
+      await win.evaluate(async (f) => Board.addPaths([f]), path.join(__dirname, 'fixtures', 'brief.docx'));
+      await win.waitForFunction(() => Board.live().some((i) => i.type === 'pdf' && i.ext === 'docx'), null, { timeout: 60000 }).catch(() => {});
+      const docx = await win.evaluate(() => { const it = Board.live().find((i) => i.type === 'pdf' && i.ext === 'docx'); return it && { pages: it.pages, videos: (it.videos || []).length }; });
+      expect('a Word file turns into pages too', docx && docx.pages >= 2 && docx.videos === 0, docx);
+      await win.evaluate(() => { const ids = Board.live().filter((i) => i.type === 'pdf' && i.doc).map((i) => i.id); Board.sel = new Set(ids); Board.deleteSelection(); Board.clearSel(); });
+    } else {
+      // No LibreOffice here: the deck stays a card, and Eye Refs offers to get it, once
+      await win.waitForSelector('#modalWrap:not([hidden]) >> text=Get LibreOffice for decks and docs', { timeout: 15000 }).catch(() => {});
+      const asked = await win.evaluate(() => !document.querySelector('#modalWrap').hidden && /LibreOffice/.test(document.querySelector('#modalWrap').textContent));
+      const card = await win.evaluate((id) => Board.items.get(id) && Board.items.get(id).type, deckCard);
+      expect('without a converter, the deck stays a card and Eye Refs offers LibreOffice', asked && card === 'file', { asked, card, can });
+      await win.click('#modalWrap >> text=Not now');
+      await win.evaluate((id) => { Board.sel = new Set([id]); Board.deleteSelection(); Board.clearSel(); }, deckCard);
+    }
     await win.evaluate((ids) => { Board.sel = new Set(ids); Board.deleteSelection(); Board.clearSel(); }, [pdfId, ...cards]);
     await win.evaluate(() => { const it = Board.live().filter((i) => i.type === 'image').sort((a, b) => b.z - a.z)[0]; Board.sel = new Set([it.id]); Board.deleteSelection(); Board.clearSel(); });
   }

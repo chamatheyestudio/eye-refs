@@ -922,6 +922,36 @@
     ]);
   };
 
+  // Decks and documents need an app that can make pages. Asked once; after that
+  // a short note, and the cards turn into pages by themselves once it's installed.
+  let officeWait = null;
+  B.onNeedOffice = () => {
+    const pid = S.current && S.current.id;
+    const watch = () => {
+      clearInterval(officeWait);
+      const until = Date.now() + 30 * 60 * 1000;
+      officeWait = setInterval(async () => {
+        if (Date.now() > until || !S.current || S.current.id !== pid) return clearInterval(officeWait);
+        const r = await api.docCan('check.pptx');
+        if (r && r.can) { clearInterval(officeWait); toast('LibreOffice is ready. Making the pages.'); B.retryPages(); }
+      }, 5000);
+    };
+    if (S.officeAsked) { toast('This stays a card until LibreOffice is installed. Right click it for Show pages.'); return; }
+    S.officeAsked = true;
+    openModal((close) => [
+      el('h2', { text: 'Get LibreOffice for decks and docs' }),
+      el('p', { text: "It's free. Eye Refs uses it to show PowerPoint, Word and Excel files page by page, with their videos playing on the slides. Until then this one stays a card." }),
+      el('div', { class: 'actions' },
+        el('button', { class: 'btn ghost', text: 'Not now', onclick: close }),
+        el('button', { class: 'btn', text: 'Download LibreOffice', onclick: () => {
+          close();
+          api.docGet();
+          toast('Install LibreOffice, and the deck turns into pages by itself.');
+          watch();
+        } })),
+    ]);
+  };
+
   // Palette of a picture: click a colour to copy it, or add the strip to the board
   B.onPalette = (it, colors) => {
     openModal((close) => [

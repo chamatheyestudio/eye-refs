@@ -189,7 +189,7 @@
         node.append(clip, el('div', { class: 'play-badge', html: ICONS.smallPlay }));
       } else if (it.type === 'pdf') {
         node.classList.add('pdf');
-        clip.append(el('canvas', { class: 'media' }));
+        clip.append(el('canvas', { class: 'media' }), el('div', { class: 'pdf-vids' }));
         node.append(clip);
       } else if (it.type === 'file') {
         node.classList.add('filecard');
@@ -243,6 +243,13 @@
     node.style.transform = `translate(${it.x}px, ${it.y}px) rotate(${it.rot || 0}deg)`;
     const clip = node.querySelector('.clip');
     clip.style.transform = `scale(${it.flipX ? -1 : 1}, ${it.flipY ? -1 : 1})`;
+    // "Slide 4": where a picture or video came from in a deck
+    let tagEl = node.querySelector(':scope > .item-tag');
+    if (it.tag && (it.type === 'image' || it.type === 'video')) {
+      if (!tagEl) { tagEl = el('span', { class: 'item-tag' }); node.append(tagEl); }
+      tagEl.textContent = it.tag;
+      tagEl.style.fontSize = Math.max(11, Math.min(30, d.w * 0.045)) + 'px';
+    } else if (tagEl) tagEl.remove();
     // Each picture can be faded on its own; lines carry it on the stroke instead
     clip.style.opacity = it.type !== 'draw' && it.op != null && it.op < 1 ? String(it.op) : '';
     const m = clip.querySelector('.media');
@@ -262,7 +269,7 @@
         if (it.style === 'dotted') path.setAttribute('stroke-dasharray', `0 ${(it.sw || 4) * 2}`); else path.removeAttribute('stroke-dasharray');
         return;
       }
-      if (it.type === 'pdf') { queuePdf(it.id); return; }
+      if (it.type === 'pdf') { syncSlideVideos(node, m, it); queuePdf(it.id); return; }
       if (it.type === 'file') { fillCard(m, it); return; }
       const url = mediaUrl(it.src);
       if (m.dataset.src !== url && !node.classList.contains('missing')) { m.dataset.src = url; m.src = url; }
@@ -387,10 +394,22 @@
         const n = one.page || 1, total = one.pages || 1;
         const prev = el('button', { class: 'pg-btn', 'data-pg': '-1', title: 'Previous page', html: ICONS.chev, disabled: n <= 1 || B.readOnly });
         const next = el('button', { class: 'pg-btn', 'data-pg': '1', title: 'Next page', html: ICONS.chev, disabled: n >= total || B.readOnly });
-        const bar = el('div', { class: 'pdf-pages' }, prev, el('span', { class: 'pg-n', text: `${n} / ${total}` }), next);
+        const bar = el('div', { class: 'pdf-pages' }, el('div', { class: 'pg-row' }, prev, el('span', { class: 'pg-n', text: `${n} / ${total}` }), next));
+        // The pages around this one, to jump straight to. A dot marks a slide with video.
+        const from = Math.max(1, Math.min(total - 8, n - 4)), to = Math.min(total, from + 8);
+        const strip = el('div', { class: 'pg-strip' });
+        const withVideo = new Set((one.videos || []).map((v) => v.page));
+        for (let pnum = from; pnum <= to; pnum++) {
+          const t = el('button', { class: 'pg-th' + (pnum === n ? ' on' : ''), title: `Page ${pnum}`, 'aria-label': `Page ${pnum}` });
+          if (withVideo.has(pnum)) t.append(el('span', { class: 'pg-vid' }));
+          pageThumb(one.src, pnum).then((url) => { t.style.backgroundImage = `url(${url})`; }).catch(() => {});
+          t.addEventListener('pointerdown', (e) => { e.stopPropagation(); e.preventDefault(); if (!B.readOnly && pnum !== n) setPdfPage(one.id, pnum); });
+          strip.append(t);
+        }
+        bar.append(strip);
         // Always reachable: on screen and clear of the toolbar, even when the page fills the view
         bar.style.left = Math.max(80, Math.min(innerWidth - 80, c.x)) + 'px';
-        bar.style.top = Math.max(70, Math.min(innerHeight - 110, c.y + r + 14)) + 'px';
+        bar.style.top = Math.max(70, Math.min(innerHeight - 190, c.y + r + 14)) + 'px';
         for (const btn of [prev, next]) btn.addEventListener('pointerdown', (e) => { e.stopPropagation(); e.preventDefault(); if (!btn.disabled) setPdfPage(one.id, n + Number(btn.dataset.pg)); });
         overlay.append(bar);
       }
@@ -770,9 +789,12 @@
         renderOverlay(); return;
       }
       if (e.altKey && e.shiftKey && canEdit()) { if (free.length) startGesture({ type: 'flip', ids: free }, e); renderOverlay(); return; }
+      // A video on a slide: its bar seeks, a click plays or pauses, a drag still moves the deck
+      const track = e.target.closest && e.target.closest('.slide-vid .sv-track');
+      if (track) { seekSlideVideo(track, e.clientX); renderOverlay(); return; }
       // View only boards still select, they just don't move
       const movable = B.readOnly ? [] : withSectionContents(all);
-      startGesture({ type: 'move', hit, ids: movable, start: movable.map((id) => ({ id, x: B.items.get(id).x, y: B.items.get(id).y })), before: snapshot(movable, ['x', 'y']) }, e);
+      startGesture({ type: 'move', hit, ids: movable, start: movable.map((id) => ({ id, x: B.items.get(id).x, y: B.items.get(id).y })), before: snapshot(movable, ['x', 'y']), vid: e.target.closest && e.target.closest('.slide-vid') }, e);
       renderOverlay();
       return;
     }
@@ -1107,6 +1129,7 @@
         if (!g.moved) contextMenu(e.clientX, e.clientY);
         break;
       case 'move':
+        if (!g.moved && g.vid) toggleSlideVideo(g.vid);
         if (g.moved && g.ids.length) commit(g.ids.map((id) => ({ id, fields: { x: B.items.get(id).x, y: B.items.get(id).y } })), g.before);
         else if (!g.moved && !e.shiftKey && B.sel.size > 1) { B.sel = new Set([g.hit]); renderOverlay(); }
         break;
@@ -1479,6 +1502,141 @@
     } catch (_) { toast("Couldn't make a picture of that page.", true); }
   }
 
+  // ---------- videos that play on their slide ----------
+  function syncSlideVideos(node, m, it) {
+    const box = node.querySelector('.pdf-vids');
+    if (!box) return;
+    // Exactly over the page, so the parts of the slide line up
+    box.style.width = m.style.width; box.style.height = m.style.height;
+    box.style.left = m.style.left; box.style.top = m.style.top;
+    const page = it.page || 1;
+    const want = (it.videos || []).filter((v) => v.page === page);
+    const key = page + '|' + want.map((v) => v.src + ':' + v.x + ':' + v.y).join('|');
+    if (box.dataset.key === key) return;
+    box.dataset.key = key;
+    box.innerHTML = '';
+    for (const v of want) {
+      const wrap = el('div', { class: 'slide-vid', style: `left:${v.x * 100}%;top:${v.y * 100}%;width:${v.w * 100}%;height:${v.h * 100}%` });
+      const video = el('video', { preload: 'metadata', playsinline: '' });
+      video.loop = true;
+      video.src = mediaUrl(v.src);
+      const fill = el('span');
+      const time = el('span', { class: 'sv-t', text: '0:00' });
+      const icon = el('span', { class: 'sv-play', html: ICONS.play });
+      const bar = el('div', { class: 'sv-bar' }, icon, el('div', { class: 'sv-track' }, fill), time);
+      video.addEventListener('timeupdate', () => {
+        fill.style.width = (video.duration ? (video.currentTime / video.duration) * 100 : 0) + '%';
+        time.textContent = fmtTime(video.currentTime);
+      });
+      video.addEventListener('play', () => { wrap.classList.add('playing'); icon.innerHTML = ICONS.pause; });
+      video.addEventListener('pause', () => { wrap.classList.remove('playing'); icon.innerHTML = ICONS.play; });
+      wrap.append(video, bar);
+      box.append(wrap);
+    }
+  }
+  function toggleSlideVideo(wrap) {
+    const v = wrap && wrap.querySelector('video');
+    if (!v) return;
+    if (v.paused) v.play().catch(() => {}); else v.pause();
+  }
+  function seekSlideVideo(track, clientX) {
+    const v = track.closest('.slide-vid').querySelector('video');
+    const r = track.getBoundingClientRect();
+    if (v && v.duration) v.currentTime = Math.max(0, Math.min(1, (clientX - r.left) / Math.max(1, r.width))) * v.duration;
+  }
+
+  // Small pictures of the pages, for jumping around a deck
+  const thumbCache = new Map();
+  function pageThumb(src, page) {
+    const key = (B.project ? B.project.id : '') + '|' + src + '|' + page;
+    if (!thumbCache.has(key)) {
+      thumbCache.set(key, (async () => {
+        const doc = await pdfDoc(src);
+        const pg = await doc.getPage(page);
+        const base = pg.getViewport({ scale: 1 });
+        const vp = pg.getViewport({ scale: 120 / base.width });
+        const c = document.createElement('canvas');
+        c.width = Math.round(vp.width); c.height = Math.round(vp.height);
+        const x = c.getContext('2d');
+        x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height);
+        await pg.render({ canvasContext: x, viewport: vp }).promise;
+        return c.toDataURL('image/jpeg', 0.75);
+      })().catch((e) => { thumbCache.delete(key); throw e; }));
+    }
+    return thumbCache.get(key);
+  }
+
+  // ---------- decks and documents, page by page ----------
+  const OFFICE_EXT = new Set(['ppt', 'pptx', 'pps', 'ppsx', 'pot', 'potx', 'odp', 'key', 'doc', 'docx', 'dot', 'dotx', 'odt', 'rtf', 'xls', 'xlsx', 'ods']);
+  const isOfficeItem = (it) => !!it && it.type === 'file' && OFFICE_EXT.has(String(it.ext || '').toLowerCase());
+  const isDeck = (it) => !!it && ((it.type === 'pdf' && it.doc) || isOfficeItem(it));
+  const making = new Set();
+  B.waitingPages = new Set();
+  async function makePages(id, opts = {}) {
+    const it = B.items.get(id);
+    if (!isOfficeItem(it) || making.has(id) || !canEdit()) return;
+    const pid = boardId();
+    making.add(id);
+    const node = B.els.get(id);
+    if (node) node.classList.add('making');
+    let r;
+    try { r = await api.docPages(pid, it.src, it.original); } catch (_) { r = { error: "Couldn't turn that file into pages." }; }
+    making.delete(id);
+    const n2 = B.els.get(id);
+    if (n2) n2.classList.remove('making');
+    if (leftBoard(pid)) return;
+    if (r && r.missing) { B.waitingPages.add(id); if (B.onNeedOffice) B.onNeedOffice(r.getUrl); return; }
+    // A Keynote file on a computer without Keynote: it stays a card, nothing to ask
+    if (r && r.unsupported) { if (!opts.quiet && opts.asked) toast('Keynote files show as pages on a Mac with Keynote. It opens in its app from the card.'); return; }
+    if (!r || r.error) { if (!opts.quiet) toast((r && r.error) || "Couldn't turn that file into pages.", true); return; }
+    B.waitingPages.delete(id);
+    const cur = B.items.get(id);
+    if (!cur || cur.deleted) return;
+    const m = await measure(r.pdf, 'pdf');
+    if (leftBoard(pid) || !B.items.get(id) || B.items.get(id).deleted) return;
+    const f = Math.min(1, 900 / Math.max(m.nw, m.nh));
+    const nid = uid();
+    // The card becomes the pages, in the same spot. Undo brings the card back.
+    commit([
+      { id, fields: { deleted: true } },
+      { id: nid, fields: {
+        type: 'pdf', src: r.pdf, hash: null, original: cur.original, doc: cur.src, ext: cur.ext, size: cur.size || 0,
+        nw: m.nw, nh: m.nh, x: cur.x, y: cur.y, w: m.nw * f, page: 1, pages: m.pages || 1, videos: r.videos || [],
+        crop: { ...ZC }, rot: cur.rot || 0, flipX: false, flipY: false, gray: false, locked: false, deleted: false,
+        z: cur.z, created: Date.now(), addedBy: B.me.name,
+      } },
+    ], [{ id, fields: { deleted: false } }, { id: nid, fields: { deleted: true } }]);
+    if (B.sel.has(id)) { B.sel.delete(id); B.sel.add(nid); }
+    renderOverlay();
+    if ((r.videos || []).length) toast(r.videos.length === 1 ? 'Pages ready. The video plays right on its slide.' : `Pages ready. ${r.videos.length} videos play right on their slides.`);
+  }
+  // Once a converter is installed, the cards that were waiting become pages
+  function retryPages() {
+    for (const id of [...B.waitingPages]) if (B.items.get(id) && !B.items.get(id).deleted) makePages(id, { quiet: true });
+  }
+  // Every picture and video in a deck, as they are, in a section named after it
+  async function pullOutMedia(id) {
+    const it = B.items.get(id);
+    if (!isDeck(it) || !canEdit()) return;
+    const pid = boardId();
+    const src = it.type === 'pdf' ? it.doc : it.src;
+    toast('Taking out the videos and pictures');
+    const r = await api.docMedia(pid, src);
+    if (leftBoard(pid)) return;
+    if (!r || r.error) return toast((r && r.error) || "Couldn't open that file.", true);
+    if (!r.results.length) return toast('There are no videos or pictures inside that one.');
+    const d = dims(it);
+    const ids = await placeResults(r.results, { x: it.x + d.w + 160, y: it.y + 120 }, { pid, exact: true, tags: true });
+    if (!ids || !ids.length || leftBoard(pid)) return;
+    B.sel = new Set(ids);
+    sectionFromSelection(String(it.original || 'Deck').replace(/\.[^.]*$/, ''), { quiet: true });
+    toast(`${ids.length} ${ids.length === 1 ? 'piece' : 'pieces'} taken out, in slide order.`);
+  }
+  function clearTags(ids) {
+    const withTag = ids.filter((i) => B.items.get(i) && B.items.get(i).tag);
+    if (withTag.length) commit(withTag.map((i) => ({ id: i, fields: { tag: null } })));
+  }
+
   // ---------- file cards: anything else, opening in its own app ----------
   const sizeText = (n) => (n >= 1e9 ? (n / 1e9).toFixed(1) + ' GB' : n >= 1e6 ? (n / 1e6).toFixed(1) + ' MB' : n >= 1e3 ? Math.round(n / 1e3) + ' KB' : (n || 0) + ' bytes');
   function fillCard(m, it) {
@@ -1501,7 +1659,7 @@
   async function openFile(id) {
     const it = B.items.get(id);
     if (!it || !B.project) return;
-    const r = await api.openMedia(B.project.id, it.src, it.original);
+    const r = await api.openMedia(B.project.id, it.doc || it.src, it.original);
     if (r && r.error) toast(r.error, true);
     else if (r && r.shown) toast('Shown in its folder. Files that run programs never open straight from a board.');
   }
@@ -1573,12 +1731,15 @@
         z: ++z, created: Date.now(), addedBy: B.me.name,
         ...(r.kind === 'video' ? { vin: 0, vout: m.duration || r.duration || 0, loop: true, speed: 1 } : {}),
         ...(r.kind === 'pdf' ? { page: 1, pages: m.pages || 1 } : {}),
+        ...(opts.tags && r.page ? { tag: `Slide ${r.page}` } : {}),
         ...(r.kind === 'file' ? { size: r.size || 0, ext: r.ext || '', preview: (r.preview && r.preview.src) || (r.reused ? (live().find((o) => o.src === r.src && o.preview) || {}).preview || null : null) } : {}),
       },
     }));
     commit(changes);
     B.sel = new Set(changes.map((c) => c.id));
     renderOverlay();
+    // Decks and documents turn into pages on their own
+    for (const c of changes) if (isOfficeItem(B.items.get(c.id))) makePages(c.id);
     const reused = ok.filter(({ r }) => r.reused).length;
     const converted = ok.filter(({ r }) => r.reason === 'format' || r.converted).length;
     if (converted) toast(converted === 1 ? 'Converted so it plays on the board. Your original is untouched.' : `${converted} files converted so they play on the board.`);
@@ -2163,21 +2324,21 @@
     }
     return [...out];
   }
-  function addSection(rect, title) {
+  function addSection(rect, title, opts = {}) {
     if (!canEdit()) return;
     const id = uid();
     commit([{ id, fields: { type: 'section', title: title || 'Section', x: rect.x, y: rect.y, w: Math.max(120, rect.w), h: Math.max(80, rect.h), z: minZ() - 1, rot: 0, deleted: false, created: Date.now(), addedBy: B.me.name } }]);
     B.sel = new Set([id]);
     renderOverlay();
-    setTimeout(() => editSectionTitle(id), 0);
+    if (!opts.quiet) setTimeout(() => editSectionTitle(id), 0);
     return id;
   }
-  function sectionFromSelection() {
+  function sectionFromSelection(title, opts = {}) {
     const ids = selIds().filter((id) => B.items.get(id).type !== 'section');
     const bb = ids.length ? bbox(ids) : null;
     if (!bb) return;
     const pad = Math.max(30, Math.min(bb.w, bb.h) * 0.06) , top = 64 / B.view.s;
-    addSection({ x: bb.x - pad, y: bb.y - pad - top, w: bb.w + pad * 2, h: bb.h + pad * 2 + top });
+    return addSection({ x: bb.x - pad, y: bb.y - pad - top, w: bb.w + pad * 2, h: bb.h + pad * 2 + top }, typeof title === 'string' ? title : undefined, opts);
   }
   function editSectionTitle(id) {
     const it = B.items.get(id);
@@ -2585,11 +2746,16 @@
       items.push(
         { label: 'Next page', key: 'Period', onClick: () => setPdfPage(one.id, n + 1), disabled: !ed || n >= total },
         { label: 'Previous page', key: 'Comma', onClick: () => setPdfPage(one.id, n - 1), disabled: !ed || n <= 1 },
-        { label: 'Page as picture', onClick: () => pdfPageAsPicture(one.id), disabled: !ed },
-        { label: 'Open in its app', onClick: () => openFile(one.id) },
+        { label: one.doc ? 'Slide as picture' : 'Page as picture', onClick: () => pdfPageAsPicture(one.id), disabled: !ed },
+        { label: one.doc ? 'Open original in its app' : 'Open in its app', onClick: () => openFile(one.id) },
         '-');
     }
-    if (one && one.type === 'file') items.push({ label: 'Open', onClick: () => openFile(one.id) }, '-');
+    if (one && one.type === 'pdf' && one.doc) items.splice(items.length - 1, 0, { label: 'Pull out videos and pictures', onClick: () => pullOutMedia(one.id), disabled: !ed });
+    if (one && one.type === 'file') {
+      if (isOfficeItem(one)) items.push({ label: 'Show pages', onClick: () => makePages(one.id, { asked: true }), disabled: !ed || making.has(one.id) }, { label: 'Pull out videos and pictures', onClick: () => pullOutMedia(one.id), disabled: !ed });
+      items.push({ label: 'Open', onClick: () => openFile(one.id) }, '-');
+    }
+    if (ids.some((i) => B.items.get(i) && B.items.get(i).tag)) items.push({ label: 'Remove slide tags', onClick: () => clearTags(ids), disabled: !ed }, '-');
     if (one && one.type === 'video') {
       const v = videoEl(one.id);
       items.push(
@@ -2732,7 +2898,7 @@
     copySelection, pasteInternal, pasteNative, pasteKey, deleteSelection, duplicate, toggleField, resetCrop, resetTransform, toggleCropMode, front, back,
     align, normalize, arrange, focusSelection, focusAll, focusStep, selectAll, clearSel, selIds,
     togglePlay, setInOut, toggleLoop, cycleSpeed, toggleMute, step, grabFrame, activeVideoId,
-    setTool, setGrid, setGrayCanvas, setLockedCanvas, binItems, restore, mediaUrl, contextMenu, live, setPdfPage, pdfStep, pdfPageAsPicture, openFile,
+    setTool, setGrid, setGrayCanvas, setLockedCanvas, binItems, restore, mediaUrl, contextMenu, live, setPdfPage, pdfStep, pdfPageAsPicture, openFile, makePages, retryPages, pullOutMedia,
   });
   window.Board = B;
 })();
