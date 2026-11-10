@@ -17,6 +17,19 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const srv = await gas.listen();
   const codeFor = (email) => /code is (\d{6})/.exec([...gas.mail].reverse().find((m) => m.to === email).body)[1];
 
+  // A board from before single files: a folder in Documents/Eye Refs
+  const legacy = await (async () => {
+    const lib = require('../main/library');
+    const { Session } = require('../main/session');
+    const L = { email: 'chamath@eyestudio.ae', name: 'Chamath', initials: 'CH', deviceKey: 'chamath-old000' };
+    const rec = await lib.createProject(path.join(tmp, 'Documents', 'Eye Refs'), L, 'Old Moodboard', '');
+    fs.copyFileSync(path.join(SRC, 'warm.jpg'), path.join(rec.dir, 'media', 'warm.jpg'));
+    const s = new Session(rec, L, path.join(tmp, 'oldbk'), { state() {}, status() {}, presence() {} });
+    await s.open();
+    s.write([{ id: 'old1', fields: { type: 'image', src: 'warm.jpg', x: 0, y: 0, w: 400, nw: 640, nh: 480, z: 1 } }]);
+    await s.close();
+    return rec;
+  })();
   const app = await electron.launch({
     executablePath: require('electron'),
     args: [path.join(__dirname, '..'), '--no-sandbox'],
@@ -1367,6 +1380,41 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const openingGone = await win.evaluate(() => !document.body.classList.contains('is-opening'));
   expect('switching boards shows what is opening, then clears', !slowed || (openingSeen && openingSeen.on && openingSeen.text === 'Spring Campaign' && openingGone), { slowed, openingSeen, openingGone });
   expect('leaving an unsaved board asks, and Don\'t save removes it', startGone && asked && unsavedLeft === 0, { startGone, asked, unsavedLeft });
+  // ---------- one file per board ----------
+  {
+    const docs = path.join(tmp, 'Documents', 'Eye Refs');
+    const { readInfo } = require('../main/pack');
+    const listed = fs.readdirSync(docs);
+    expect('old board folders became single files', listed.includes('Old Moodboard.eyerefs') && !listed.includes('Old Moodboard') && !fs.existsSync(legacy.dir), listed);
+    expect('a shared board is not a file in Documents', !listed.some((n) => /^Spring Campaign/.test(n)), listed);
+    await win.click('#tree >> text=Old Moodboard');
+    await win.waitForFunction(() => document.querySelector('#tName').textContent === 'Old Moodboard', null, { timeout: 8000 }).catch(() => {});
+    await sleep(500);
+    const opened = await win.evaluate(() => ({ id: Board.project.id, items: Board.live().length, doc: Board.project.doc }));
+    expect('the moved board opens with everything on it', opened.id === legacy.id && opened.items === 1, opened);
+    const before = (await readInfo(path.join(docs, 'Old Moodboard.eyerefs'))).saveId;
+    await win.evaluate(() => { const n = Board.live()[0]; Board.commit([{ id: n.id, fields: { x: n.x + 50 } }]); });
+    await sleep(300);
+    const saved = await win.evaluate(() => window.eyerefs.flush());
+    const after = await readInfo(path.join(docs, 'Old Moodboard.eyerefs'));
+    expect('Cmd/Ctrl+S writes the board file', saved && saved.ok && after.saveId !== before, { saved, before, after: after && after.saveId });
+    // Edits reach the file by themselves a few seconds later
+    await win.evaluate(() => { const n = Board.live()[0]; Board.commit([{ id: n.id, fields: { x: n.x + 50 } }]); });
+    await sleep(5500);
+    const later = await readInfo(path.join(docs, 'Old Moodboard.eyerefs'));
+    expect('edits reach the file on their own', later.saveId !== after.saveId, { a: after.saveId, b: later.saveId });
+    // Renaming the board renames its file
+    await win.evaluate(async (id) => window.eyerefs.renameBoard(id, 'New Moodboard'), legacy.id);
+    await sleep(300);
+    const names = fs.readdirSync(docs);
+    expect('renaming a board renames its file', names.includes('New Moodboard.eyerefs') && !names.includes('Old Moodboard.eyerefs'), names);
+    // Opening the file opens the same board, not a copy
+    const again = await win.evaluate(async (f) => { const r = await window.eyerefs.openProjectFile(f); return r.record && r.record.id; }, path.join(docs, 'New Moodboard.eyerefs'));
+    expect('opening the file opens that board', again === legacy.id, again);
+    expect('Documents holds only board files', fs.readdirSync(docs).every((n) => n.endsWith('.eyerefs')), fs.readdirSync(docs));
+    await win.click('#tree >> text=Spring Campaign');
+    await win.waitForFunction(() => document.querySelector('#tName').textContent === 'Spring Campaign', null, { timeout: 8000 }).catch(() => {});
+  }
   // ---------- deleting boards ----------
   {
     const rowOf = (name) => win.evaluate((n) => { const r = [...document.querySelectorAll('#tree .row')].find((x) => x.querySelector('.name') && x.querySelector('.name').textContent === n); if (!r) return null; const b = r.getBoundingClientRect(); return { x: b.left + 40, y: b.top + b.height / 2 }; }, name);
@@ -1387,7 +1435,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     const askText = await win.evaluate(() => document.querySelector('#modalWrap p').textContent);
     await win.click('#modalWrap >> button.danger');
     await win.waitForFunction(() => ![...document.querySelectorAll('#tree .row .name')].some((n) => n.textContent === 'Throwaway'), null, { timeout: 10000 }).catch(() => {});
-    const throwDir = path.join(tmp, 'Documents', 'Eye Refs', 'Throwaway');
+    const throwDir = path.join(tmp, 'Documents', 'Eye Refs', 'Throwaway.eyerefs');
     expect('deleting your own board moves it to the Trash', !fs.existsSync(throwDir) && /Trash|Recycle Bin/.test(askText) && !(await rowOf('Throwaway')), { askText, still: fs.existsSync(throwDir) });
     // A board shared with you: you leave it, everyone else keeps it
     row = await rowOf('Brunch Edit');

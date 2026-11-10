@@ -443,7 +443,7 @@
       if (!r || r.error) { node.textContent = before; return toast((r && r.error) || "Couldn't rename that.", true); }
       if (r.reopened) openResult(r.reopened);
       else if (S.current && S.current.id === p.id) { S.current.name = r.name; syncChrome(); }
-      if (p.scratch) toast(`Saved in Documents / Eye Refs / ${r.name}`);
+      if (p.scratch) toast(`Saved as Documents / Eye Refs / ${r.name}.eyerefs`);
       rescan();
     };
     const onKey = (e) => {
@@ -1099,7 +1099,10 @@
 
   // ---------- events from the main process ----------
   api.onState((p) => { if (S.current && p.projectId === S.current.id) B.applyRemote(p.items); });
-  api.onStatus((p) => { if (S.current && p.projectId === S.current.id) { S.status = p.status; if (p.status === 'readonly') S.readOnly = true; syncChrome(); } });
+  // The board file couldn't be written (disk full, folder gone). Said once, not every try.
+  let fileErrShown = 0;
+  api.onFileError((p) => { if (S.current && p.projectId === S.current.id && Date.now() - fileErrShown > 60000) { fileErrShown = Date.now(); toast(p.error); } });
+    api.onStatus((p) => { if (S.current && p.projectId === S.current.id) { S.status = p.status; if (p.status === 'readonly') S.readOnly = true; syncChrome(); } });
   api.onPresence((p) => {
     if (!S.current || p.projectId !== S.current.id) return;
     S.here = p.here;
@@ -1355,7 +1358,7 @@
         close();
         openResult(res);
         await rescan();
-        toast(`Saved in Documents / Eye Refs / ${res.record.name}`);
+        toast(`Saved as Documents / Eye Refs / ${res.record.doc ? res.record.doc.split(/[\\/]/).pop() : res.record.name + '.eyerefs'}`);
         if (then) then();
       };
       name.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
@@ -1392,7 +1395,7 @@
       const draw = () => {
         box.innerHTML = '';
         if (!p.shared) {
-          box.append(el('p', { text: `This uploads "${p.name}" to the EyeStudio Google Drive at Eye Refs / ${p.name}. Everyone you invite gets a synced copy in their Documents folder.` }));
+          box.append(el('p', { text: `This uploads "${p.name}" to the EyeStudio Google Drive at Eye Refs / ${p.name}. Everyone you invite gets a synced copy in Eye Refs. Shared boards sync as they are, so this board stops being a single file in Documents.` }));
           return;
         }
         const canManage = data.role !== 'member';
@@ -1633,7 +1636,7 @@
     'Mod+Shift+S': () => packCurrent(),
     'Mod+U': () => openSettings(),
     'Mod+Shift+P': focusSearch,
-    'Mod+S': async () => { if (S.current && S.current.scratch) return saveModal(); await api.flush(); toast('Saved'); },
+    'Mod+S': async () => { if (S.current && S.current.scratch) return saveModal(); const r = await api.flush(); toast(r && r.error ? r.error : 'Saved'); },
     'Mod+Q': () => api.close(),
     'Mod+M': () => api.minimize(),
     'Mod+F': () => api.maximize(),

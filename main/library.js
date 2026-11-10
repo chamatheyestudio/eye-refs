@@ -42,6 +42,8 @@ function toRecord(found, clientFolder, me) {
     mine: !d.owner || !me || d.owner.email === me.email,
     shared: d.shared || null,
     scratch: !!d.scratch,
+    doc: d.doc || null,
+    saveId: d.saveId || null,
     dir: found.dir,
     file: found.file,
   };

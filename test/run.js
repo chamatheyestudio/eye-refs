@@ -352,6 +352,7 @@ async function test(name, fn) {
     assert.ok(!newer('1.1.0-beta.1', '1.0.0'), 'test versions never go to the team');
   });
 
+  await require('./boards.test.js')(test);
   await require('./server.test.js')(test);
   console.log(`\n${passed} passed`);
 })();

@@ -88,6 +88,7 @@ contextBridge.exposeInMainWorld('eyerefs', {
   },
   onState: on('board:state'),
   onStatus: on('board:status'),
+  onFileError: on('board:fileError'),
   onPresence: on('board:presence'),
   onCloud: on('cloud:status'),
   onUpdate: on('update:ready'),

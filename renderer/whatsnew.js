@@ -4,6 +4,9 @@ window.WHATS_NEW = [
   {
     version: '1.0.34',
     items: [
+      'Each board is now one .eyerefs file in Documents / Eye Refs, pictures, videos, PDFs and versions all inside. Double click it to open it, send it, back it up.',
+      'Your boards were moved over for you. The old folders are in the Trash, in case you want them.',
+      'Shared boards still sync as before, and no longer sit in Documents.',
       'Section names stay inside their section when you zoom out, and long names end neatly.',
       'Names from files drop their extension, so "Shoot review.docx" reads as "Shoot review".',
     ],

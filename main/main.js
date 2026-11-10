@@ -12,7 +12,8 @@ const pluck = require('./pluck');
 const { Session } = require('./session');
 const { Cloud } = require('./cloud');
 const { Sync } = require('./sync');
-const { pack, unpack, isPacked } = require('./pack');
+const { pack, isPacked } = require('./pack');
+const boards = require('./boards');
 const { randCode, initialsFrom, firstNameFrom, cleanFolderName } = require('../shared/names');
 const PKG = require('../package.json');
 // Tests keep their settings apart from the real app
@@ -31,6 +32,10 @@ let identity = { admin: false, team: false };
 const settingsPath = () => path.join(app.getPath('userData'), 'settings.json');
 const backupDir = () => path.join(app.getPath('userData'), 'backups');
 const SCRATCH = () => path.join(app.getPath('userData'), 'unsaved');
+// Working copies of saved and shared boards, out of sight. Your own boards are
+// also one .eyerefs file each in Documents/Eye Refs, kept in step by the mirror.
+const STORE = () => path.join(app.getPath('userData'), 'boards');
+const BIN = () => path.join(app.getPath('userData'), 'Deleted boards');
 const ROOT = () => process.env.EYEREFS_ROOT || path.join(app.getPath('documents'), 'Eye Refs');
 
 // ---------- settings and sign in ----------
@@ -96,6 +101,7 @@ async function boot() {
     identity = { admin: false, team: true };
   }
   me = makeMe(settings.email, settings.name);
+  await migrateOnce();
   await clearEmptyUntitled();
   const projects = await allProjects(online);
   const open = pendingOpenFile;
@@ -161,7 +167,7 @@ async function clearEmptyUntitled() {
 async function recentBoards() {
   const out = [];
   const seen = new Set();
-  for (const p of [...await lib.scanProjects(ROOT(), me), ...(await lib.scanProjects(SCRATCH(), me)).map((p) => ({ ...p, scratch: true }))]) {
+  for (const p of [...await lib.scanProjects(STORE(), me), ...(await lib.scanProjects(SCRATCH(), me)).map((p) => ({ ...p, scratch: true }))]) {
     if (seen.has(p.id) || (session && session.rec.id === p.id)) continue;
     seen.add(p.id);
     const sum = await boardSummary(p.dir);
@@ -183,6 +189,68 @@ async function recentBoards() {
 }
 
 let resumeProject = null;
+
+// ---------- one file per board ----------
+const mirror = new boards.Mirror({
+  onError: (rec, e) => { console.error('save file', rec.doc, e); send('board:fileError', { projectId: rec.id, error: "Couldn't write the board file. Your work is safe and it will try again." }); },
+});
+
+// Into the Trash, or the app's Deleted boards folder when there is no Trash
+async function toBin(p) {
+  if (!(await exists(p))) return;
+  try { await shell.trashItem(p); return; } catch (_) {}
+  await fsp.mkdir(BIN(), { recursive: true });
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+  const dest = path.join(BIN(), `${path.basename(p)} ${stamp}`);
+  await fsp.rename(p, dest).catch(async () => {
+    await fsp.cp(p, dest, { recursive: true });
+    await fsp.rm(p, { recursive: true, force: true });
+  });
+}
+// A working copy whose file went away: kept in Deleted boards, never destroyed
+async function retire(rec) {
+  await fsp.mkdir(BIN(), { recursive: true });
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+  const dest = path.join(BIN(), `${cleanFolderName(rec.name || 'Board')} ${stamp} ${String(rec.id).slice(0, 6)}`);
+  await fsp.rename(rec.dir, dest).catch(async () => {
+    await fsp.cp(rec.dir, dest, { recursive: true });
+    await fsp.rm(rec.dir, { recursive: true, force: true });
+  });
+}
+const busyBoard = (b) => (session && session.rec.id === b.id) || importing.has(b.id) || mirror.busy(b.id);
+const isOpenBoard = (b) => !!(session && session.rec.id === b.id);
+
+// Give a saved board its file in Documents/Eye Refs
+async function giveFile(rec) {
+  const doc = await boards.freeDocPath(ROOT(), rec.name);
+  await lib.updateProject(rec, { doc });
+  rec.doc = doc;
+  rec.saveId = null;
+}
+
+let migrated = false;
+async function migrateOnce() {
+  if (migrated) return;
+  migrated = true;
+  try { await boards.migrate(ROOT(), STORE(), me, toBin, (...a) => console.error(...a)); } catch (e) { console.error('migrate', e); }
+}
+
+// A board that's still an old folder somewhere (an old .eyerefs inside a folder)
+async function adoptFolder(rec) {
+  const inStore = (await lib.scanProjects(STORE(), me)).find((p) => p.id === rec.id);
+  if (inStore) return inStore;
+  const dest = await lib.makeProjectDir(STORE(), '', rec.name);
+  try {
+    await fsp.cp(rec.dir, dest.dir, { recursive: true, force: true });
+    const moved = await lib.openProjectFile(path.join(dest.dir, path.basename(rec.file)), me);
+    if (!moved.shared) { await giveFile(moved); await mirror.now(moved); }
+    await toBin(rec.dir).catch(() => {});
+    return moved;
+  } catch (e) {
+    await fsp.rm(dest.dir, { recursive: true, force: true }).catch(() => {});
+    throw e;
+  }
+}
 
 // ---------- each board remembers its window ----------
 // Size and place of the window per board, brought back when that board opens.
@@ -233,12 +301,16 @@ handle('app:quitNow', async (opts) => {
 async function allProjects(online = true) {
   const local = [];
   const seenIds = new Set();
-  for (const p of [...await lib.scanProjects(ROOT(), me), ...(await lib.scanProjects(SCRATCH(), me)).map((p) => ({ ...p, scratch: true }))]) {
+  let loose = [];
+  try { loose = (await boards.reconcile(ROOT(), STORE(), me, { busy: busyBoard, retire })).loose; } catch (e) { console.error('reconcile', e); }
+  for (const p of [...await lib.scanProjects(STORE(), me), ...(await lib.scanProjects(SCRATCH(), me)).map((p) => ({ ...p, scratch: true }))]) {
     if (seenIds.has(p.id)) continue; // a half finished move can leave a copy behind
     seenIds.add(p.id);
     p.modified = await lastEdited(p.dir);
     local.push(p);
   }
+  // Board files in Documents/Eye Refs not opened on this computer yet
+  for (const f of loose) if (!seenIds.has(f.id)) { seenIds.add(f.id); local.push(f); }
   let remote = [];
   if (online) { try { remote = await cloud.call('projects.list', {}, 20000); } catch (_) { remote = []; } }
   const fresh = online && remote.length ? news(remote) : null;
@@ -310,6 +382,7 @@ async function closeCurrent() {
   if (s) { try { await s.flush(); } catch (_) {} }
   if (y) { try { await y.stop(); } catch (_) {} }
   if (s) { try { await s.close(); } catch (_) {} }
+  if (s) { try { await mirror.settle(s.rec); } catch (_) {} } // the file gets the very last edit
 }
 
 // Opening, closing, saving and sharing boards run one at a time, so two quick
@@ -342,7 +415,7 @@ async function openProject(rec) {
     state: (items) => send('board:state', { projectId: rec.id, items }),
     status: (st) => send('board:status', { projectId: rec.id, status: st }),
     presence: () => {},
-  }, { onSaved: () => { if (sync) sync.kick(); } });
+  }, { onSaved: () => { if (sync) sync.kick(); mirror.kick(rec); } });
   session = s;
   restoreBoardWindow(rec.id);
   if (rec.shared && settings.news) { settings.news.seen[rec.shared.id] = Date.now(); }
@@ -389,7 +462,7 @@ function sessionFor(projectId) {
 }
 
 async function findLocal(id) {
-  const list = [...await lib.scanProjects(ROOT(), me), ...await lib.scanProjects(SCRATCH(), me)];
+  const list = [...await lib.scanProjects(STORE(), me), ...await lib.scanProjects(SCRATCH(), me)];
   return list.find((p) => p.id === id || (p.shared && p.shared.id === id)) || null;
 }
 
@@ -487,20 +560,9 @@ handle('projects:delete', (id, mode) => serial(async () => {
       return { error: (e && e.message) || "Couldn't reach the server. Check your connection and try again." };
     }
   }
-  if (p.dir && (await exists(p.dir))) {
-    let moved = false;
-    try { await shell.trashItem(p.dir); moved = true; } catch (_) {}
-    if (!moved) {
-      // No Trash on this computer: keep it in the app's own Deleted boards folder
-      const bin = path.join(app.getPath('userData'), 'Deleted boards');
-      await fsp.mkdir(bin, { recursive: true });
-      const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
-      await fsp.rename(p.dir, path.join(bin, `${path.basename(p.dir)} ${stamp}`)).catch(async () => {
-        await fsp.cp(p.dir, path.join(bin, `${path.basename(p.dir)} ${stamp}`), { recursive: true });
-        await fsp.rm(p.dir, { recursive: true, force: true });
-      });
-    }
-  }
+  // Your own board: its file goes to the Trash, and so does its working copy
+  if (p.doc && !p.shared) await mirror.queue(p, () => toBin(p.doc));
+  if (p.dir) await toBin(p.dir);
   if (Array.isArray(settings.pins) && settings.pins.includes(id)) { settings.pins = settings.pins.filter((x) => x !== id); saveSettings(); }
   if (settings.boardWin && settings.boardWin[id]) { delete settings.boardWin[id]; saveSettings(); }
   return { ok: true };
@@ -508,8 +570,11 @@ handle('projects:delete', (id, mode) => serial(async () => {
 
 handle('projects:create', (name) => serial(async () => {
   if (!name || !name.trim()) return { error: 'Give the project a name.' };
-  const rec = await lib.createProject(ROOT(), me, name, '');
-  return openProject(rec);
+  const rec = await lib.createProject(STORE(), me, name, '');
+  await giveFile(rec);
+  const res = await openProject(rec);
+  await mirror.now(rec);
+  return res;
 }));
 
 // PureRef style: a fresh untitled board, saved with a name later
@@ -531,7 +596,8 @@ handle('projects:save', (projectId, name) => serial(async () => {
   await closeCurrent();
   let rec;
   try {
-    rec = await lib.saveScratch(old, ROOT(), name);
+    rec = await lib.saveScratch(old, STORE(), name);
+    await giveFile(rec);
   } catch (e) {
     // Couldn't move it: keep working on the untitled board rather than leave nothing open
     const res = await openProject(old);
@@ -539,16 +605,23 @@ handle('projects:save', (projectId, name) => serial(async () => {
     return res;
   }
   rec.mine = true;
-  return openProject(rec);
+  const res = await openProject(rec);
+  await mirror.now(rec);
+  return res;
 }));
 
 handle('projects:open', (id) => serial(async () => {
   let rec = await findLocal(id);
   if (!rec) {
+    // A board file in Documents/Eye Refs that isn't open on this computer yet
+    const file = (await allProjects(false)).find((p) => p.fileOnly && p.id === id);
+    if (file) return openProject(await boards.openDoc(file.doc, STORE(), me, { retire, isOpen: isOpenBoard }));
+  }
+  if (!rec) {
     // A shared board that isn't on this computer yet: make its folder, then sync fills it
     const remote = (await cloud.call('projects.list')).find((p) => p.id === id);
     if (!remote) return { error: "That board isn't shared with you anymore." };
-    rec = await lib.createProject(ROOT(), me, remote.name, '', {
+    rec = await lib.createProject(STORE(), me, remote.name, '', {
       id: remote.id, owner: { email: remote.owner, name: remote.ownerName }, shared: { id: remote.id },
     });
   }
@@ -557,15 +630,15 @@ handle('projects:open', (id) => serial(async () => {
 
 handle('projects:openFile', (file) => serial(async () => {
   if (await isPacked(file)) {
-    const projectFile = await unpack(file, ROOT(), me);
-    const rec = await lib.openProjectFile(projectFile, me);
-    const res = await openProject(rec);
-    res.unpacked = true;
-    return res;
+    const rec = await boards.openDoc(file, STORE(), me, { retire, isOpen: isOpenBoard });
+    if (session && session.rec.id === rec.id) return openProject(session.rec);
+    return openProject(rec);
   }
-  const rec = await lib.openProjectFile(file, me);
-  if (!rec) return { error: "That file isn't an Eye Refs project." };
-  return openProject(rec);
+  // An old board folder, from before boards were single files
+  const old = await lib.openProjectFile(file, me);
+  if (!old) return { error: "That file isn't an Eye Refs project." };
+  if (session && session.rec.id === old.id) return openProject(session.rec);
+  return openProject(await adoptFolder(old));
 }));
 
 handle('projects:rename', async (newName) => {
@@ -574,6 +647,7 @@ handle('projects:rename', async (newName) => {
   const s = session;
   const data = await lib.updateProject(s.rec, { name: cleanFolderName(newName) });
   s.rec.name = data.name;
+  await renameDoc(s.rec);
   // Shared boards: everyone else sees the new name too
   if (s.rec.shared) { try { await cloud.call('projects.rename', { id: s.rec.shared.id, name: data.name }); } catch (_) {} }
   return { name: data.name };
@@ -591,20 +665,36 @@ handle('projects:renameAny', (id, newName) => serial(async () => {
     if (importing.has(rec.id)) return { error: 'Wait for the files to finish coming in, then save.' };
     if (open) await closeCurrent();
     let saved;
-    try { saved = await lib.saveScratch(rec, ROOT(), name); } catch (e) {
+    try { saved = await lib.saveScratch(rec, STORE(), name); await giveFile(saved); } catch (e) {
       if (open) await openProject(rec);
       return { error: "Couldn't save the board there. Close anything using its files and try again." };
     }
     saved.mine = true;
-    if (open) { const res = await openProject(saved); return { name: saved.name, reopened: res }; }
+    if (open) { const res = await openProject(saved); await mirror.now(saved); return { name: saved.name, reopened: res }; }
+    await mirror.now(saved);
     return { name: saved.name };
   }
   if (rec.owner && me && rec.owner.email && rec.owner.email !== me.email) return { error: 'Only the owner can rename this board.' };
   const data = await lib.updateProject(rec, { name });
   rec.name = data.name;
+  await renameDoc(rec);
   if (rec.shared) { try { await cloud.call('projects.rename', { id: rec.shared.id, name: data.name }); } catch (_) {} }
   return { name: data.name };
 }));
+
+// The board file follows the board's name: "Spring.eyerefs" becomes "Summer.eyerefs"
+async function renameDoc(rec) {
+  if (!rec.doc || rec.shared) return;
+  await mirror.queue(rec, async () => {
+    const want = cleanFolderName(rec.name);
+    if (path.basename(rec.doc, path.extname(rec.doc)) === want) return;
+    const to = await boards.freeDocPath(path.dirname(rec.doc), want);
+    if (await exists(rec.doc)) await fsp.rename(rec.doc, to);
+    await lib.updateProject(rec, { doc: to });
+    rec.doc = to;
+  });
+  mirror.kick(rec); // the new name inside the file too
+}
 
 // Share: upload this board to the EyeStudio Drive, then invite people
 handle('projects:share', async (projectId, emails) => {
@@ -614,6 +704,11 @@ handle('projects:share', async (projectId, emails) => {
     await cloud.call('projects.create', { id: s.rec.id, name: s.rec.name, client: '' });
     await lib.updateProject(s.rec, { shared: { id: s.rec.id } });
     s.rec.shared = { id: s.rec.id };
+    // A shared board is a synced folder now, so its single file goes to the Trash
+    if (s.rec.doc) {
+      const doc = s.rec.doc;
+      await mirror.queue(s.rec, async () => { await toBin(doc).catch(() => {}); await lib.updateProject(s.rec, { doc: null, saveId: null }); s.rec.doc = null; });
+    }
     await serial(async () => startSync(s.rec, s)); // only if this board is still the open one
   }
   if (emails && emails.length) await cloud.call('projects.invite', { id: s.rec.shared.id, emails });
@@ -645,16 +740,26 @@ handle('projects:pack', async (projectId) => {
   if (r.canceled || !r.filePath) return { canceled: true };
   const out = r.filePath.toLowerCase().endsWith('.eyerefs') ? r.filePath : r.filePath + '.eyerefs';
   const same = (a, b) => (process.platform === 'linux' ? a === b : a.toLowerCase() === b.toLowerCase());
-  if (same(path.resolve(out), path.resolve(s.rec.file))) return { error: 'Choose a different place than the project folder.' };
+  if (same(path.resolve(out), path.resolve(s.rec.file)) || (s.rec.doc && same(path.resolve(out), path.resolve(s.rec.doc)))) return { error: "That's the board's own file. Choose a different name or place." };
   const res = await pack(s.rec, out, (f) => send('pack:progress', { fraction: f }));
   shell.showItemInFolder(out);
   return { file: out, ...res };
 });
 
-handle('projects:reveal', async () => { if (session) shell.showItemInFolder(session.rec.file); else shell.openPath(ROOT()); return true; });
+handle('projects:reveal', async () => {
+  if (session && session.rec.doc) { await mirror.now(session.rec); shell.showItemInFolder(session.rec.doc); } else shell.openPath(ROOT());
+  return true;
+});
 
 handle('board:write', async (projectId, writes) => sessionFor(projectId).write(writes));
-handle('board:flush', async () => { if (session) await session.flush(); return true; });
+// Cmd/Ctrl + S: save now, file included
+handle('board:flush', async () => {
+  if (!session) return true;
+  const s = session;
+  await s.flush();
+  const r = await mirror.now(s.rec);
+  return r && r.error ? { error: "Couldn't write the board file. Your work is safe." } : { ok: true, file: s.rec.doc || null };
+});
 
 handle('media:importPaths', async (projectId, paths) => {
   const s = sessionFor(projectId);
