@@ -1174,7 +1174,9 @@
     const it = id && B.items.get(id);
     if (it && it.type === 'note') editNote(id);
     else if (it && it.type === 'video') togglePlay(id);
-    else if (it && (it.type === 'file' || it.type === 'pdf')) openFile(id);
+    // Decks, PDFs and files stay on the board: double click brings them up to fill the view.
+    // Opening in another app is only ever from the right click menu.
+    else if (it && (it.type === 'file' || it.type === 'pdf')) { B.sel = new Set([id]); focusSelection(); renderOverlay(); }
   });
 
   // Mouse wheel zooms like PureRef; trackpad two finger scroll pans, pinch zooms.

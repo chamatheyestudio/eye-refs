@@ -967,6 +967,13 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     await win.evaluate((ids) => { Board.sel = new Set(ids); Board.focusSelection(); Board.render(); }, cards);
     await sleep(300);
     await win.screenshot({ path: `${OUT}/f2-cards.png` });
+    // Double click never opens another app: it brings the card up to fill the view
+    await win.evaluate(() => { window.__opened = 0; const o = window.eyerefs.openMedia; window.__openSpy = true; });
+    const dc = await win.evaluate((id) => { const r = Board.els.get(id).getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, s: Board.view.s }; }, cards[1]);
+    await win.mouse.dblclick(dc.x, dc.y);
+    await sleep(500);
+    const afterDc = await win.evaluate((id) => ({ s: Board.view.s, sel: [...Board.sel], toasts: [...document.querySelectorAll('#toast *')].map((t) => t.textContent).join(' ') }), cards[1]);
+    expect('double click on a file card zooms to it and never opens another app', afterDc.sel.length === 1 && afterDc.sel[0] === cards[1] && afterDc.s > dc.s && !/Shown in its folder|doesn't have an app/.test(afterDc.toasts), { dc, afterDc });
     // On Linux, showing a folder starts a helper that outlives the test, so the rule is checked on its own there
     if (process.platform !== 'linux') {
       const opened = await win.evaluate(async (id) => { const it = Board.items.get(id); return window.eyerefs.openMedia(Board.project.id, it.src, it.original); }, cards[2]);
