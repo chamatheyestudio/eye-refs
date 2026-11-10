@@ -59,6 +59,7 @@ contextBridge.exposeInMainWorld('eyerefs', {
   openMedia: call('media:open'),
   docCan: call('doc:can'),
   docGet: call('doc:get'),
+  seenVersion: call('app:seenVersion'),
   docPages: call('doc:pages'),
   docMedia: call('doc:media'),
   importBytes: call('media:importBytes'),

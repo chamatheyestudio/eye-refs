@@ -128,6 +128,8 @@
     if (r.joinResult) setTimeout(() => toast(r.joinResult.error ? r.joinResult.error : "Asked to join. You'll see the board once the owner approves.", !!r.joinResult.error), 400);
     S.admin = !!r.admin; S.teamMember = !!r.team; S.online = r.online !== false;
     S.version = r.version || '';
+    // After an update, say what changed (once). A fresh install starts quietly.
+    setTimeout(() => whatsNew(r.seenVersion, !!r.usedBefore), 900);
     $$('.beta').forEach((b) => { b.title = versionLabel(); });
     B.me = r.me;
     $('#meName').textContent = r.me.name;
@@ -294,11 +296,37 @@
       { label: 'Show in folder', onClick: () => api.reveal(), disabled: S.current && S.current.scratch },
       '-',
       { label: 'Keyboard shortcuts', key: IS_MAC ? 'Ctrl+H' : 'Mod+H', onClick: shortcutsModal },
+      { label: "What's new", onClick: () => B.showWhatsNew() },
       '-',
       { label: `Sign out ${S.me.email}`, onClick: async () => { S.current = null; B.unload(); B.clip = null; B.clipMarker = null; route(await api.signOut()); } },
       { label: `Eye Refs ${versionLabel()}`, disabled: true },
     ], r.left, r.top - 300);
   });
+
+  // ---------- what's new ----------
+  const verNum = (v) => String(v || '0').split(/[.-]/).slice(0, 3).map((n) => parseInt(n, 10) || 0);
+  const newer = (a, b) => { const x = verNum(a), y = verNum(b); for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] > y[i]; return false; };
+  function whatsNewModal(entries) {
+    if (!entries.length) return;
+    openModal((close) => [
+      el('h2', { text: `What's new in ${entries[0].version}` }),
+      el('div', { class: 'whatsnew' }, ...entries.map((e, i) => el('div', { class: 'wn-ver' },
+        i > 0 ? el('span', { class: 'wn-tag', text: e.version }) : null,
+        el('ul', {}, ...e.items.map((t) => el('li', { text: t })))))),
+      el('div', { class: 'actions' }, el('button', { class: 'btn', text: 'Got it', onclick: close })),
+    ]);
+  }
+  function whatsNew(seen, usedBefore) {
+    const all = window.WHATS_NEW || [];
+    const cur = S.version;
+    if (!cur || seen === cur) return;
+    api.seenVersion(cur);
+    // A fresh install has nothing to compare with
+    if (!seen && !usedBefore) return;
+    const from = seen || '1.0.29';
+    whatsNewModal(all.filter((e) => newer(e.version, from) && !newer(e.version, cur)).slice(0, 3));
+  }
+  B.showWhatsNew = () => whatsNewModal((window.WHATS_NEW || []).filter((e) => !newer(e.version, S.version)).slice(0, 2));
 
   // "1.0.0-beta.2" reads as "Version 1.0.0 beta 2"
   function versionLabel() {
@@ -1261,6 +1289,9 @@
   let startGen = 0;
   async function renderStart() {
     const show = !!(S.current && S.current.scratch && !S.readOnly);
+    // Decide "empty" right now from the board itself, so the home screen never
+    // waits on a later redraw to appear (it used to need Tab at launch)
+    try { document.body.classList.toggle('board-empty', !B.live().length); } catch (_) {}
     $('#start').hidden = !show;
     applySide();
     // Always opens on the short view: New board plus four recent

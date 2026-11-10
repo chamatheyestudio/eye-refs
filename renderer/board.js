@@ -2976,6 +2976,7 @@
     for (const svg of world.querySelectorAll('svg.live')) svg.remove();
     for (const node of B.els.values()) { const vv = node.querySelector('video'); if (vv) { vv.pause(); vv.removeAttribute('src'); vv.load(); } node.remove(); }
     B.els.clear(); B.items.clear(); B.sel.clear();
+    document.body.classList.add('board-empty');
     for (const j of pdfJobs.values()) if (j.task) try { j.task.cancel(); } catch (_) {}
     pdfJobs.clear();
     for (const d of pdfDocs.values()) d.then((doc) => doc.destroy()).catch(() => {});

@@ -108,6 +108,8 @@ async function boot() {
   return {
     screen: 'app', me, online, admin: identity.admin, team: identity.team,
     projects, lastProject: last || null, openFile: open, prefs: prefs(), version: app.getVersion(), root: ROOT(),
+    seenVersion: settings.seenVersion || null,
+    usedBefore: !!(settings.lastProject || (settings.boardWin && Object.keys(settings.boardWin).length) || (settings.pins && settings.pins.length)),
   };
 }
 
@@ -677,6 +679,7 @@ handle('media:importPaths', async (projectId, paths) => {
 });
 
 // ---------- decks and documents, page by page ----------
+handle('app:seenVersion', (v) => { settings.seenVersion = String(v || '').slice(0, 40); saveSettings(); return true; });
 handle('doc:get', () => { shell.openExternal(office.GET_LIBREOFFICE); return true; });
 handle('doc:can', (name) => office.isOffice(name) ? { office: true, can: office.canConvert(name), getUrl: office.GET_LIBREOFFICE } : { office: false });
 
