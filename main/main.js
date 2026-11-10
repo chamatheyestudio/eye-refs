@@ -714,7 +714,7 @@ handle('doc:pages', async (projectId, src, original) => {
           if (r && r.hash && r.src) known.set(r.hash, r.src);
         }
         const r = seen.get(v.part);
-        if (r) videos.push({ page: v.page, src: r.src, x: v.x, y: v.y, w: v.w, h: v.h, duration: r.duration || 0 });
+        if (r) videos.push({ page: v.page, src: r.src, x: v.x, y: v.y, w: v.w, h: v.h, duration: r.duration || 0, fps: r.fps || 0 });
       }
       return { pdf: pdf.src, videos };
     } catch (e) {

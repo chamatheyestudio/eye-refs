@@ -1533,7 +1533,7 @@
     box.dataset.key = key;
     box.innerHTML = '';
     for (const v of want) {
-      const wrap = el('div', { class: 'slide-vid', style: `left:${v.x * 100}%;top:${v.y * 100}%;width:${v.w * 100}%;height:${v.h * 100}%` });
+      const wrap = el('div', { class: 'slide-vid', style: `left:${v.x * 100}%;top:${v.y * 100}%;width:${v.w * 100}%;height:${v.h * 100}%`, 'data-fps': v.fps || '' });
       const video = el('video', { preload: 'metadata', playsinline: '' });
       video.loop = true;
       video.src = mediaUrl(v.src);
@@ -1554,10 +1554,12 @@
   function toggleSlideVideo(wrap) {
     const v = wrap && wrap.querySelector('video');
     if (!v) return;
+    B.lastSlideVid = wrap;
     if (v.paused) v.play().catch(() => {}); else v.pause();
   }
   function seekSlideVideo(track, clientX) {
-    const v = track.closest('.slide-vid').querySelector('video');
+    B.lastSlideVid = track.closest('.slide-vid');
+    const v = B.lastSlideVid.querySelector('video');
     const r = track.getBoundingClientRect();
     if (v && v.duration) v.currentTime = Math.max(0, Math.min(1, (clientX - r.left) / Math.max(1, r.width))) * v.duration;
   }
@@ -1795,7 +1797,7 @@
         nw: m.nw, nh: m.nh, x: ox + pos[i].x, y: oy + pos[i].y, w: sizes[i].w,
         crop: { ...ZC }, rot: 0, flipX: false, flipY: false, gray: false, locked: false, deleted: false,
         z: ++z, created: Date.now(), addedBy: B.me.name,
-        ...(r.kind === 'video' ? { vin: 0, vout: m.duration || r.duration || 0, loop: true, speed: 1 } : {}),
+        ...(r.kind === 'video' ? { vin: 0, vout: m.duration || r.duration || 0, loop: true, speed: 1, fps: r.fps || 0 } : {}),
         ...(r.kind === 'pdf' ? { page: 1, pages: m.pages || 1 } : {}),
         ...(opts.tags && r.page ? { tag: `Slide ${r.page}` } : {}),
         ...(r.kind === 'file' ? { size: r.size || 0, ext: r.ext || '', preview: (r.preview && r.preview.src) || (r.reused ? (live().find((o) => o.src === r.src && o.preview) || {}).preview || null : null) } : {}),
@@ -2239,7 +2241,61 @@
     v.muted = !unmute;
     syncVideoBar();
   }
-  function step(dir) { if (pdfStep(dir)) return; const id = activeVideoId(); const v = id && videoEl(id); if (v) { v.pause(); v.currentTime = Math.max(0, v.currentTime + dir / 30); } }
+  // The video the arrow keys step through: the selected video, a video on the
+  // selected page, or the slide video you last played
+  function currentVideo() {
+    const id = activeVideoId();
+    if (id && videoEl(id)) return { v: videoEl(id), fps: B.items.get(id).fps };
+    const ids = selIds();
+    const it = ids.length === 1 && B.items.get(ids[0]);
+    if (it && it.type === 'pdf') {
+      const wraps = [...(B.els.get(it.id) || document.createElement('div')).querySelectorAll('.slide-vid')];
+      if (wraps.length) { const w = wraps.includes(B.lastSlideVid) ? B.lastSlideVid : wraps[0]; return { v: w.querySelector('video'), fps: w.dataset.fps }; }
+    }
+    if (B.lastSlideVid && B.lastSlideVid.isConnected && !ids.length) return { v: B.lastSlideVid.querySelector('video'), fps: B.lastSlideVid.dataset.fps };
+    return null;
+  }
+  // Videos without a known frame rate measure it from the first frames they play
+  const RATES = [23.976, 24, 25, 29.97, 30, 48, 50, 59.94, 60, 120];
+  document.addEventListener('play', (e) => {
+    const v = e.target;
+    if (!(v instanceof HTMLVideoElement) || v.__fps || v.__fpsWatch || !v.requestVideoFrameCallback) return;
+    v.__fpsWatch = true;
+    const seen = [];
+    const tick = (now, meta) => {
+      seen.push(meta.mediaTime);
+      if (seen.length < 12) return v.requestVideoFrameCallback(tick);
+      const gaps = seen.slice(1).map((t, i) => t - seen[i]).filter((g) => g > 0.002).sort((a, b) => a - b);
+      if (gaps.length) {
+        const raw = 1 / gaps[0];
+        v.__fps = RATES.reduce((b, r) => (Math.abs(r - raw) < Math.abs(b - raw) ? r : b), 30);
+      }
+      v.__fpsWatch = false;
+    };
+    v.requestVideoFrameCallback(tick);
+  }, true);
+  let hintTimer = null;
+  // One frame at a time. Shift steps a second.
+  function frameStep(n, bySecond) {
+    const c = currentVideo();
+    if (!c || !c.v) return false;
+    const v = c.v;
+    const fps = Number(c.fps) || v.__fps || 30;
+    v.pause();
+    const now = Math.floor(v.currentTime * fps + 1e-4);
+    const max = v.duration ? Math.max(0, Math.floor(v.duration * fps) - 1) : Infinity;
+    const f = Math.max(0, Math.min(max, now + (bySecond ? Math.round(fps) * n : n)));
+    // The middle of the frame, so the picture shown is always that frame
+    v.currentTime = (f + 0.5) / fps;
+    if (B.onHint) {
+      B.onHint(`Frame ${f + 1}  ·  ${fmtTime(f / fps)}`);
+      clearTimeout(hintTimer);
+      hintTimer = setTimeout(() => B.onHint(''), 1200);
+    }
+    syncVideoBar();
+    return true;
+  }
+  function step(dir) { if (pdfStep(dir)) return; frameStep(dir); }
   async function grabFrame() {
     const id = activeVideoId(); const v = id && videoEl(id);
     if (!v || !canEdit()) return;
@@ -2967,7 +3023,7 @@
     copySelection, pasteInternal, pasteNative, pasteKey, deleteSelection, duplicate, toggleField, resetCrop, resetTransform, toggleCropMode, front, back,
     align, normalize, arrange, focusSelection, focusAll, focusStep, selectAll, clearSel, selIds,
     togglePlay, setInOut, toggleLoop, cycleSpeed, toggleMute, step, grabFrame, activeVideoId,
-    setTool, setGrid, setGrayCanvas, setLockedCanvas, binItems, restore, mediaUrl, contextMenu, live, setPdfPage, pdfStep, pdfPageAsPicture, openFile, makePages, retryPages, pullOutMedia,
+    setTool, setGrid, setGrayCanvas, setLockedCanvas, binItems, restore, mediaUrl, contextMenu, live, setPdfPage, pdfStep, pdfPageAsPicture, openFile, makePages, retryPages, pullOutMedia, frameStep,
   });
   window.Board = B;
 })();

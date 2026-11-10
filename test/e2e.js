@@ -657,6 +657,24 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     return { n0, n1 };
   })();
   expect('drawing works on a locked canvas', lockDraw.n1 === lockDraw.n0 + 1, lockDraw);
+  // Arrow keys step a video frame by frame; Shift steps a second
+  {
+    const vid = await win.evaluate(() => { const it = Board.live().find((i) => i.type === 'video'); if (!it) return null; Board.sel = new Set([it.id]); Board.render(); const v = Board.els.get(it.id).querySelector('video'); v.pause(); v.currentTime = 0; return { id: it.id, fps: it.fps }; });
+    if (vid) {
+      await sleep(300);
+      await win.evaluate(() => document.querySelector('#canvas').focus());
+      for (let i = 0; i < 3; i++) await win.keyboard.press('ArrowRight');
+      await sleep(250);
+      const a = await win.evaluate((id) => { const v = Board.els.get(id).querySelector('video'); return { t: v.currentTime, paused: v.paused, hint: document.querySelector('#hint').textContent }; }, vid.id);
+      await win.keyboard.press('Shift+ArrowRight');
+      await win.keyboard.press('ArrowLeft');
+      await sleep(250);
+      const b = await win.evaluate((id) => Board.els.get(id).querySelector('video').currentTime, vid.id);
+      const fps = vid.fps || 30;
+      expect('arrow keys step a video one frame at a time, Shift a second', fps === 30 && Math.abs(a.t - 3.5 / fps) < 0.002 && a.paused && /Frame 4/.test(a.hint) && Math.abs(b - (3 + 30 - 1 + 0.5) / fps) < 0.002, { vid, a, b });
+      await win.evaluate(() => Board.clearSel());
+    }
+  }
   // ...and videos still play there: a tap plays or pauses, a drag only moves the view
   {
     const vid = await win.evaluate(() => { const it = Board.live().find((i) => i.type === 'video'); if (!it) return null; Board.sel = new Set([it.id]); Board.focusSelection(); Board.clearSel(); Board.setLockedCanvas(true); return it.id; });
@@ -1014,6 +1032,19 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       const deck = { id: slides[1].id };
       await win.evaluate((id) => { Board.sel = new Set([id]); Board.focusSelection(); Board.clearSel(); }, deck.id);
       await win.waitForFunction((id) => { const v = Board.els.get(id).querySelector('.slide-vid video'); return v && v.readyState >= 1; }, deck.id, { timeout: 10000 }).catch(() => {});
+      const sv = await win.evaluate((id) => { const n = Board.els.get(id); const w = n.querySelector('.slide-vid'); const page = n.querySelector('canvas.media').getBoundingClientRect(); if (!w) return null; const r = w.getBoundingClientRect(); return { fx: (r.left - page.left) / page.width, fw: r.width / page.width, x: r.left + r.width / 2, y: r.top + r.height / 3, ready: w.querySelector('video').readyState }; }, deck.id);
+      expect('on its slide, the video sits where the deck put it', sv && Math.abs(sv.fx - 0.4875) < 0.02 && Math.abs(sv.fw - 0.42) < 0.02 && sv.ready >= 1, sv);
+      await win.screenshot({ path: `${OUT}/f3-deck.png` });
+      await win.mouse.click(sv.x, sv.y);
+      await sleep(700);
+      const playing = await win.evaluate((id) => { const v = Board.els.get(id).querySelector('.slide-vid video'); return { paused: v.paused, t: v.currentTime }; }, deck.id);
+      expect('clicking the video plays it right on the slide', !playing.paused && playing.t > 0, playing);
+      await win.evaluate((id) => { const v = Board.els.get(id).querySelector('.slide-vid video'); v.pause(); v.currentTime = 0; Board.sel = new Set([id]); Board.render(); document.querySelector('#canvas').focus(); }, deck.id);
+      await win.keyboard.press('ArrowRight'); await win.keyboard.press('ArrowRight');
+      await sleep(250);
+      const svt = await win.evaluate((id) => { const w = Board.els.get(id).querySelector('.slide-vid'); return { t: w.querySelector('video').currentTime, fps: Number(w.dataset.fps) }; }, deck.id);
+      expect('arrow keys step a video on a slide too', svt.fps === 15 && Math.abs(svt.t - 2.5 / 15) < 0.002, svt);
+      await win.evaluate(() => Board.clearSel());
       // Everything inside, in slide order, in a section named after the deck
       const before = await win.evaluate(() => Board.live().length);
       await win.evaluate((id) => Board.pullOutMedia(id), deck.id);

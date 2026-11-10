@@ -183,7 +183,9 @@ async function probeInfo(file) {
   const dur = /Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/.exec(out);
   const vid = /Stream #[^\n]*Video:\s*([a-z0-9_]+)/i.exec(out);
   const dim = /Video:[^\n]*?,\s*(\d{2,5})x(\d{2,5})/.exec(out);
+  const rate = /Video:[^\n]*?,\s*([\d.]+)\s*fps/.exec(out) || /Video:[^\n]*?,\s*([\d.]+)\s*tbr/.exec(out);
   return {
+    fps: rate ? Math.min(240, Math.max(1, parseFloat(rate[1]))) : 0,
     duration: dur ? +dur[1] * 3600 + +dur[2] * 60 + parseFloat(dur[3]) : 0,
     codec: vid ? vid[1].toLowerCase() : null,
     width: dim ? +dim[1] : 0,
@@ -323,7 +325,7 @@ async function importFile(mediaDir, file, me, known, onProgress, asName) {
   if (!mode) {
     const { name, p } = await uniqueMediaPath(mediaDir, original, me.initials, ext);
     await copyAtomic(file, p);
-    return { kind, src: name, hash, original, duration: info.duration };
+    return { kind, src: name, hash, original, duration: info.duration, fps: info.fps };
   }
   const { name, p } = await uniqueMediaPath(mediaDir, original, me.initials, 'mp4');
   if (onProgress) onProgress(0, mode);
@@ -333,7 +335,7 @@ async function importFile(mediaDir, file, me, known, onProgress, asName) {
     if (mode === 'remux') await convertVideo(file, p, 'compress', info, (f) => onProgress && onProgress(f, 'compress'));
     else throw e;
   }
-  return { kind, src: name, hash, original, duration: info.duration, reason, originalBytes: st.size };
+  return { kind, src: name, hash, original, duration: info.duration, fps: info.fps, reason, originalBytes: st.size };
 }
 
 // Images pasted from the clipboard or dragged from a browser arrive as bytes.

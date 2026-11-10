@@ -1515,7 +1515,7 @@
   }
 
   const SHORTCUTS = [
-    ['Board', [['Pan', 'Alt + drag, or middle mouse'], ['Zoom', 'Scroll, or hold Z and drag'], ['Move window', 'Right mouse drag'], ['Menu', 'Right click'], ['Focus image', 'Space'], ['Focus canvas', 'Mod+Space'], ['Reset zoom', 'Mod+0'], ['Zoom in / out', 'Mod+=  /  Mod+-'], ['Next or previous image', '→  ←'], ['Lock canvas', 'Mod+R'], ['Grayscale canvas', 'Mod+Alt+G'], ['Hide or show controls', 'Tab'], ['Select all', 'Mod+A']]],
+    ['Board', [['Pan', 'Alt + drag, or middle mouse'], ['Zoom', 'Scroll, or hold Z and drag'], ['Move window', 'Right mouse drag'], ['Menu', 'Right click'], ['Focus image', 'Space'], ['Focus canvas', 'Mod+Space'], ['Reset zoom', 'Mod+0'], ['Zoom in / out', 'Mod+=  /  Mod+-'], ['Next or previous image', '→  ←'], ['Video frame by frame', '→  ←  with a video selected'], ['Video a second at a time', 'Shift + →  ←'], ['Lock canvas', 'Mod+R'], ['Grayscale canvas', 'Mod+Alt+G'], ['Hide or show controls', 'Tab'], ['Select all', 'Mod+A']]],
     ['Items', [['Crop', 'Hold C and drag'], ['Crop with handles', 'Mod+Alt+Shift+C'], ['Keep shape / square while cropping', 'Shift  /  Shift+Alt'], ['Pan cropping', 'Hold V and drag'], ['Zoom cropping', 'Shift+V and drag'], ['Reset cropping', 'Mod+Shift+C'], ['Rotate', 'Mod + drag, or just outside a corner'], ['Rotate in 45° steps', 'Mod+Shift + drag'], ['Scale', 'Mod+Alt + drag'], ['Scale from the centre', 'Alt + corner'], ['Each from its own centre', 'Shift+Alt + corner'], ['Opacity', 'Mod+Alt+Shift + drag'], ['Move in a straight line', 'Shift + drag'], ['Snap to other pieces', 'Shift+Space + drag'], ['Flip', 'Alt+Shift+H  /  Alt+Shift+V'], ['Flip by dragging', 'Alt+Shift + drag'], ['Grayscale', 'Alt+G'], ['Toggle locked', 'Alt+L'], ['Reset transform', 'Mod+Shift+T'], ['Arrange optimal', 'Mod+P'], ['Align', 'Mod + arrows'], ['Normalize', 'Mod+Alt + arrows'], ['Send to front / back', '↑  ↓'], ['Note', 'Mod+N'], ['Copy / Cut / Paste', 'Mod+C  /  Mod+X  /  Mod+V'], ['Delete', 'Del'], ['Undo / Redo', 'Mod+Z  /  Mod+Shift+Z']]],
     ['Draw', [['Draw', 'Mod+D'], ['Pen / Eraser', 'D  /  E'], ['Text', 'T'], ['Straight line', 'Hold Shift while drawing'], ['Line opacity', 'Pen bar, or right click a line'], ['Solid / Dotted / Arrow', '1  /  2  /  3'], ['Pen colour', 'Mod+T'], ['Stop drawing', 'Esc']]],
     ['Video', [['Play or pause', 'K'], ['Set start / end', 'I  /  O'], ['Step a frame', ',  .'], ['Grab frame', 'F'], ['Sound', 'M']]],
@@ -1607,8 +1607,11 @@
     'Mod+Minus': () => B.zoomAt(innerWidth / 2, innerHeight / 2, 0.8),
     'Mod+Space': () => B.focusAll(),
     'Tab': toggleUi,
-    'Left': () => B.focusStep(-1),
-    'Right': () => B.focusStep(1),
+    // With a video in hand, the arrows step frame by frame; otherwise they move between pictures
+    'Left': () => { if (!B.frameStep(-1)) B.focusStep(-1); },
+    'Right': () => { if (!B.frameStep(1)) B.focusStep(1); },
+    'Shift+Left': () => B.frameStep(-1, true),
+    'Shift+Right': () => B.frameStep(1, true),
     'Up': () => B.front(),
     'Down': () => B.back(),
     'Mod+Up': () => B.align('top'),
