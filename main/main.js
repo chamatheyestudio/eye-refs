@@ -311,8 +311,20 @@ async function allProjects(online = true) {
   }
   // Board files in Documents/Eye Refs not opened on this computer yet
   for (const f of loose) if (!seenIds.has(f.id)) { seenIds.add(f.id); local.push(f); }
-  let remote = [];
-  if (online) { try { remote = await cloud.call('projects.list', {}, 20000); } catch (_) { remote = []; } }
+  let remote = [], listed = false;
+  if (online) { try { remote = await cloud.call('projects.list', {}, 20000); listed = Array.isArray(remote); } catch (_) { remote = []; } }
+  // A shared board that's gone from the server (the owner stopped sharing it,
+  // deleted it, or took you off it) leaves your list. Its copy is kept in the
+  // app's Deleted boards folder, never destroyed.
+  if (listed) {
+    const there = new Set(remote.map((r) => r.id));
+    for (const p of [...local]) {
+      if (!p.shared || p.mine || there.has(p.shared.id) || busyBoard(p)) continue;
+      try { await retire(p); } catch (_) { continue; }
+      local.splice(local.indexOf(p), 1);
+      tell({ id: null, title: p.name, body: `"${p.name}" is no longer shared with you.` });
+    }
+  }
   const fresh = online && remote.length ? news(remote) : null;
   const byShared = new Map(local.filter((p) => p.shared).map((p) => [p.shared.id, p]));
   for (const r of remote) {
@@ -714,6 +726,44 @@ handle('projects:share', async (projectId, emails) => {
   if (emails && emails.length) await cloud.call('projects.invite', { id: s.rec.shared.id, emails });
   return { shared: s.rec.shared, members: await cloud.call('projects.members', { id: s.rec.shared.id }) };
 });
+
+// Stop sharing: everyone else loses the board, the owner keeps it with every
+// teammate's changes, as a single file in Documents again.
+handle('projects:unshare', (projectId) => serial(async () => {
+  const s = sessionFor(projectId);
+  const rec = s.rec;
+  if (!rec.shared) return { error: "This board isn't shared." };
+  if (!rec.mine) return { error: 'Only the owner can stop sharing this board.' };
+  if (!sync) return { error: "You're offline. Stopping sharing needs a connection." };
+  // Bring down the last of everyone's changes and pictures first
+  try {
+    await s.flush();
+    await sync.tick();
+    sync.queue = sync.queue.filter((j) => j.type === 'down');
+    await sync.settle();
+  } catch (_) {}
+  await s.poll(true);
+  const missing = [];
+  for (const it of Object.values(s.merged())) {
+    if (it.deleted || !it.src) continue;
+    if (!(await exists(path.join(s.mediaDir, it.src)))) missing.push(it.src);
+  }
+  if (missing.length) return { error: `${missing.length} file${missing.length === 1 ? " hasn't" : "s haven't"} come down from the Drive yet. Check your connection and try again.` };
+  await closeCurrent();
+  try {
+    await cloud.call('projects.delete', { id: rec.shared.id });
+  } catch (e) {
+    const res = await openProject(rec);
+    res.error = (e && e.message) || "Couldn't reach the server. Check your connection and try again.";
+    return res;
+  }
+  await lib.updateProject(rec, { shared: null });
+  rec.shared = null;
+  await giveFile(rec);
+  const res = await openProject(rec);
+  await mirror.now(rec);
+  return res;
+}));
 
 // View link: anyone with it sees the board in a browser, phones too, read only
 handle('projects:viewLink', async (projectId, on) => {

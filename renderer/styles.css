@@ -600,6 +600,7 @@ body.ui-hidden #pins { display: none; }
 .btn.danger { background: #FF6E5A; color: #141414; }
 .btn.danger:hover { background: #FF8A7A; }
 .btn.danger:disabled { opacity: 0.6; }
+.btn.ghost.danger-text { color: #FF8A7A; }
 
 .pdf-pages .pg-row { display: flex; align-items: center; gap: 2px; }
 /* The pages around this one, to jump to */

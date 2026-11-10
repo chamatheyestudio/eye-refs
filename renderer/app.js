@@ -1446,6 +1446,12 @@
           list.append(el('div', { class: 'li' }, el('span', { class: 'grow', text: `${m.name}  ·  ${m.email}` }), m.owner ? el('span', { class: 'kbd', style: 'padding-right:10px', text: 'Owner' }) : remove));
         }
         box.append(list);
+        // Only the owner can take a board back
+        if (p.mine) {
+          const stop = el('button', { class: 'btn ghost danger-text', style: 'align-self:flex-start;height:32px;padding:0 12px', text: 'Stop sharing' });
+          stop.onclick = () => { close(); stopSharingModal(p); };
+          box.append(stop);
+        }
       };
       const refresh = async () => { const d = await api.members(p.id); if (d && !d.error) { data = d; draw(); } };
       const decide = async (email, allow) => { const r = await api.decide(p.id, email, allow); if (r && r.error) toast(r.error, true); await refresh(); rescan(); };
@@ -1474,6 +1480,29 @@
         canInvite ? el('div', { class: 'field' }, el('label', { for: 'shEmails', text: 'Invite people' }), emails, preview) : null,
         err,
         el('div', { class: 'actions' }, el('button', { class: 'btn ghost', text: 'Done', onclick: close }), canInvite ? btn : null),
+      ];
+    });
+  }
+
+  function stopSharingModal(p) {
+    openModal((close) => {
+      const go = el('button', { class: 'btn danger', text: 'Stop sharing' });
+      go.onclick = async () => {
+        go.disabled = true; go.textContent = 'Bringing everything down';
+        const r = await api.unshare(p.id);
+        close();
+        if (r && r.record) {
+          const err = r.error;
+          openResult({ ...r, error: undefined });
+          if (err) toast(err, true);
+          else toast(`${p.name} is yours alone again, saved as one file in Documents / Eye Refs.`);
+        } else toast((r && r.error) || "Couldn't stop sharing.", true);
+        rescan(); syncChrome();
+      };
+      return [
+        el('h2', { text: `Stop sharing "${p.name}"?` }),
+        el('p', { text: "Everyone else loses it from their list. You keep the board with all their changes, as a single file in Documents / Eye Refs. The shared copy goes to the trash in your Google Drive for 30 days." }),
+        el('div', { class: 'actions' }, el('button', { class: 'btn ghost', text: 'Cancel', onclick: close }), go),
       ];
     });
   }

@@ -1450,17 +1450,53 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     expect('leaving a shared board removes you only; the owner keeps it', items2.includes('Leave board') && !stillMember.includes('chamath@eyestudio.ae') && stillMember.length >= 1 && !(await rowOf('Brunch Edit')), { items2, stillMember });
     await win.screenshot({ path: `${OUT}/d1-after-delete.png` });
   }
+  // ---------- stop sharing ----------
+  {
+    const rowNames = () => win.evaluate(() => [...document.querySelectorAll('#tree .row .name')].map((n) => n.textContent));
+    await win.click('#tree >> text=Spring Campaign');
+    await win.waitForFunction(() => document.querySelector('#tName').textContent === 'Spring Campaign', null, { timeout: 8000 }).catch(() => {});
+    await sleep(800);
+    const before = await win.evaluate(() => ({ items: Board.live().length, shared: !!(Board.project.shared) }));
+    await win.click('#share');
+    await win.waitForSelector('#modalWrap >> text=Stop sharing', { timeout: 10000 });
+    await win.click('#modalWrap >> text=Stop sharing');
+    await win.waitForSelector('#modalWrap:not([hidden]) >> text=Stop sharing "Spring Campaign"?');
+    await win.screenshot({ path: `${OUT}/s1-stop-sharing.png` });
+    await win.click('#modalWrap >> button.danger');
+    await win.waitForFunction(() => Board.project && !Board.project.shared && document.querySelector('#tName').textContent === 'Spring Campaign', null, { timeout: 30000 }).catch(() => {});
+    await sleep(500);
+    const after = await win.evaluate(() => ({ items: Board.live().length, shared: !!(Board.project.shared), doc: Board.project.doc }));
+    const docs = fs.readdirSync(path.join(tmp, 'Documents', 'Eye Refs'));
+    const herList = gas.call({ action: 'projects.list', token: tB }).data.map((x) => x.name);
+    expect('stop sharing keeps the board, everything on it, as one file again', before.shared && !after.shared && after.items === before.items && docs.includes('Spring Campaign.eyerefs'), { before, after, docs });
+    expect('stop sharing takes it away from everyone else', !herList.includes('Spring Campaign'), herList);
+    // A board someone stops sharing with you leaves your list, kept aside in the app
+    gas.call({ action: 'projects.create', token: tB, id: 'nousaiba-board-0002', name: 'Gone Soon' });
+    gas.call({ action: 'projects.invite', token: tB, id: 'nousaiba-board-0002', emails: ['chamath@eyestudio.ae'] });
+    await win.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await win.waitForFunction(() => [...document.querySelectorAll('#tree .row .name')].some((n) => n.textContent === 'Gone Soon'), null, { timeout: 15000 }).catch(() => {});
+    await win.click('#tree >> text=Gone Soon');
+    await win.waitForFunction(() => document.querySelector('#tName').textContent === 'Gone Soon', null, { timeout: 20000 }).catch(() => {});
+    await win.click('#tree >> text=Spring Campaign');
+    await win.waitForFunction(() => document.querySelector('#tName').textContent === 'Spring Campaign', null, { timeout: 8000 }).catch(() => {});
+    gas.call({ action: 'projects.delete', token: tB, id: 'nousaiba-board-0002' });
+    await win.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await win.waitForFunction(() => ![...document.querySelectorAll('#tree .row .name')].some((n) => n.textContent === 'Gone Soon'), null, { timeout: 15000 }).catch(() => {});
+    const bin = path.join(tmp, 'cfg', 'Eye Refs', 'Deleted boards');
+    const kept = fs.existsSync(bin) ? fs.readdirSync(bin) : [];
+    const names = await rowNames();
+    expect('a board no longer shared with you leaves your list, kept aside', !names.includes('Gone Soon') && kept.some((n) => n.startsWith('Gone Soon')), { names, kept });
+  }
   const result = await win.evaluate((fresh) => ({ fresh, items: Board.live().length, status: document.querySelector('#tStatus').textContent, rows: [...document.querySelectorAll('#tree .row')].map((r) => r.textContent) }), fresh);
   await syncB.stop(); await sB.close();
   await app.close();
   const driveDir = path.join(tmp, 'drive', 'Eye Refs', 'Spring Campaign');
   console.log(JSON.stringify({
     result, request: reqRes.ok, checks,
-    driveMedia: fs.readdirSync(path.join(driveDir, 'media')).length,
-    driveChanges: fs.readdirSync(path.join(driveDir, 'changes')),
+    driveMedia: fs.existsSync(path.join(driveDir, 'media')) ? fs.readdirSync(path.join(driveDir, 'media')).length : null,
     local: fs.readdirSync(path.join(tmp, 'Documents', 'Eye Refs')),
     unsaved: fs.readdirSync(path.join(tmp, 'cfg', 'Eye Refs', 'unsaved')),
-    members: gas.call({ action: 'projects.members', token: tB, id: remote.id }).data.members.map((m) => m.email),
+
     errors,
   }, null, 1));
   srv.close();

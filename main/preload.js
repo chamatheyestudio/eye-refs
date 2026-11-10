@@ -53,6 +53,7 @@ contextBridge.exposeInMainWorld('eyerefs', {
   join: call('projects:join'),
   packProject: call('projects:pack'),
   reveal: call('projects:reveal'),
+  unshare: call('projects:unshare'),
   write: call('board:write'),
   flush: call('board:flush'),
   importPaths: call('media:importPaths'),
