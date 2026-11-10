@@ -880,19 +880,14 @@
       }
       case 'move': {
         let mx = dx, my = dy;
-        if (e.shiftKey && B.held.has(' ')) {
-          // Shift+Space: line up with the edges of nearby pieces
-          if (!g.snap) {
-            const mine = new Set(g.ids);
-            const xs = [], ys = [];
-            for (const o of live()) { if (mine.has(o.id)) continue; const b = bbox([o.id]); xs.push(b.x, b.x + b.w, b.x + b.w / 2); ys.push(b.y, b.y + b.h, b.y + b.h / 2); }
-            g.snap = { xs, ys, bb: bbox(g.ids) };
-          }
-          const thr = 8 / B.view.s, bb = g.snap.bb;
-          const near = (mine, list, d) => { let best = null; for (const m of mine) for (const o of list) { const k = o - (m + d); if (Math.abs(k) < thr && (best === null || Math.abs(k) < Math.abs(best))) best = k; } return best; };
-          const sx = near([bb.x, bb.x + bb.w, bb.x + bb.w / 2], g.snap.xs, mx); if (sx !== null) mx += sx;
-          const sy = near([bb.y, bb.y + bb.h, bb.y + bb.h / 2], g.snap.ys, my); if (sy !== null) my += sy;
-        } else if (e.shiftKey) { if (Math.abs(dx) > Math.abs(dy)) my = 0; else mx = 0; }
+        // Snapping is on unless switched off; Cmd/Ctrl moves freely. Shift+Space
+        // (PureRef's way) always snaps.
+        const spaceSnap = e.shiftKey && B.held.has(' ');
+        if (!spaceSnap && e.shiftKey) { if (Math.abs(dx) > Math.abs(dy)) my = 0; else mx = 0; }
+        if (g.ids.length && (spaceSnap || (B.snapOn && !(e.metaKey || e.ctrlKey)))) {
+          const r = snapMove(g, mx, my);
+          if (!e.shiftKey || spaceSnap) { mx = r.mx; my = r.my; } else if (my === 0) mx = r.mx; else my = r.my;
+        } else clearGuides();
         for (const s of g.start) { const it = B.items.get(s.id); it.x = s.x + mx; it.y = s.y + my; updateEl(B.els.get(s.id), it, mz); }
         renderOverlay();
         break;
@@ -937,6 +932,7 @@
           const fx = Math.abs(p.x - ax) / Math.max(1, bb.w);
           const fy = Math.abs(p.y - ay) / Math.max(1, bb.h);
           f = Math.max(0.01, Math.max(fx, fy));
+          if (B.snapOn && !(e.metaKey || e.ctrlKey)) f = snapResize(g, f, ax, ay); else clearGuides();
           g.start.forEach((s0) => {
             const it = B.items.get(s0.id);
             it.w = Math.max(MIN_SIZE, s0.w * f);
@@ -1128,10 +1124,121 @@
     renderOverlay();
   }
 
+  // ---------- snapping ----------
+  // Edges and centres line up with nearby pieces you can see; equal gaps match.
+  // The pull is measured on screen, so it feels the same at any zoom.
+  try { B.snapOn = localStorage.getItem('snap') !== '0'; B.snapGrid = localStorage.getItem('snapGrid') === '1'; } catch (_) { B.snapOn = true; B.snapGrid = false; }
+  const SNAP_PX = 5, GRID = 28;
+  const guides = el('div', { id: 'snapGuides' });
+  canvas.append(guides);
+  function clearGuides() { guides.innerHTML = ''; }
+  function snapBoxes(exclude) {
+    const W = innerWidth, H = innerHeight, out = [];
+    for (const o of live()) {
+      if (exclude.has(o.id) || o.type === 'comment') continue;
+      const b = bbox([o.id]);
+      const a = toScreen(b.x, b.y), z = toScreen(b.x + b.w, b.y + b.h);
+      if (z.x < 0 || z.y < 0 || a.x > W || a.y > H) continue;
+      out.push(b);
+    }
+    return out;
+  }
+  function guideLine(x1, y1, x2, y2) {
+    const a = toScreen(x1, y1), b = toScreen(x2, y2);
+    guides.append(el('div', { class: 'sg-line', style: `left:${Math.min(a.x, b.x)}px;top:${Math.min(a.y, b.y)}px;width:${Math.max(1, Math.abs(b.x - a.x))}px;height:${Math.max(1, Math.abs(b.y - a.y))}px` }));
+  }
+  function guideText(x, y, text) {
+    const a = toScreen(x, y);
+    guides.append(el('div', { class: 'sg-gap', text, style: `left:${a.x}px;top:${a.y}px` }));
+  }
+  const nearest = (mine, list, thr) => {
+    let best = null;
+    for (const m of mine) for (const t of list) { const k = t.v - m; if (Math.abs(k) <= thr && (!best || Math.abs(k) < Math.abs(best.k))) best = { k, t }; }
+    return best;
+  };
+  // Moving: how far to shift so the box lines up, and the guides that show it
+  // The pieces being dragged, without the text and drawings that ride along on them
+  function mainIds(ids) {
+    const set = new Set(ids);
+    const main = ids.filter((id) => { const it = B.items.get(id); return it && it.type !== 'comment' && !(it.on && set.has(it.on)); });
+    return main.length ? main : ids;
+  }
+  function snapMove(g, mx, my) {
+    clearGuides();
+    if (!g.snapBoxes) g.snapBoxes = snapBoxes(new Set(g.ids));
+    if (!g.bb0) g.bb0 = bbox(mainIds(g.ids));
+    const boxes = g.snapBoxes, b0 = g.bb0, thr = SNAP_PX / B.view.s;
+    const L = b0.x + mx, T = b0.y + my, R = L + b0.w, Bt = T + b0.h;
+    const xs = [], ys = [];
+    for (const b of boxes) { for (const v of [b.x, b.x + b.w / 2, b.x + b.w]) xs.push({ v, b }); for (const v of [b.y, b.y + b.h / 2, b.y + b.h]) ys.push({ v, b }); }
+    let sx = nearest([L, L + b0.w / 2, R], xs, thr), sy = nearest([T, T + b0.h / 2, Bt], ys, thr);
+    // Equal gaps between the neighbours on either side
+    const gap = (axis) => {
+      const lo = axis === 'x' ? L : T, hi = axis === 'x' ? R : Bt;
+      const o1 = axis === 'x' ? T : L, o2 = axis === 'x' ? Bt : R;
+      let A = null, Bn = null;
+      for (const b of boxes) {
+        const bl = axis === 'x' ? b.x : b.y, bh = axis === 'x' ? b.x + b.w : b.y + b.h;
+        const c1 = axis === 'x' ? b.y : b.x, c2 = axis === 'x' ? b.y + b.h : b.x + b.w;
+        if (c2 < o1 || c1 > o2) continue;
+        if (bh <= lo + thr && (!A || bh > A.e)) A = { e: bh, b };
+        if (bl >= hi - thr && (!Bn || bl < Bn.e)) Bn = { e: bl, b };
+      }
+      if (!A || !Bn) return null;
+      const g1 = lo - A.e, g2 = Bn.e - hi;
+      if (g1 < 0 || g2 < 0 || Math.abs(g1 - g2) > thr * 2) return null;
+      return { k: (g2 - g1) / 2, A, Bn, size: (g1 + g2) / 2 };
+    };
+    // Whichever is closer wins: an edge, or the equal gap
+    let gx = gap('x'), gy = gap('y');
+    if (gx && sx) { if (Math.abs(gx.k) <= Math.abs(sx.k)) sx = null; else gx = null; }
+    if (gy && sy) { if (Math.abs(gy.k) <= Math.abs(sy.k)) sy = null; else gy = null; }
+    // The grid, when it's showing and that's switched on
+    const onGrid = B.snapGrid && canvas.classList.contains('bg-grid');
+    let dx = sx ? sx.k : gx ? gx.k : onGrid ? Math.round(L / GRID) * GRID - L : 0;
+    let dy = sy ? sy.k : gy ? gy.k : onGrid ? Math.round(T / GRID) * GRID - T : 0;
+    const nl = L + dx, nt = T + dy, nr = nl + b0.w, nb = nt + b0.h;
+    if (sx) { const b = sx.t.b; guideLine(sx.t.v, Math.min(nt, b.y) - 4 / B.view.s, sx.t.v, Math.max(nb, b.y + b.h) + 4 / B.view.s); }
+    if (sy) { const b = sy.t.b; guideLine(Math.min(nl, b.x) - 4 / B.view.s, sy.t.v, Math.max(nr, b.x + b.w) + 4 / B.view.s, sy.t.v); }
+    const label = (n) => String(Math.round(n));
+    if (gx) { const cy = nt + b0.h / 2; guideLine(gx.A.e, cy, nl, cy); guideLine(nr, cy, gx.Bn.e, cy); guideText((gx.A.e + nl) / 2, cy, label(gx.size)); guideText((nr + gx.Bn.e) / 2, cy, label(gx.size)); }
+    if (gy) { const cx = nl + b0.w / 2; guideLine(cx, gy.A.e, cx, nt); guideLine(cx, nb, cx, gy.Bn.e); guideText(cx, (gy.A.e + nt) / 2, label(gy.size)); guideText(cx, (nb + gy.Bn.e) / 2, label(gy.size)); }
+    return { mx: mx + dx, my: my + dy };
+  }
+  // Resizing from a corner: the moving edges line up with nearby pieces
+  function snapResize(g, f, ax, ay) {
+    clearGuides();
+    if (!g.snapBoxes) g.snapBoxes = snapBoxes(new Set(g.ids));
+    const thr = SNAP_PX / B.view.s;
+    if (!g.mainBB) g.mainBB = bbox(mainIds(g.ids));
+    const mb = g.mainBB;
+    // The picture's own corner, scaled from the anchor like everything else
+    const cx0 = g.corner.includes('w') ? mb.x : mb.x + mb.w, cy0 = g.corner.includes('n') ? mb.y : mb.y + mb.h;
+    const ex = ax + (cx0 - ax) * f, ey = ay + (cy0 - ay) * f;
+    const xs = [], ys = [];
+    for (const b of g.snapBoxes) { xs.push({ v: b.x, b }, { v: b.x + b.w, b }); ys.push({ v: b.y, b }, { v: b.y + b.h, b }); }
+    const sx = nearest([ex], xs, thr), sy = nearest([ey], ys, thr);
+    const pick = sx && (!sy || Math.abs(sx.k) <= Math.abs(sy.k)) ? 'x' : sy ? 'y' : null;
+    if (!pick) return f;
+    const nf = pick === 'x' ? (sx.t.v - ax) / ((cx0 - ax) || 1) : (sy.t.v - ay) / ((cy0 - ay) || 1);
+    if (!(nf > 0.01)) return f;
+    const ny = ay + (cy0 - ay) * nf, nx = ax + (cx0 - ax) * nf;
+    const top = Math.min(ay, ny), bot = Math.max(ay, ny), lft = Math.min(ax, nx), rgt = Math.max(ax, nx);
+    if (pick === 'x') { const b = sx.t.b; guideLine(sx.t.v, Math.min(top, b.y), sx.t.v, Math.max(bot, b.y + b.h)); }
+    else { const b = sy.t.b; guideLine(Math.min(lft, b.x), sy.t.v, Math.max(rgt, b.x + b.w), sy.t.v); }
+    return nf;
+  }
+  function setSnap(on, grid) {
+    if (on !== undefined) B.snapOn = !!on;
+    if (grid !== undefined) B.snapGrid = !!grid;
+    try { localStorage.setItem('snap', B.snapOn ? '1' : '0'); localStorage.setItem('snapGrid', B.snapGrid ? '1' : '0'); } catch (_) {}
+  }
+
   function endGesture(e) {
     const g = B.gesture;
     if (!g) return;
     B.gesture = null;
+    clearGuides();
     canvas.classList.remove('panning');
     marquee.hidden = true;
     try { canvas.releasePointerCapture(e.pointerId); } catch (_) {}
@@ -3024,7 +3131,7 @@
     copySelection, pasteInternal, pasteNative, pasteKey, deleteSelection, duplicate, toggleField, resetCrop, resetTransform, toggleCropMode, front, back,
     align, normalize, arrange, focusSelection, focusAll, focusStep, selectAll, clearSel, selIds,
     togglePlay, setInOut, toggleLoop, cycleSpeed, toggleMute, step, grabFrame, activeVideoId,
-    setTool, setGrid, setGrayCanvas, setLockedCanvas, binItems, restore, mediaUrl, contextMenu, live, setPdfPage, pdfStep, pdfPageAsPicture, openFile, makePages, retryPages, pullOutMedia, frameStep,
+    setTool, setGrid, setGrayCanvas, setLockedCanvas, binItems, restore, mediaUrl, contextMenu, live, setPdfPage, pdfStep, pdfPageAsPicture, openFile, makePages, retryPages, pullOutMedia, frameStep, setSnap, bbox,
   });
   window.Board = B;
 })();

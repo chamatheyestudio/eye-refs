@@ -43,6 +43,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
   // Like PureRef: straight onto a blank untitled board
   await win.waitForSelector('#title:not([hidden])');
+  expect('snapping is on for a new user', await win.evaluate(() => Board.snapOn === true && Board.snapGrid === false));
+  // Most checks drag by exact amounts; snapping gets its own checks further on
+  await win.evaluate(() => Board.setSnap(false));
   await win.waitForFunction(() => document.querySelector('#tName').textContent === 'Untitled');
   expect('opens in the normal view, not see through', await win.evaluate(() => !document.body.classList.contains('see')));
   await win.evaluate(async (src) => {
@@ -947,6 +950,73 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       await win.evaluate(() => { Board.undo(); Board.undo(); });
     }
     await win.evaluate(() => Board.clearSel());
+  }
+
+  // ---------- snapping ----------
+  {
+    // Three pictures in a row, at known spots, nothing turned
+    const fresh = await win.evaluate(async (fs) => { const before = new Set(Board.items.keys()); await Board.addPaths(fs); return [...Board.items.keys()].filter((k) => !before.has(k)); }, ['warm.jpg', 'night.jpg', 'pattern.png'].map((n) => path.join(SRC, n)));
+    const set = await win.evaluate((ids) => {
+      if (ids.length < 3) return null;
+      const far = 50000;
+      Board.commit([
+        { id: ids[0], fields: { x: far, y: far, w: 400, rot: 0, crop: { l: 0, t: 0, r: 0, b: 0 } } },
+        { id: ids[1], fields: { x: far + 700, y: far + 40, w: 300, rot: 0, crop: { l: 0, t: 0, r: 0, b: 0 } } },
+        { id: ids[2], fields: { x: far + 1300, y: far, w: 400, rot: 0, crop: { l: 0, t: 0, r: 0, b: 0 } } },
+      ]);
+      Board.sel = new Set(ids); Board.focusSelection(); Board.clearSel();
+      Board.setSnap(true);
+      return { ids, far };
+    }, fresh);
+    if (set) {
+      await sleep(400);
+      const [A, M, C] = set.ids;
+      const scr = (id) => win.evaluate((i) => { const it = Board.items.get(i); const d = Board.bbox([i]); const a = Board.toScreen(d.x, d.y), z = Board.toScreen(d.x + d.w, d.y + d.h); return { l: a.x, t: a.y, r: z.x, b: z.y, x: it.x, y: it.y, s: Board.view.s }; }, id);
+      const a0 = await scr(A), m0 = await scr(M);
+      // Drag the middle one so its top is 3 screen pixels below the left one's top
+      const grab = { x: (m0.l + m0.r) / 2, y: (m0.t + m0.b) / 2 };
+      const dy = a0.t + 3 - m0.t;
+      await win.mouse.move(grab.x, grab.y); await win.mouse.down();
+      await win.mouse.move(grab.x + 10, grab.y + dy, { steps: 6 });
+      const lines = await win.evaluate(() => document.querySelectorAll('#snapGuides .sg-line').length);
+      await win.mouse.up();
+      const m1 = await scr(M);
+      expect('moving a picture near another lines up its edge, with a guide', Math.abs(m1.y - set.far) < 0.01 && lines > 0 && (await win.evaluate(() => document.querySelectorAll('#snapGuides *').length)) === 0, { y: m1.y, want: set.far, lines });
+      await win.evaluate(() => Board.undo());
+      // Holding Cmd/Ctrl moves freely
+      await win.mouse.move(grab.x, grab.y); await win.mouse.down();
+      await win.keyboard.down('ControlOrMeta');
+      await win.mouse.move(grab.x + 10, grab.y + dy, { steps: 6 });
+      await win.mouse.up(); await win.keyboard.up('ControlOrMeta');
+      const m2 = await scr(M);
+      expect('holding Cmd or Ctrl moves without snapping', Math.abs(m2.y - set.far) > 1, { y: m2.y });
+      await win.evaluate(() => Board.undo());
+      // Equal gaps: drop the middle one a little off centre between the other two
+      const c0 = await scr(C), m3 = await scr(M);
+      const gapL = m3.l - a0.r, gapR = c0.l - m3.r;
+      const shift = (gapR - gapL) / 2 + 3;
+      await win.mouse.move(grab.x, grab.y); await win.mouse.down();
+      await win.mouse.move(grab.x + shift, grab.y + 30, { steps: 6 });
+      const gapText = await win.evaluate(() => [...document.querySelectorAll('#snapGuides .sg-gap')].map((t) => t.textContent));
+      await win.mouse.up();
+      const eq = await win.evaluate((ids) => { const [a, m, c] = ids.map((i) => Board.bbox([i])); return { g1: m.x - (a.x + a.w), g2: c.x - (m.x + m.w) }; }, set.ids);
+      expect('a picture between two others snaps to equal gaps, and shows them', Math.abs(eq.g1 - eq.g2) < 0.01 && gapText.length === 2 && gapText[0] === String(Math.round(eq.g1)), { eq, gapText });
+      await win.evaluate(() => Board.undo());
+      // Resizing: the corner lines up with a neighbour's edge
+      await win.evaluate((i) => { Board.sel = new Set([i]); Board.render(); }, A);
+      const h = await win.evaluate(() => { const r = document.querySelector('#overlay .h.se').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
+      const cBox = await win.evaluate((i) => Board.bbox([i]), C);
+      const target = await win.evaluate((v) => Board.toScreen(v.x, v.y + v.h), cBox);
+      const aBox0 = await win.evaluate((i) => Board.bbox([i]), A);
+      const aim = await win.evaluate((v) => Board.toScreen(v.x + v.w, v.y + v.h), aBox0);
+      // C's bottom is lower than A's? Make A taller so its bottom meets near C's bottom
+      await win.mouse.move(h.x, h.y); await win.mouse.down();
+      await win.mouse.move(h.x + 40, target.y + 3, { steps: 8 });
+      await win.mouse.up();
+      const aBox = await win.evaluate((i) => Board.bbox([i]), A);
+      expect('resizing a corner lines up with a neighbour', Math.abs((aBox.y + aBox.h) - (cBox.y + cBox.h)) < 0.05 || Math.abs((aBox.x + aBox.w) - cBox.x) < 0.05, { aBox, cBox, aim });
+      await win.evaluate((ids) => { Board.undo(); Board.clearSel(); Board.setSnap(false); Board.sel = new Set(ids); Board.deleteSelection(); Board.clearSel(); }, set.ids);
+    }
   }
 
 
