@@ -1799,6 +1799,31 @@
     sectionFromSelection(String(it.original || 'Deck').replace(/\.[^.]*$/, ''), { quiet: true });
     toast(`${ids.length} ${ids.length === 1 ? 'piece' : 'pieces'} taken out, in slide order.`);
   }
+  // Only what's on the selected slides: their videos (already on the board) and pictures
+  async function pullOutSlide(ids) {
+    ids = (ids || selIds()).filter((i) => { const it = B.items.get(i); return it && it.type === 'pdf' && (it.doc || (it.videos || []).length); });
+    if (!ids.length || !canEdit()) return false;
+    const pid = boardId();
+    let total = 0;
+    for (const id of ids) {
+      const it = B.items.get(id);
+      const page = it.page || 1;
+      const name = String(it.original || 'Slide').replace(/\.[^.]*$/, '');
+      const results = (it.videos || []).filter((v) => v.page === page || it.single).map((v) => ({ kind: 'video', src: v.src, duration: v.duration, fps: v.fps, original: `${name} slide ${page}.mp4`, page }));
+      if (it.doc && /^pptx?$|^ppsx$|^potx$/i.test(it.ext || '')) {
+        const r = await api.docMedia(pid, it.doc, page).catch(() => null);
+        if (leftBoard(pid)) return true;
+        for (const m of (r && r.results) || []) if (m.kind === 'image') results.push({ ...m, page });
+      }
+      if (!results.length) continue;
+      const d = dims(it);
+      const placed = await placeResults(results, { x: it.x + d.w + 60, y: it.y }, { pid, exact: true, tags: true });
+      total += placed ? placed.length : 0;
+    }
+    if (leftBoard(pid)) return true;
+    toast(total ? `${total} ${total === 1 ? 'piece' : 'pieces'} taken out of the slide.` : "There's no video or picture on this slide.");
+    return true;
+  }
   function clearTags(ids) {
     const withTag = ids.filter((i) => B.items.get(i) && B.items.get(i).tag);
     if (withTag.length) commit(withTag.map((i) => ({ id: i, fields: { tag: null } })));
@@ -2982,7 +3007,8 @@
         { label: one.doc ? 'Open original in its app' : 'Open in its app', onClick: () => openFile(one.id) },
         '-');
     }
-    if (one && one.type === 'pdf' && one.doc) items.splice(items.length - 1, 0, { label: 'Pull out videos and pictures', onClick: () => pullOutMedia(one.id), disabled: !ed });
+    if (one && one.type === 'pdf' && (one.doc || (one.videos || []).length)) items.splice(items.length - 1, 0, { label: 'Pull out from this slide', key: 'Mod+E', onClick: () => pullOutSlide([one.id]), disabled: !ed || !((one.videos || []).length || one.doc) });
+    if (one && one.type === 'pdf' && one.doc) items.splice(items.length - 1, 0, { label: 'Pull out from the whole deck', key: 'Mod+Shift+E', onClick: () => pullOutMedia(one.id), disabled: !ed });
     if (one && one.type === 'file') {
       if (isOfficeItem(one)) items.push({ label: 'Show pages', onClick: () => makePages(one.id, { asked: true }), disabled: !ed || making.has(one.id) }, { label: 'Pull out videos and pictures', onClick: () => pullOutMedia(one.id), disabled: !ed });
       items.push({ label: 'Open', onClick: () => openFile(one.id) }, '-');
@@ -3131,7 +3157,7 @@
     copySelection, pasteInternal, pasteNative, pasteKey, deleteSelection, duplicate, toggleField, resetCrop, resetTransform, toggleCropMode, front, back,
     align, normalize, arrange, focusSelection, focusAll, focusStep, selectAll, clearSel, selIds,
     togglePlay, setInOut, toggleLoop, cycleSpeed, toggleMute, step, grabFrame, activeVideoId,
-    setTool, setGrid, setGrayCanvas, setLockedCanvas, binItems, restore, mediaUrl, contextMenu, live, setPdfPage, pdfStep, pdfPageAsPicture, openFile, makePages, retryPages, pullOutMedia, frameStep, setSnap, bbox,
+    setTool, setGrid, setGrayCanvas, setLockedCanvas, binItems, restore, mediaUrl, contextMenu, live, setPdfPage, pdfStep, pdfPageAsPicture, openFile, makePages, retryPages, pullOutMedia, pullOutSlide, frameStep, setSnap, bbox,
   });
   window.Board = B;
 })();

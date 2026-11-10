@@ -1115,6 +1115,14 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       const svt = await win.evaluate((id) => { const w = Board.els.get(id).querySelector('.slide-vid'); return { t: w.querySelector('video').currentTime, fps: Number(w.dataset.fps) }; }, deck.id);
       expect('arrow keys step a video on a slide too', svt.fps === 15 && Math.abs(svt.t - 2.5 / 15) < 0.002, svt);
       await win.evaluate(() => Board.clearSel());
+      // Just one slide: Mod+E takes its video out, beside the slide
+      await win.evaluate((id) => { Board.sel = new Set([id]); Board.render(); document.querySelector('#canvas').focus(); }, deck.id);
+      const nBefore = await win.evaluate(() => Board.live().length);
+      await win.keyboard.press('ControlOrMeta+E');
+      await win.waitForFunction((n) => Board.live().length > n, nBefore, { timeout: 15000 }).catch(() => {});
+      const one = await win.evaluate((id) => { const page = Board.items.get(id); const d = Board.bbox([id]); const out = Board.live().filter((i) => i.tag); return { n: out.length, types: out.map((i) => i.type + ':' + i.tag), right: out.every((i) => i.x >= d.x + d.w) }; }, deck.id);
+      expect('Mod+E pulls just that slide\'s video out, beside it', one.n === 1 && one.types[0] === 'video:Slide 2' && one.right, one);
+      await win.evaluate(() => { const ids = Board.live().filter((i) => i.tag).map((i) => i.id); Board.sel = new Set(ids); Board.deleteSelection(); Board.clearSel(); });
       // Everything inside, in slide order, in a section named after the deck
       const before = await win.evaluate(() => Board.live().length);
       await win.evaluate((id) => Board.pullOutMedia(id), deck.id);

@@ -729,7 +729,7 @@ handle('doc:pages', async (projectId, src, original) => {
 });
 
 // Every picture and video inside a deck or document, as they are, in slide order
-handle('doc:media', async (projectId, src) => {
+handle('doc:media', async (projectId, src, page) => {
   const s = sessionFor(projectId);
   if (s.readOnly) return { error: 'This project is view only.' };
   let file;
@@ -737,8 +737,10 @@ handle('doc:media', async (projectId, src) => {
   if (!(await exists(file))) return { error: "That file hasn't arrived on this computer yet." };
   return tracked(s.rec, async () => {
     const work = path.join(app.getPath('temp'), 'eye-refs-doc', Math.random().toString(36).slice(2, 10));
-    const list = await office.innerMedia(file).catch(() => []);
+    let list = await office.innerMedia(file).catch(() => []);
     const closer = list.length && list[list.length - 1].close ? list.pop() : null;
+    // Just one slide's pictures, when asked
+    if (page) list = list.filter((m) => m.page === page);
     const out = [];
     try {
       await fsp.mkdir(work, { recursive: true });

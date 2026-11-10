@@ -2,6 +2,13 @@
 // Newest first. Plain words, one line each.
 window.WHATS_NEW = [
   {
+    version: '1.0.33',
+    items: [
+      'Select a slide and press Cmd or Ctrl + E to pull out just its videos and pictures, right beside it.',
+      'Cmd or Ctrl + Shift + E still pulls everything out of the whole deck.',
+    ],
+  },
+  {
     version: '1.0.32',
     items: [
       'Snapping: pictures line up with the edges and centres of nearby pieces as you move or resize them, with a thin guide.',
