@@ -386,7 +386,7 @@
       const b = box(one, false);
       handles(b, ids);
       overlay.append(b);
-      if (one.type === 'pdf' && (one.pages || 1) > 1) {
+      if (one.type === 'pdf' && !one.single && (one.pages || 1) > 1) {
         // Page arrows under the PDF, at screen size
         const d = dims(one);
         const c = toScreen(one.x + d.w / 2, one.y + d.h / 2);
@@ -1494,7 +1494,7 @@
   function pdfStep(dir) {
     const ids = selIds();
     const it = ids.length === 1 && B.items.get(ids[0]);
-    if (!it || it.type !== 'pdf') return false;
+    if (!it || it.type !== 'pdf' || it.single) return false;
     setPdfPage(it.id, (it.page || 1) + dir);
     return true;
   }
@@ -1583,6 +1583,55 @@
     return thumbCache.get(key);
   }
 
+  // ---------- every page laid out at once, in a section named after the file ----------
+  async function spreadPages(src, meta, at, opts = {}) {
+    const doc = await pdfDoc(src);
+    const n = doc.numPages;
+    const sizes = [];
+    for (let p = 1; p <= n; p++) {
+      const vp = (await doc.getPage(p)).getViewport({ scale: 1 });
+      sizes.push({ nw: Math.round(vp.width * 2), nh: Math.round(vp.height * 2) });
+    }
+    // Wide slides in rows of three, tall pages in rows of four
+    const wide = sizes[0].nw >= sizes[0].nh;
+    const W = wide ? 800 : 560, gap = 40;
+    const cols = Math.min(n, wide ? 3 : 4);
+    const pos = [];
+    let y = 0;
+    for (let r = 0; r * cols < n; r++) {
+      let rowH = 0;
+      for (let c = 0; c < cols && r * cols + c < n; c++) {
+        const i = r * cols + c, h = W * (sizes[i].nh / sizes[i].nw);
+        pos.push({ x: c * (W + gap), y });
+        rowH = Math.max(rowH, h);
+      }
+      y += rowH + gap;
+    }
+    const totalW = cols * W + (cols - 1) * gap, totalH = y - gap;
+    const ox = opts.exact ? at.x : at.x - totalW / 2, oy = opts.exact ? at.y : at.y - totalH / 2;
+    let z = maxZ();
+    const pages = sizes.map((sz, i) => ({
+      id: uid(),
+      fields: {
+        type: 'pdf', src, hash: null, original: meta.original || src, doc: meta.doc || null, ext: meta.ext || 'pdf', size: meta.size || 0,
+        nw: sz.nw, nh: sz.nh, x: ox + pos[i].x, y: oy + pos[i].y, w: W, page: i + 1, pages: n, single: true,
+        videos: (meta.videos || []).filter((v) => v.page === i + 1),
+        crop: { ...ZC }, rot: 0, flipX: false, flipY: false, gray: false, locked: false, deleted: false,
+        z: ++z, created: Date.now(), addedBy: B.me.name,
+      },
+    }));
+    // One page needs no section around it
+    const changes = [...(opts.extra || []), ...pages];
+    if (n > 1) {
+      const pad = 60, top = 110;
+      changes.unshift({ id: uid(), fields: { type: 'section', title: String(meta.original || 'Pages').replace(/\.[^.]*$/, ''), x: ox - pad, y: oy - pad - top, w: totalW + pad * 2, h: totalH + pad * 2 + top, z: minZ() - 1, rot: 0, deleted: false, created: Date.now(), addedBy: B.me.name } });
+    }
+    commit(changes);
+    B.sel = new Set(n > 1 ? [changes.find((c) => c.fields.type === 'section').id] : [pages[0].id]);
+    renderOverlay();
+    return pages.map((p) => p.id);
+  }
+
   // ---------- decks and documents, page by page ----------
   const OFFICE_EXT = new Set(['ppt', 'pptx', 'pps', 'ppsx', 'pot', 'potx', 'odp', 'key', 'doc', 'docx', 'dot', 'dotx', 'odt', 'rtf', 'xls', 'xlsx', 'ods']);
   const isOfficeItem = (it) => !!it && it.type === 'file' && OFFICE_EXT.has(String(it.ext || '').toLowerCase());
@@ -1609,22 +1658,11 @@
     B.waitingPages.delete(id);
     const cur = B.items.get(id);
     if (!cur || cur.deleted) return;
-    const m = await measure(r.pdf, 'pdf');
     if (leftBoard(pid) || !B.items.get(id) || B.items.get(id).deleted) return;
-    const f = Math.min(1, 900 / Math.max(m.nw, m.nh));
-    const nid = uid();
-    // The card becomes the pages, in the same spot. Undo brings the card back.
-    commit([
-      { id, fields: { deleted: true } },
-      { id: nid, fields: {
-        type: 'pdf', src: r.pdf, hash: null, original: cur.original, doc: cur.src, ext: cur.ext, size: cur.size || 0,
-        nw: m.nw, nh: m.nh, x: cur.x, y: cur.y, w: m.nw * f, page: 1, pages: m.pages || 1, videos: r.videos || [],
-        crop: { ...ZC }, rot: cur.rot || 0, flipX: false, flipY: false, gray: false, locked: false, deleted: false,
-        z: cur.z, created: Date.now(), addedBy: B.me.name,
-      } },
-    ], [{ id, fields: { deleted: false } }, { id: nid, fields: { deleted: true } }]);
-    if (B.sel.has(id)) { B.sel.delete(id); B.sel.add(nid); }
-    renderOverlay();
+    // The card becomes every page, laid out where it was. Undo brings the card back.
+    try {
+      await spreadPages(r.pdf, { original: cur.original, doc: cur.src, ext: cur.ext, size: cur.size, videos: r.videos }, { x: cur.x, y: cur.y + 110 }, { exact: true, extra: [{ id, fields: { deleted: true } }] });
+    } catch (_) { return toast("Couldn't show the pages of that one.", true); }
     if ((r.videos || []).length) toast(r.videos.length === 1 ? 'Pages ready. The video plays right on its slide.' : `Pages ready. ${r.videos.length} videos play right on their slides.`);
   }
   // Once a converter is installed, the cards that were waiting become pages
@@ -1643,7 +1681,10 @@
     if (!r || r.error) return toast((r && r.error) || "Couldn't open that file.", true);
     if (!r.results.length) return toast('There are no videos or pictures inside that one.');
     const d = dims(it);
-    const ids = await placeResults(r.results, { x: it.x + d.w + 160, y: it.y + 120 }, { pid, exact: true, tags: true });
+    // Beside the deck's section, when its pages are laid out in one
+    const sec = live().find((o) => o.type === 'section' && it.x >= o.x && it.y >= o.y && it.x + d.w <= o.x + o.w && it.y + d.h <= o.y + o.h);
+    const at = sec ? { x: sec.x + sec.w + 160, y: sec.y + 120 } : { x: it.x + d.w + 160, y: it.y + 120 };
+    const ids = await placeResults(r.results, at, { pid, exact: true, tags: true });
     if (!ids || !ids.length || leftBoard(pid)) return;
     B.sel = new Set(ids);
     sectionFromSelection(String(it.original || 'Deck').replace(/\.[^.]*$/, ''), { quiet: true });
@@ -1715,11 +1756,19 @@
   async function placeResults(results, p, opts = {}) {
     const pid = opts.pid || boardId();
     const ok = [];
+    const spread = [];
     for (const r of results) {
       if (!r) continue;
       if (r.error) { toast(r.error, true); continue; }
       const m = await measure(r.src, r.kind);
+      // A PDF with several pages comes in as all its pages, in a section
+      if (r.kind === 'pdf' && (m.pages || 1) > 1 && !m.failed) { spread.push(r); continue; }
       ok.push({ r, m });
+    }
+    for (const r of spread) {
+      if (leftBoard(pid)) break;
+      const at = ok.length ? { x: p.x, y: p.y + 600 } : p;
+      await spreadPages(r.src, { original: r.original, ext: 'pdf', size: r.size }, at).catch(() => toast("Couldn't show the pages of that PDF.", true));
     }
     if (!ok.length || leftBoard(pid)) return [];
     const sizes = ok.map(({ r, m }) => {
@@ -2762,9 +2811,10 @@
     // Kept short like PureRef: the main actions on top, the rest in side menus
     if (one && one.type === 'pdf') {
       const n = one.page || 1, total = one.pages || 1;
-      items.push(
+      if (!one.single) items.push(
         { label: 'Next page', key: 'Period', onClick: () => setPdfPage(one.id, n + 1), disabled: !ed || n >= total },
-        { label: 'Previous page', key: 'Comma', onClick: () => setPdfPage(one.id, n - 1), disabled: !ed || n <= 1 },
+        { label: 'Previous page', key: 'Comma', onClick: () => setPdfPage(one.id, n - 1), disabled: !ed || n <= 1 });
+      items.push(
         { label: one.doc ? 'Slide as picture' : 'Page as picture', onClick: () => pdfPageAsPicture(one.id), disabled: !ed },
         { label: one.doc ? 'Open original in its app' : 'Open in its app', onClick: () => openFile(one.id) },
         '-');
