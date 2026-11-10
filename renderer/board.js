@@ -710,8 +710,19 @@
     const hit = itemAt(e.clientX, e.clientY);
     // A locked canvas only stops moving pieces; drawing, typing and comments still work
     const drawingTool = ['pen', 'eraser', 'text', 'comment'].includes(B.tool);
+    // Locked canvas: videos still play. A tap plays or pauses, a slide video's bar
+    // still scrubs, and a drag still moves the view.
+    let tap = null;
+    if (B.lockedCanvas && !drawingTool && B.tool !== 'hand') {
+      const track = e.target.closest && e.target.closest('.slide-vid .sv-track');
+      if (track) { seekSlideVideo(track, e.clientX); return; }
+      const sv = e.target.closest && e.target.closest('.slide-vid');
+      if (sv) tap = { slide: sv };
+      else if (hit && B.items.get(hit).type === 'video') tap = { video: hit };
+      if (!tap && B.lockedVideo) { B.lockedVideo = null; syncVideoBar(); }
+    }
     if (B.tool === 'hand' || (B.lockedCanvas && !drawingTool) || (e.altKey && !mod && !e.shiftKey) || (B.held.has(' ') && !hit)) {
-      startGesture({ type: 'pan', v0: { ...B.view } }, e); canvas.classList.add('panning'); return;
+      startGesture({ type: 'pan', v0: { ...B.view }, tap }, e); canvas.classList.add('panning'); return;
     }
     if (B.tool === 'comment' && !B.held.has('z')) {
       e.preventDefault();
@@ -1124,6 +1135,10 @@
     canvas.classList.remove('panning');
     marquee.hidden = true;
     try { canvas.releasePointerCapture(e.pointerId); } catch (_) {}
+    if (g.type === 'pan' && g.tap && !g.moved) {
+      if (g.tap.slide) toggleSlideVideo(g.tap.slide);
+      else if (g.tap.video && B.items.get(g.tap.video)) { B.lockedVideo = g.tap.video; togglePlay(g.tap.video); syncVideoBar(); }
+    }
     switch (g.type) {
       case 'right':
         if (!g.moved) contextMenu(e.clientX, e.clientY);
@@ -1173,7 +1188,7 @@
     const id = itemAt(e.clientX, e.clientY);
     const it = id && B.items.get(id);
     if (it && it.type === 'note') editNote(id);
-    else if (it && it.type === 'video') togglePlay(id);
+    else if (it && it.type === 'video' && !B.lockedCanvas) togglePlay(id);
     // Decks, PDFs and files stay on the board: double click brings them up to fill the view.
     // Opening in another app is only ever from the right click menu.
     else if (it && (it.type === 'file' || it.type === 'pdf')) { B.sel = new Set([id]); focusSelection(); renderOverlay(); }
@@ -2110,6 +2125,8 @@
   function activeVideoId() {
     const ids = selIds();
     if (ids.length === 1 && B.items.get(ids[0]).type === 'video') return ids[0];
+    // On a locked canvas, the video you tapped keeps its bar for scrubbing
+    if (B.lockedCanvas && B.lockedVideo && B.items.get(B.lockedVideo) && !B.items.get(B.lockedVideo).deleted) return B.lockedVideo;
     return null;
   }
   const videoEl = (id) => { const n = B.els.get(id); return n && n.querySelector('video'); };
@@ -2879,7 +2896,7 @@
   }
   function setGrid(on) { B.grid = on; canvas.classList.toggle('grid', on); }
   function setGrayCanvas(on) { B.grayCanvas = on; world.classList.toggle('gray', on); }
-  function setLockedCanvas(on) { B.lockedCanvas = on; B.onChange('lock'); }
+  function setLockedCanvas(on) { B.lockedCanvas = on; if (!on) B.lockedVideo = null; syncVideoBar(); B.onChange('lock'); }
 
   // Crop with handles on one picture (Cmd/Ctrl+Alt+Shift+C toggles, like PureRef)
   function toggleCropMode(on) {

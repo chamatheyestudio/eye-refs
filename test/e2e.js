@@ -657,6 +657,25 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     return { n0, n1 };
   })();
   expect('drawing works on a locked canvas', lockDraw.n1 === lockDraw.n0 + 1, lockDraw);
+  // ...and videos still play there: a tap plays or pauses, a drag only moves the view
+  {
+    const vid = await win.evaluate(() => { const it = Board.live().find((i) => i.type === 'video'); if (!it) return null; Board.sel = new Set([it.id]); Board.focusSelection(); Board.clearSel(); Board.setLockedCanvas(true); return it.id; });
+    if (vid) {
+      await sleep(300);
+      const c = await win.evaluate((id) => { const r = Board.els.get(id).getBoundingClientRect(); const it = Board.items.get(id); return { x: r.left + r.width / 2, y: r.top + r.height / 2, ix: it.x }; }, vid);
+      await win.mouse.click(c.x, c.y);
+      await sleep(600);
+      const st1 = await win.evaluate((id) => ({ paused: Board.els.get(id).querySelector('video').paused, bar: !document.querySelector('#videoBar').hidden }), vid);
+      await win.mouse.move(c.x, c.y); await win.mouse.down(); await win.mouse.move(c.x + 60, c.y + 20, { steps: 5 }); await win.mouse.up();
+      const st2 = await win.evaluate((id) => ({ paused: Board.els.get(id).querySelector('video').paused, x: Board.items.get(id).x }), vid);
+      const c2 = await win.evaluate((id) => { const r = Board.els.get(id).getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; }, vid);
+      await win.mouse.click(c2.x, c2.y);
+      await sleep(300);
+      const st3 = await win.evaluate((id) => Board.els.get(id).querySelector('video').paused, vid);
+      expect('on a locked canvas, a tap plays and pauses a video, and a drag never moves it', !st1.paused && st1.bar && !st2.paused && st2.x === c.ix && st3, { st1, st2, st3 });
+      await win.evaluate(() => Board.setLockedCanvas(false));
+    }
+  }
   // A drag whose release got lost ends as soon as no button is held, so the window never sticks to the mouse
   const stuck = await win.evaluate(() => {
     const c = document.querySelector('#canvas');
