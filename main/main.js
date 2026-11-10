@@ -328,29 +328,28 @@ function rememberOutside(oldPath, newPath) {
 
 // Board files in Documents/Eye Refs. One check at a time; callers at the same
 // moment share it.
-let looseRun = null;
+// Each look starts fresh after the one before, so a board that closed a moment
+// ago is never missed. Callers look at their working copies first, then here.
+let looseChain = Promise.resolve();
 function looseNow() {
-  if (!looseRun) {
-    looseRun = boards.reconcile(ROOT(), STORE(), me, { busy: busyBoard, retire, extra: outsideFiles() })
-      .then((r) => r.loose, (e) => { console.error('reconcile', e); return []; })
-      .finally(() => { looseRun = null; });
-  }
-  return looseRun;
+  const run = looseChain.then(() => boards.reconcile(ROOT(), STORE(), me, { busy: busyBoard, retire, extra: outsideFiles() }))
+    .then((r) => r.loose, (e) => { console.error('reconcile', e); return []; });
+  looseChain = run.catch(() => {});
+  return run;
 }
 
 // Local projects plus shared boards not yet on this computer
 async function allProjects(online = true) {
   const local = [];
   const seenIds = new Set();
-  const loose = await looseNow();
   for (const p of [...await lib.scanProjects(STORE(), me), ...(await lib.scanProjects(SCRATCH(), me)).map((p) => ({ ...p, scratch: true }))]) {
     if (seenIds.has(p.id)) continue; // a half finished move can leave a copy behind
     seenIds.add(p.id);
     p.modified = await lastEdited(p.dir);
     local.push(p);
   }
-  // Board files in Documents/Eye Refs not opened on this computer yet
-  for (const f of loose) if (!seenIds.has(f.id)) { seenIds.add(f.id); local.push(f); }
+  // Board files: closed boards, and files not opened on this computer yet
+  for (const f of await looseNow()) if (!seenIds.has(f.id)) { seenIds.add(f.id); local.push(f); }
   let remote = [], listed = false;
   if (online) { try { remote = await cloud.call('projects.list', {}, 20000); listed = Array.isArray(remote); } catch (_) { remote = []; } }
   // A shared board that's gone from the server (the owner stopped sharing it,
