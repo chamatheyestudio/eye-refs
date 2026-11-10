@@ -220,6 +220,8 @@
       node.style.transform = `translate(${it.x}px, ${it.y}px)`;
       const label = node.firstChild;
       if (B.sectionEditing !== it.id && label.textContent !== (it.title || 'Section')) label.textContent = it.title || 'Section';
+      // Never wider than the section; long names end in "…"
+      label.style.setProperty('--secw', it.w + 'px');
       return;
     }
     if (it.type === 'note') {
@@ -1692,6 +1694,9 @@
     return thumbCache.get(key);
   }
 
+  // "Shoot review.docx.pdf" reads as "Shoot review"
+  const bareName = (n) => String(n || '').replace(/(\.(pdf|docx?|dotx?|pptx?|ppsx|potx|pps|xlsx?|key|odt|odp|ods|rtf|pages|numbers))+$/i, '').trim() || String(n || '');
+
   // ---------- every page laid out at once, in a section named after the file ----------
   async function spreadPages(src, meta, at, opts = {}) {
     const doc = await pdfDoc(src);
@@ -1733,7 +1738,7 @@
     const changes = [...(opts.extra || []), ...pages];
     if (n > 1) {
       const pad = 60, top = 110;
-      changes.unshift({ id: uid(), fields: { type: 'section', title: String(meta.original || 'Pages').replace(/\.[^.]*$/, ''), x: ox - pad, y: oy - pad - top, w: totalW + pad * 2, h: totalH + pad * 2 + top, z: minZ() - 1, rot: 0, deleted: false, created: Date.now(), addedBy: B.me.name } });
+      changes.unshift({ id: uid(), fields: { type: 'section', title: bareName(meta.original || 'Pages'), x: ox - pad, y: oy - pad - top, w: totalW + pad * 2, h: totalH + pad * 2 + top, z: minZ() - 1, rot: 0, deleted: false, created: Date.now(), addedBy: B.me.name } });
     }
     commit(changes);
     B.sel = new Set(n > 1 ? [changes.find((c) => c.fields.type === 'section').id] : [pages[0].id]);
@@ -1796,7 +1801,7 @@
     const ids = await placeResults(r.results, at, { pid, exact: true, tags: true });
     if (!ids || !ids.length || leftBoard(pid)) return;
     B.sel = new Set(ids);
-    sectionFromSelection(String(it.original || 'Deck').replace(/\.[^.]*$/, ''), { quiet: true });
+    sectionFromSelection(bareName(it.original || 'Deck'), { quiet: true });
     toast(`${ids.length} ${ids.length === 1 ? 'piece' : 'pieces'} taken out, in slide order.`);
   }
   // Only what's on the selected slides: their videos (already on the board) and pictures
@@ -1808,7 +1813,7 @@
     for (const id of ids) {
       const it = B.items.get(id);
       const page = it.page || 1;
-      const name = String(it.original || 'Slide').replace(/\.[^.]*$/, '');
+      const name = bareName(it.original || 'Slide');
       const results = (it.videos || []).filter((v) => v.page === page || it.single).map((v) => ({ kind: 'video', src: v.src, duration: v.duration, fps: v.fps, original: `${name} slide ${page}.mp4`, page }));
       if (it.doc && /^pptx?$|^ppsx$|^potx$/i.test(it.ext || '')) {
         const r = await api.docMedia(pid, it.doc, page).catch(() => null);

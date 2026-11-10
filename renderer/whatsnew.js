@@ -2,6 +2,13 @@
 // Newest first. Plain words, one line each.
 window.WHATS_NEW = [
   {
+    version: '1.0.34',
+    items: [
+      'Section names stay inside their section when you zoom out, and long names end neatly.',
+      'Names from files drop their extension, so "Shoot review.docx" reads as "Shoot review".',
+    ],
+  },
+  {
     version: '1.0.33',
     items: [
       'Select a slide and press Cmd or Ctrl + E to pull out just its videos and pictures, right beside it.',

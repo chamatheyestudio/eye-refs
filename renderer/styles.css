@@ -512,7 +512,9 @@ body.is-opening #opening .opening-card { transform: translate(-50%, -50%) scale(
 
 /* Sections: a labelled area behind references */
 .item.section { background: rgba(255, 255, 255, 0.03); box-shadow: inset 0 0 0 calc(1px * var(--ls, 1)) rgba(255, 255, 255, 0.14); border-radius: calc(14px * var(--ls, 1)); pointer-events: none; }
-.item.section .section-label { position: absolute; left: 0; top: 0; transform: scale(var(--ls, 1)); transform-origin: 0 0; padding: 10px 14px; font-size: 13px; font-weight: 600; color: var(--soft); white-space: nowrap; pointer-events: auto; cursor: grab; outline: none; border-radius: 10px; max-width: 480px; overflow: hidden; text-overflow: ellipsis; }
+/* The name reads the same size on screen, until it would outgrow the section's
+   header: then it shrinks with the board. It never runs past the section's edge. */
+.item.section .section-label { position: absolute; left: 0; top: 0; --lsc: min(var(--ls, 1), 2.6); transform: scale(var(--lsc)); transform-origin: 0 0; padding: 10px 14px; font-size: 13px; font-weight: 600; color: var(--soft); white-space: nowrap; pointer-events: auto; cursor: grab; outline: none; border-radius: 10px; max-width: min(480px, calc(var(--secw, 9999px) / var(--lsc) - 8px)); overflow: hidden; text-overflow: ellipsis; box-sizing: border-box; }
 .item.section .section-label:hover { color: var(--text); }
 .item.section .section-label[contenteditable="plaintext-only"], .item.section .section-label[contenteditable="true"] { cursor: text; color: var(--text); box-shadow: inset 0 0 0 1px var(--lime); background: var(--panel-solid); }
 #title .t-sections { -webkit-app-region: no-drag; height: 26px; padding: 0 10px; margin-left: 4px; border-radius: 999px; border: 0; background: rgba(255, 255, 255, 0.06); color: var(--soft); font: 500 12px Inter, system-ui, sans-serif; cursor: pointer; }
