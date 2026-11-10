@@ -108,7 +108,8 @@ module.exports = async function (test) {
     for (let round = 0; round < 24; round++) {
       const p = spawn(process.execPath, [child], { stdio: ['ignore', 'pipe', 'inherit'] });
       p.stdout.on('data', (d) => { for (const m of String(d).matchAll(/saved (\S+)/g)) { good.add(m[1]); sawSaves++; } });
-      await sleep(40 + Math.floor(Math.random() * 400));
+      // Mostly quick kills in the middle of a save; some later ones, so saves also finish on slow machines
+      await sleep(round % 3 === 2 ? 1500 + Math.floor(Math.random() * 1500) : 40 + Math.floor(Math.random() * 400));
       p.kill('SIGKILL');
       await new Promise((r) => p.on('exit', r));
       kills++;
