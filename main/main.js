@@ -1,5 +1,5 @@
 // Eye Refs by Matte Black
-const { app, BrowserWindow, ipcMain, dialog, shell, globalShortcut, net, screen, Menu, clipboard, Notification } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, globalShortcut, net, screen, Menu, clipboard, Notification, nativeImage } = require('electron');
 const path = require('path');
 const fsp = require('fs').promises;
 const { pathToFileURL } = require('url');
@@ -36,6 +36,7 @@ const SCRATCH = () => path.join(app.getPath('userData'), 'unsaved');
 // also one .eyerefs file each in Documents/Eye Refs, kept in step by the mirror.
 const STORE = () => path.join(app.getPath('userData'), 'boards');
 const BIN = () => path.join(app.getPath('userData'), 'Deleted boards');
+const THUMBS = () => path.join(app.getPath('userData'), 'thumbs');
 const ROOT = () => process.env.EYEREFS_ROOT || path.join(app.getPath('documents'), 'Eye Refs');
 
 // ---------- settings and sign in ----------
@@ -103,6 +104,7 @@ async function boot() {
   me = makeMe(settings.email, settings.name);
   await migrateOnce();
   await clearEmptyUntitled();
+  laterEvict(1500);
   const projects = await allProjects(online);
   const open = pendingOpenFile;
   pendingOpenFile = null;
@@ -163,6 +165,20 @@ async function clearEmptyUntitled() {
   }
 }
 
+// The pieces of a board as simple shapes, for the start screen pictures
+function shapesOf(live) {
+  return live
+    .sort((a, b) => (a.z || 0) - (b.z || 0))
+    .slice(-40)
+    .map((it) => {
+      const c = it.crop || { l: 0, r: 0, t: 0, b: 0 };
+      const vw = Math.max(1, (it.nw || it.w) * (1 - c.l - c.r)), vh = Math.max(1, (it.nh || it.w) * (1 - c.t - c.b));
+      const h = it.type === 'note' ? (it.fs || 16) * 3 : it.w * vh / vw;
+      return { type: it.type, x: it.x, y: it.y, w: it.w, h, src: it.type === 'image' && it.src ? it.src : null, color: it.color || null };
+    });
+}
+const safeId = (id) => String(id || '').replace(/[^A-Za-z0-9-]/g, '').slice(0, 64) || 'x';
+
 // Start screen, like PureRef: the latest boards with a small picture of each
 async function recentBoards() {
   const out = [];
@@ -173,16 +189,18 @@ async function recentBoards() {
     const sum = await boardSummary(p.dir);
     if (!sum.count) continue;
     const media = pathToFileURL(path.join(p.dir, 'media')).href + '/';
-    const shapes = sum.live
-      .sort((a, b) => (a.z || 0) - (b.z || 0))
-      .slice(-40)
-      .map((it) => {
-        const c = it.crop || { l: 0, r: 0, t: 0, b: 0 };
-        const vw = Math.max(1, (it.nw || it.w) * (1 - c.l - c.r)), vh = Math.max(1, (it.nh || it.w) * (1 - c.t - c.b));
-        const h = it.type === 'note' ? (it.fs || 16) * 3 : it.w * vh / vw;
-        return { type: it.type, x: it.x, y: it.y, w: it.w, h, src: it.type === 'image' && it.src ? media + encodeURIComponent(it.src) : null, color: it.color || null };
-      });
+    const shapes = shapesOf(sum.live).map((sh) => ({ ...sh, src: sh.src ? media + encodeURIComponent(sh.src) : null }));
     out.push({ id: p.id, name: p.name, scratch: !!p.scratch, modified: sum.modified, shapes });
+  }
+  // Closed boards are just their files; their little pictures were kept when they closed
+  for (const f of await looseNow()) {
+    if (seen.has(f.id)) continue;
+    seen.add(f.id);
+    const t = await readJson(path.join(THUMBS(), safeId(f.boardId), 'index.json'));
+    const fresh = t && t.saveId && t.saveId === f.saveId;
+    if (fresh && !t.count) continue;
+    const base = pathToFileURL(path.join(THUMBS(), safeId(f.boardId))).href + '/';
+    out.push({ id: f.id, name: f.name, modified: f.modified, shapes: fresh ? t.shapes.map((sh) => ({ ...sh, src: sh.src ? base + sh.src : null })) : [] });
   }
   out.sort((a, b) => b.modified - a.modified);
   return out.slice(0, 8);
@@ -297,12 +315,34 @@ handle('app:quitNow', async (opts) => {
   return { ok: true };
 });
 
+// Board files opened from somewhere else (the Desktop, Downloads) stay on the
+// list after they close, like PureRef's recent files
+function outsideFiles() { return Array.isArray(settings.outside) ? settings.outside : []; }
+function rememberOutside(oldPath, newPath) {
+  const inRoot = (f) => path.resolve(path.dirname(f)) === path.resolve(ROOT());
+  let list = outsideFiles().filter((f) => !boards.same(f, oldPath) && !(newPath && boards.same(f, newPath)));
+  if (newPath && !inRoot(newPath)) list.unshift(newPath);
+  list = list.slice(0, 60);
+  if (JSON.stringify(list) !== JSON.stringify(outsideFiles())) { settings.outside = list; saveSettings(); }
+}
+
+// Board files in Documents/Eye Refs. One check at a time; callers at the same
+// moment share it.
+let looseRun = null;
+function looseNow() {
+  if (!looseRun) {
+    looseRun = boards.reconcile(ROOT(), STORE(), me, { busy: busyBoard, retire, extra: outsideFiles() })
+      .then((r) => r.loose, (e) => { console.error('reconcile', e); return []; })
+      .finally(() => { looseRun = null; });
+  }
+  return looseRun;
+}
+
 // Local projects plus shared boards not yet on this computer
 async function allProjects(online = true) {
   const local = [];
   const seenIds = new Set();
-  let loose = [];
-  try { loose = (await boards.reconcile(ROOT(), STORE(), me, { busy: busyBoard, retire })).loose; } catch (e) { console.error('reconcile', e); }
+  const loose = await looseNow();
   for (const p of [...await lib.scanProjects(STORE(), me), ...(await lib.scanProjects(SCRATCH(), me)).map((p) => ({ ...p, scratch: true }))]) {
     if (seenIds.has(p.id)) continue; // a half finished move can leave a copy behind
     seenIds.add(p.id);
@@ -388,13 +428,104 @@ handle('app:notify', async (n) => { if (n && n.body) tell({ id: n.id || null, ti
 
 // ---------- board session ----------
 // Save first, then the final upload, so the very last edit reaches teammates.
-async function closeCurrent() {
+// keepId: the board is about to open again straight away, so it stays unpacked.
+async function closeCurrent(keepId) {
   const s = session, y = sync;
   session = null; sync = null;
   if (s) { try { await s.flush(); } catch (_) {} }
   if (y) { try { await y.stop(); } catch (_) {} }
   if (s) { try { await s.close(); } catch (_) {} }
   if (s) { try { await mirror.settle(s.rec); } catch (_) {} } // the file gets the very last edit
+  // Like PureRef: once it's closed, the board is just its file
+  if (s && s.rec.id !== keepId && !(await evict(s.rec).catch(() => false)) && s.rec.doc && !s.rec.shared) laterEvict();
+}
+
+// ---------- closed boards are only their file ----------
+// The working copy of a closed board is removed once its file is known to hold
+// everything. Opening the board unpacks the file again.
+async function newestIn(dir) {
+  let t = 0;
+  for (const sub of ['changes', 'media', 'versions']) {
+    for (const f of await fsp.readdir(path.join(dir, sub)).catch(() => [])) {
+      try { t = Math.max(t, (await fsp.stat(path.join(dir, sub, f))).mtimeMs); } catch (_) {}
+    }
+  }
+  return t;
+}
+
+async function evict(rec) {
+  if (!rec || !rec.doc || rec.shared || rec.scratch || importing.has(rec.id)) return false;
+  if (session && session.rec.id === rec.id) return false;
+  if (!(await exists(rec.dir)) || !(await boards.docThere(rec.doc))) return false;
+  const { readInfo } = require('./pack');
+  let info = await readInfo(rec.doc);
+  if (!info) return false;
+  if (info.saveId !== rec.saveId) {
+    // The file changed somewhere else: the file wins, this copy is kept aside
+    await retire(rec);
+    mirror.forget(rec.id);
+    return true;
+  }
+  // Anything newer than the last write goes into the file first
+  if ((await newestIn(rec.dir)) > (rec.mirrored || 0) + 1) {
+    const r = await mirror.now(rec);
+    if (!r || !r.ok) return false;
+    info = await readInfo(rec.doc);
+    if (!info || info.saveId !== rec.saveId) return false;
+  }
+  try { await saveThumbs(rec, info); } catch (_) {}
+  // Moved aside in one step first, so a file still in use (Windows) leaves the
+  // working copy whole rather than half deleted
+  const gone = path.join(path.dirname(rec.dir), `.gone-${safeId(rec.id)}-${randCode(4)}`);
+  try { await fsp.rename(rec.dir, gone); } catch (_) { return false; }
+  mirror.forget(rec.id);
+  await fsp.rm(gone, { recursive: true, force: true }).catch(() => {});
+  await fsp.rm(path.join(backupDir(), `${rec.id}.json`), { force: true }).catch(() => {});
+  return true;
+}
+
+// Small pictures of a closing board for the start screen
+async function saveThumbs(rec, info) {
+  const sum = await boardSummary(rec.dir);
+  const dir = path.join(THUMBS(), safeId(rec.id));
+  await fsp.rm(dir, { recursive: true, force: true }).catch(() => {});
+  await fsp.mkdir(dir, { recursive: true });
+  const shapes = shapesOf(sum.live);
+  const made = new Map();
+  for (const sh of shapes) {
+    if (!sh.src) continue;
+    if (!made.has(sh.src)) {
+      let name = null;
+      try {
+        const img = nativeImage.createFromPath(path.join(rec.dir, 'media', sh.src));
+        if (!img.isEmpty()) {
+          const small = img.getSize().width > 320 ? img.resize({ width: 320, quality: 'good' }) : img;
+          name = `${made.size}.jpg`;
+          await fsp.writeFile(path.join(dir, name), small.toJPEG(72));
+        }
+      } catch (_) {}
+      made.set(sh.src, name);
+    }
+    sh.src = made.get(sh.src);
+  }
+  await writeJson(path.join(dir, 'index.json'), { saveId: info.saveId, count: sum.count, shapes });
+}
+
+// Boards left unpacked (a crash, a file still in use when closed, the move from
+// folders) are packed away in the background
+let evictTimer = null;
+function laterEvict(ms = 8000) {
+  clearTimeout(evictTimer);
+  evictTimer = setTimeout(() => serial(evictIdle).catch(() => {}), ms);
+}
+async function evictIdle() {
+  for (const p of await lib.scanProjects(STORE(), me)) {
+    if (!p.doc || p.shared || busyBoard(p)) continue;
+    await evict(p).catch(() => {});
+  }
+  for (const e of await fsp.readdir(STORE()).catch(() => [])) {
+    if (e.startsWith('.gone-')) await fsp.rm(path.join(STORE(), e), { recursive: true, force: true }).catch(() => {});
+  }
 }
 
 // Opening, closing, saving and sharing boards run one at a time, so two quick
@@ -418,7 +549,7 @@ async function tracked(rec, fn) {
 
 async function openProject(rec) {
   const prev = session && session.rec.scratch && session.rec.id !== rec.id && isEmpty(session) ? session.rec : null;
-  await closeCurrent();
+  await closeCurrent(rec.id);
   // An untitled board nobody added anything to just goes away. Only when it is
   // truly empty: nothing on it and no files at all in its media folder, so a board
   // with an import still running is never touched.
@@ -432,6 +563,7 @@ async function openProject(rec) {
   restoreBoardWindow(rec.id);
   if (rec.shared && settings.news) { settings.news.seen[rec.shared.id] = Date.now(); }
   const items = await s.open();
+  if (rec.doc && !rec.shared) rememberOutside(null, rec.doc);
   if (rec.shared) startSync(rec, s);
   settings.lastProject = rec.id;
   saveSettings();
@@ -574,6 +706,8 @@ handle('projects:delete', (id, mode) => serial(async () => {
   }
   // Your own board: its file goes to the Trash, and so does its working copy
   if (p.doc && !p.shared) await mirror.queue(p, () => toBin(p.doc));
+  if (p.doc && !p.shared) rememberOutside(p.doc, null);
+  if (p.fileOnly && p.boardId && !(await looseNow()).some((f) => f.boardId === p.boardId)) await fsp.rm(path.join(THUMBS(), safeId(p.boardId)), { recursive: true, force: true }).catch(() => {});
   if (p.dir) await toBin(p.dir);
   if (Array.isArray(settings.pins) && settings.pins.includes(id)) { settings.pins = settings.pins.filter((x) => x !== id); saveSettings(); }
   if (settings.boardWin && settings.boardWin[id]) { delete settings.boardWin[id]; saveSettings(); }
@@ -672,6 +806,17 @@ handle('projects:renameAny', (id, newName) => serial(async () => {
   if (!String(newName || '').trim()) return { error: 'Give the board a name.' };
   const open = session && session.rec.id === id ? session : null;
   const rec = open ? open.rec : await findLocal(id);
+  if (!rec) {
+    // A closed board is just its file: rename the file
+    const f = (await looseNow()).find((x) => x.id === id);
+    if (f) {
+      if (path.basename(f.doc, path.extname(f.doc)) === name) return { name };
+      const to = await boards.freeDocPath(path.dirname(f.doc), name);
+      await fsp.rename(f.doc, to);
+      rememberOutside(f.doc, to);
+      return { name: path.basename(to, path.extname(to)) };
+    }
+  }
   if (!rec) return { error: "That board isn't on this computer yet. Open it first." };
   if (rec.scratch) {
     if (importing.has(rec.id)) return { error: 'Wait for the files to finish coming in, then save.' };
@@ -702,6 +847,7 @@ async function renameDoc(rec) {
     if (path.basename(rec.doc, path.extname(rec.doc)) === want) return;
     const to = await boards.freeDocPath(path.dirname(rec.doc), want);
     if (await exists(rec.doc)) await fsp.rename(rec.doc, to);
+    rememberOutside(rec.doc, to);
     await lib.updateProject(rec, { doc: to });
     rec.doc = to;
   });

@@ -89,8 +89,10 @@ class Mirror {
         await pack(b.rec, b.rec.doc, null, { saveId });
         // The file is written first and only then remembered, so a crash between
         // the two leaves a file that is newer than what we remember, never older.
-        await lib.updateProject(b.rec, { saveId, mirrored: Date.now() });
+        const mirrored = Date.now();
+        await lib.updateProject(b.rec, { saveId, mirrored });
         b.rec.saveId = saveId;
+        b.rec.mirrored = mirrored;
         b.took = Date.now() - t0; b.at = Date.now();
         this.onWritten(b.rec);
         return { ok: true, file: b.rec.doc };
@@ -110,6 +112,7 @@ class Mirror {
     b.chain = next.catch(() => {});
     return next;
   }
+  forget(id) { const b = this.boards.get(id); if (b && !b.active && !b.timer) this.boards.delete(id); }
   busy(id) { const b = this.boards.get(id); return !!(b && (b.active || b.timer)); }
   queue(rec, fn) { return this.run(this.slot(rec), fn); }
 
@@ -178,11 +181,15 @@ async function migrate(root, store, me, trash, log = () => {}) {
 // ---------- files in Documents/Eye Refs ----------
 // Board files sitting in the folder, with what each says about itself.
 const infoCache = new Map(); // file -> { key, info }
-async function looseFiles(root) {
+async function looseFiles(root, extra = []) {
   const out = [];
+  const paths = [];
   for (const e of await listDir(root)) {
     if (!e.isFile() || e.name.startsWith('.') || !e.name.toLowerCase().endsWith('.eyerefs')) continue;
-    const file = path.join(root, e.name);
+    paths.push(path.join(root, e.name));
+  }
+  for (const f of extra) if (typeof f === 'string' && !paths.some((p) => same(p, f))) paths.push(path.resolve(f));
+  for (const file of paths) {
     let st;
     try { st = await fsp.stat(file); } catch (_) { continue; }
     const key = `${st.size}:${st.mtimeMs}`;
@@ -197,9 +204,9 @@ async function looseFiles(root) {
 // folder is followed. A file that was deleted takes its board with it, the way
 // deleting a PureRef file does; the working copy goes to the Deleted boards folder
 // in the app's storage, so it can still be brought back.
-async function reconcile(root, store, me, { busy = () => false, retire } = {}) {
+async function reconcile(root, store, me, { busy = () => false, retire, extra = [] } = {}) {
   const boards = await lib.scanProjects(store, me);
-  const files = await looseFiles(root);
+  const files = await looseFiles(root, extra);
   const claimed = new Set();
   const rootThere = await exists(root);
   for (const b of boards) {
@@ -214,14 +221,16 @@ async function reconcile(root, store, me, { busy = () => false, retire } = {}) {
       continue;
     }
     // Only when the file is surely gone: the folder is there and the file was written at least once
-    if (rootThere && b.saveId && retire) { await retire(b); b.retired = true; }
+    if (rootThere && b.saveId && retire) { try { await retire(b); b.retired = true; } catch (_) {} }
   }
   const live = boards.filter((b) => !b.retired);
   const byId = new Set(live.map((b) => b.id));
+  // Two files of the same board (a copy made in Finder) each get their own entry
   const loose = files
     .filter((f) => !claimed.has(path.resolve(f.file)))
     .map((f) => ({
-      id: byId.has(f.info.id) ? 'file:' + f.file : f.info.id,
+      id: byId.has(f.info.id) ? 'file:' + f.file : (byId.add(f.info.id), f.info.id),
+      boardId: f.info.id, saveId: f.info.saveId || null,
       name: path.basename(f.file, path.extname(f.file)),
       owner: f.info.owner || null,
       mine: !f.info.owner || !me || f.info.owner.email === me.email,
@@ -262,7 +271,8 @@ async function openDoc(file, store, me, { retire, isOpen = () => false } = {}) {
 }
 
 async function bringIn(file, store, me, keepId) {
-  const projectFile = await unpack(file, store, me, { keepId, doc: file });
+  // Named after the file, so a file renamed in Finder opens under its new name
+  const projectFile = await unpack(file, store, me, { keepId, doc: file, name: cleanFolderName(path.basename(file, path.extname(file))) });
   return lib.openProjectFile(projectFile, me);
 }
 

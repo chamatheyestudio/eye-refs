@@ -44,6 +44,7 @@ function toRecord(found, clientFolder, me) {
     scratch: !!d.scratch,
     doc: d.doc || null,
     saveId: d.saveId || null,
+    mirrored: d.mirrored || 0,
     dir: found.dir,
     file: found.file,
   };

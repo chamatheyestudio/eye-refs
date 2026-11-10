@@ -171,7 +171,7 @@ async function unpackInto(file, root, me, made, opts) {
   if (!project || !dest) throw new Error("That file isn't an Eye Refs board.");
   const mine = !project.owner || project.owner.email === me.email;
   const data = {
-    kind: 'eyerefs-project', format: 1, id: opts.keepId && project.id && mine && !project.shared ? project.id : crypto.randomUUID(), name: project.name, client: '',
+    kind: 'eyerefs-project', format: 1, id: opts.keepId && project.id && mine && !project.shared ? project.id : crypto.randomUUID(), name: opts.name || project.name, client: '',
     owner: { email: me.email, name: me.name }, created: (mine && project.created) || Date.now(), shared: null,
     app: 'Eye Refs by Matte Black',
   };

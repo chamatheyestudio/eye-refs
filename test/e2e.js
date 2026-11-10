@@ -1414,6 +1414,20 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     expect('Documents holds only board files', fs.readdirSync(docs).every((n) => n.endsWith('.eyerefs')), fs.readdirSync(docs));
     await win.click('#tree >> text=Spring Campaign');
     await win.waitForFunction(() => document.querySelector('#tName').textContent === 'Spring Campaign', null, { timeout: 8000 }).catch(() => {});
+    // Closed, it's only its file, like PureRef: no copy left in the app's storage
+    await sleep(800);
+    const store = path.join(tmp, 'cfg', 'Eye Refs', 'boards');
+    const inStore = () => fs.readdirSync(store).filter((d) => !d.startsWith('.')).some((d) => fs.readdirSync(path.join(store, d)).some((f) => f.endsWith('.eyerefs') && fs.readFileSync(path.join(store, d, f), 'utf8').includes(legacy.id)));
+    const thumbs = path.join(tmp, 'cfg', 'Eye Refs', 'thumbs', legacy.id);
+    const pics = fs.existsSync(thumbs) ? fs.readdirSync(thumbs).filter((f) => f.endsWith('.jpg')).length : 0;
+    expect('a closed board is only its file, with a small picture kept for the start screen', !inStore() && pics >= 1 && fs.existsSync(path.join(docs, 'New Moodboard.eyerefs')), { inStore: inStore(), pics });
+    await win.click('#tree >> text=New Moodboard');
+    await win.waitForFunction(() => document.querySelector('#tName').textContent === 'New Moodboard', null, { timeout: 10000 }).catch(() => {});
+    await sleep(600);
+    const back = await win.evaluate(() => ({ id: Board.project.id, items: Board.live().length, x: Board.live()[0] && Board.live()[0].x }));
+    expect('it opens again from the file with everything, edits included', back.id === legacy.id && back.items === 1 && back.x === 100, back);
+    await win.click('#tree >> text=Spring Campaign');
+    await win.waitForFunction(() => document.querySelector('#tName').textContent === 'Spring Campaign', null, { timeout: 8000 }).catch(() => {});
   }
   // ---------- deleting boards ----------
   {
