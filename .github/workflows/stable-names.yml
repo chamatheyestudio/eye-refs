@@ -1,0 +1,27 @@
+name: Download page names
+
+# Adds the latest installers under names that never change, so the download page
+# can always link to releases/latest/download/<name>. New releases get these from
+# build.yml; run this by hand to add them to a release that came out before.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  names:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Copy the latest installers under fixed names
+        run: |
+          set -e
+          TAG=$(gh release view -R "$GITHUB_REPOSITORY" --json tagName -q .tagName)
+          V=${TAG#v}
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p "Eye-Refs-$V-arm64.dmg" -p "Eye-Refs-$V.dmg" -p "Eye-Refs-Setup-$V.exe"
+          cp "Eye-Refs-$V-arm64.dmg" Eye-Refs-Mac-Apple-Silicon.dmg
+          cp "Eye-Refs-$V.dmg" Eye-Refs-Mac-Intel.dmg
+          cp "Eye-Refs-Setup-$V.exe" Eye-Refs-Windows.exe
+          gh release upload "$TAG" Eye-Refs-Mac-Apple-Silicon.dmg Eye-Refs-Mac-Intel.dmg Eye-Refs-Windows.exe --clobber -R "$GITHUB_REPOSITORY"

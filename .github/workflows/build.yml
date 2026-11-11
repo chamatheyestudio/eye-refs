@@ -87,6 +87,13 @@ jobs:
           npm_config_arch=x64 node node_modules/ffmpeg-static/install.js
           file node_modules/ffmpeg-static/ffmpeg | grep -q x86_64
           npx electron-builder --mac dmg pkg --x64 --publish ${{ needs.prepare.outputs.publish }}
+      - name: Same files under names that never change, for the download page
+        if: needs.prepare.outputs.publish == 'always'
+        run: |
+          V=${{ needs.prepare.outputs.version }}
+          cp "dist/Eye-Refs-$V-arm64.dmg" dist/Eye-Refs-Mac-Apple-Silicon.dmg
+          cp "dist/Eye-Refs-$V.dmg" dist/Eye-Refs-Mac-Intel.dmg
+          gh release upload "v$V" dist/Eye-Refs-Mac-Apple-Silicon.dmg dist/Eye-Refs-Mac-Intel.dmg --clobber -R "$GITHUB_REPOSITORY"
       - uses: actions/upload-artifact@v4
         with:
           name: eye-refs-mac
@@ -109,5 +116,12 @@ jobs:
         shell: bash
         run: node -e "const f='package.json',p=require('./'+f);p.build.publish[0].releaseType='${{ needs.prepare.outputs.type }}';require('fs').writeFileSync(f,JSON.stringify(p,null,2))"
       - run: npx electron-builder --win nsis --x64 --publish ${{ needs.prepare.outputs.publish }}
+      - name: Same file under a name that never changes, for the download page
+        if: needs.prepare.outputs.publish == 'always'
+        shell: bash
+        run: |
+          V=${{ needs.prepare.outputs.version }}
+          cp "dist/Eye-Refs-Setup-$V.exe" dist/Eye-Refs-Windows.exe
+          gh release upload "v$V" dist/Eye-Refs-Windows.exe --clobber -R "$GITHUB_REPOSITORY"
       - uses: actions/upload-artifact@v4
         with: { name: eye-refs-windows, path: 'dist/*.exe' }
