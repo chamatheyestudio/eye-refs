@@ -5,6 +5,12 @@
   const B = window.Board;
   fillIcons();
 
+  // Pluck and LibreOffice set up state (declared early: settings can draw before boot ends)
+  const EXTRAS = {
+    pluck: { name: 'Pluck', what: 'Videos and posts from Instagram, TikTok, YouTube and more.' },
+    office: { name: 'LibreOffice', what: 'PowerPoint, Word and Excel files, page by page. About 350MB.' },
+  };
+  const X = { state: null, progress: {}, busy: false, view: null };
   const S = {
     me: null, admin: false, teamMember: false, online: true, cloud: null,
     projects: [], current: null, status: 'saved', readOnly: false,
@@ -934,11 +940,6 @@
   // ---------- Pluck and LibreOffice ----------
   // Two free helpers, set up from inside Eye Refs: downloaded and installed in
   // the background, nothing to find or click through.
-  const EXTRAS = {
-    pluck: { name: 'Pluck', what: 'Videos and posts from Instagram, TikTok, YouTube and more.' },
-    office: { name: 'LibreOffice', what: 'PowerPoint, Word and Excel files, page by page. About 350MB.' },
-  };
-  const X = { state: null, progress: {}, busy: false, view: null };
   async function extrasState() { X.state = await api.extrasState(); return X.state; }
   function extrasLabel() {
     const st = X.state;
