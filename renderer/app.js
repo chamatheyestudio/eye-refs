@@ -130,6 +130,7 @@
     S.version = r.version || '';
     // After an update, say what changed (once). A fresh install starts quietly.
     setTimeout(() => whatsNew(r.seenVersion, !!r.usedBefore), 900);
+    if (!r.extrasAsked) setTimeout(offerExtras, 1800);
     $$('.beta').forEach((b) => { b.title = versionLabel(); });
     B.me = r.me;
     $('#meName').textContent = r.me.name;
@@ -918,6 +919,8 @@
       toggle('Lock window', S.lockedWindow, async () => { await toggleWindowLock(); drawSettings(); }, 'Mod+W'),
       el('button', { class: 'set-row set-link', onclick: () => { $('#settings').hidden = true; setThrough(true); } },
         el('span', { class: 'set-label', text: 'Transparent to mouse' }), el('span', { class: 'k', text: keyLabel('Mod+T') })),
+      el('button', { class: 'set-row set-link', onclick: () => { $('#settings').hidden = true; extrasModal(['pluck', 'office']); } },
+        el('span', { class: 'set-label', text: 'Pluck and LibreOffice' }), el('span', { class: 'k', text: extrasLabel() })),
     );
   }
   document.addEventListener('pointerdown', (e) => {
@@ -928,6 +931,94 @@
 
   async function toggleWindowLock() { S.lockedWindow = !S.lockedWindow; await api.lockWindow(S.lockedWindow); toast(S.lockedWindow ? 'Window locked in place' : 'Window unlocked'); }
 
+  // ---------- Pluck and LibreOffice ----------
+  // Two free helpers, set up from inside Eye Refs: downloaded and installed in
+  // the background, nothing to find or click through.
+  const EXTRAS = {
+    pluck: { name: 'Pluck', what: 'Videos and posts from Instagram, TikTok, YouTube and more.' },
+    office: { name: 'LibreOffice', what: 'PowerPoint, Word and Excel files, page by page. About 350MB.' },
+  };
+  const X = { state: null, progress: {}, busy: false, view: null };
+  async function extrasState() { X.state = await api.extrasState(); return X.state; }
+  function extrasLabel() {
+    const st = X.state;
+    if (X.busy) return 'Setting up';
+    if (!st) return '';
+    return st.pluck && st.office ? 'Ready' : 'Set up';
+  }
+  function extrasLine(w) {
+    const p = X.progress[w];
+    if (X.state && X.state[w] && (!p || p.step === 'done')) return 'Ready';
+    if (!p) return 'Not set up';
+    if (p.step === 'downloading') return p.fraction ? `Downloading ${Math.round(p.fraction * 100)}%` : 'Downloading';
+    if (p.step === 'installing') return IS_MAC || w === 'pluck' ? 'Installing' : 'Installing. Choose Yes if Windows asks.';
+    if (p.step === 'error') return p.message || "Couldn't set it up.";
+    return 'Ready';
+  }
+  api.onExtras((p) => {
+    X.progress[p.which] = p;
+    if (p.step === 'done' && X.state) X.state[p.which] = true;
+    if (X.view) X.view();
+  });
+  async function setUpExtras(list) {
+    if (X.busy) return;
+    const st = await extrasState();
+    if (!st.supported) return toast('Set these up from their own websites on this computer.', true);
+    list = list.filter((w) => !st[w]);
+    if (!list.length) return toast('Already set up');
+    X.busy = true;
+    for (const w of list) X.progress[w] = { which: w, step: 'downloading', fraction: 0 };
+    if (X.view) X.view();
+    if (!X.view) toast(`Setting up ${list.map((w) => EXTRAS[w].name).join(' and ')} in the background.`);
+    const res = await api.extrasSetUp(list);
+    X.busy = false;
+    await extrasState();
+    if (X.view) X.view();
+    const bad = list.filter((w) => !res || res.error || (res[w] && res[w].error));
+    if (!bad.length) toast(`${list.map((w) => EXTRAS[w].name).join(' and ')} ${list.length > 1 ? 'are' : 'is'} ready`);
+    else toast((res && res.error) || (res[bad[0]] && res[bad[0]].error) || `Couldn't set up ${EXTRAS[bad[0]].name}.`, true);
+  }
+  async function extrasModal(list) {
+    await extrasState();
+    openModal((close) => {
+      const rows = el('div', { class: 'extras' });
+      const go = el('button', { class: 'btn', text: 'Set up', onclick: () => setUpExtras(list) });
+      const later = el('button', { class: 'btn ghost', text: 'Later', onclick: () => { X.view = null; close(); } });
+      X.view = () => {
+        if (rows.dataset.drawn && !rows.isConnected) { X.view = null; return; } // the window was closed
+        rows.dataset.drawn = '1';
+        rows.innerHTML = '';
+        for (const w of list) {
+          const ready = X.state && X.state[w];
+          const p = X.progress[w];
+          rows.append(el('div', { class: 'extra-row' + (ready ? ' ready' : '') + (p && p.step === 'error' ? ' failed' : '') },
+            el('div', { class: 'extra-text' }, el('b', { text: EXTRAS[w].name }), el('span', { text: EXTRAS[w].what })),
+            el('span', { class: 'extra-state', text: extrasLine(w) })));
+        }
+        const left = list.filter((w) => !(X.state && X.state[w]));
+        go.hidden = !left.length || X.busy;
+        go.textContent = left.some((w) => X.progress[w] && X.progress[w].step === 'error') ? 'Try again' : 'Set up';
+        later.textContent = !left.length ? 'Done' : X.busy ? 'Keep going in the background' : 'Later';
+      };
+      X.view();
+      return [
+        el('h2', { text: 'Set up the extras' }),
+        el('p', { text: 'Eye Refs uses two free apps for links and Office files. It downloads and installs them for you.' }),
+        rows,
+        el('div', { class: 'actions' }, later, go),
+      ];
+    });
+  }
+  // Offered once, on the first launch where something is missing
+  async function offerExtras() {
+    if (modalOpen()) return setTimeout(offerExtras, 3000);
+    const st = await extrasState();
+    api.extrasAsked();
+    if (!st || !st.supported || (st.pluck && st.office)) return;
+    extrasModal(['pluck', 'office'].filter((w) => !st[w]));
+  }
+  extrasState().catch(() => {});
+
   // A social link needs Pluck. Ask once, download it, and bring the link in by
   // itself as soon as Pluck is installed.
   let pluckWait = null;
@@ -935,13 +1026,12 @@
     const pid = S.current && S.current.id;
     openModal((close) => [
       el('h2', { text: 'Get Pluck for videos from links' }),
-      el('p', { text: "Eye Refs uses Pluck to bring in videos and posts from Instagram, TikTok, YouTube and more. It's free, and also made by Matte Black. Install it once and it runs quietly in the background from then on." }),
+      el('p', { text: "Eye Refs uses Pluck to bring in videos and posts from Instagram, TikTok, YouTube and more. It's free, and also made by Matte Black. Eye Refs sets it up for you, and the link comes in by itself once it's ready." }),
       el('div', { class: 'actions' },
         el('button', { class: 'btn ghost', text: 'Not now', onclick: close }),
-        el('button', { class: 'btn', text: 'Download Pluck', onclick: () => {
+        el('button', { class: 'btn', text: 'Set up Pluck', onclick: () => {
           close();
-          api.pluckGet();
-          toast('Downloading Pluck. Open it once to install, and the link comes in by itself.');
+          setUpExtras(['pluck']);
           clearInterval(pluckWait);
           const until = Date.now() + 20 * 60 * 1000;
           pluckWait = setInterval(async () => {
@@ -970,13 +1060,12 @@
     S.officeAsked = true;
     openModal((close) => [
       el('h2', { text: 'Get LibreOffice for decks and docs' }),
-      el('p', { text: "It's free. Eye Refs uses it to show PowerPoint, Word and Excel files page by page, with their videos playing on the slides. Until then this one stays a card." }),
+      el('p', { text: "It's free. Eye Refs uses it to show PowerPoint, Word and Excel files page by page, with their videos playing on the slides. Eye Refs sets it up for you (about 350MB), and this card turns into pages by itself." }),
       el('div', { class: 'actions' },
         el('button', { class: 'btn ghost', text: 'Not now', onclick: close }),
-        el('button', { class: 'btn', text: 'Download LibreOffice', onclick: () => {
+        el('button', { class: 'btn', text: 'Set up LibreOffice', onclick: () => {
           close();
-          api.docGet();
-          toast('Install LibreOffice, and the deck turns into pages by itself.');
+          setUpExtras(['office']);
           watch();
         } })),
     ]);

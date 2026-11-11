@@ -12,6 +12,7 @@ const pluck = require('./pluck');
 const { Session } = require('./session');
 const { Cloud } = require('./cloud');
 const { Sync, UNSENT } = require('./sync');
+const extras = require('./extras');
 const { pack, isPacked } = require('./pack');
 const boards = require('./boards');
 const { randCode, initialsFrom, firstNameFrom, cleanFolderName } = require('../shared/names');
@@ -117,6 +118,7 @@ async function boot() {
     screen: 'app', me, online, admin: identity.admin, team: identity.team,
     projects, lastProject: last || null, openFile: open, prefs: prefs(), version: app.getVersion(), root: ROOT(),
     seenVersion: settings.seenVersion || null,
+    extrasAsked: !!settings.extrasAsked,
     usedBefore: !!(settings.lastProject || (settings.boardWin && Object.keys(settings.boardWin).length) || (settings.pins && settings.pins.length)),
   };
 }
@@ -1200,6 +1202,12 @@ handle('pluck:fetch', async (projectId, url, key) => {
 handle('pluck:cancel', (token) => { pluck.cancel(String(token || '')); return true; });
 handle('pluck:cleanup', async (token) => { await pluck.cleanup(String(token || '')); return true; });
 handle('pluck:get', () => { shell.openExternal(pluck.GET_PLUCK); return true; });
+
+// Pluck and LibreOffice, set up from inside Eye Refs
+handle('extras:state', () => extras.state());
+handle('extras:setUp', (which) => extras.setUp(which, (p) => send('extras:progress', p)));
+handle('extras:cancel', () => { extras.cancel(); return true; });
+handle('extras:asked', () => { settings.extrasAsked = true; saveSettings(); return true; });
 handle('pluck:installed', () => pluck.installed());
 
 // Media as bytes for an export (a video gives the frame showing now)

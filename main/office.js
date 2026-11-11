@@ -282,4 +282,4 @@ async function extract(file, part, toDir) {
   } finally { z.close(); }
 }
 
-module.exports = { isOffice, canConvert, toPdf, deckVideos, innerMedia, extract, GET_LIBREOFFICE, DECKS, DOCS, extOf };
+module.exports = { hasLibreOffice: () => !!soffice(), isOffice, canConvert, toPdf, deckVideos, innerMedia, extract, GET_LIBREOFFICE, DECKS, DOCS, extOf };
