@@ -2,7 +2,7 @@
 // Newest first. Plain words, one line each.
 window.WHATS_NEW = [
   {
-    version: '1.0.36',
+    version: '1.0.37',
     items: [
       'Pluck and LibreOffice now set up from inside Eye Refs. One click, and they download and install in the background. Find it in Settings any time.',
       'On shared boards, files you add keep sending after you close the board, and finish next time you open Eye Refs if you quit first.',
