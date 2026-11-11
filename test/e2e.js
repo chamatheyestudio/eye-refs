@@ -522,7 +522,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   })();
   expect('a social link comes in as a video through Pluck', pluckRes.cardSeen && pluckRes.added === 1 && pluckRes.cardGone && pluckRes.tmpLeft === 0, pluckRes);
   expect('when Pluck says no, the card says why', /private/.test(pluckRes.errText || ''), pluckRes.errText);
-  expect('without Pluck, it asks to download Pluck', pluckRes.missing && pluckRes.missing.get.includes('Download Pluck') && !pluckRes.missing.card, pluckRes.missing);
+  expect('without Pluck, it asks to download Pluck', pluckRes.missing && pluckRes.missing.get.includes('Set up Pluck') && !pluckRes.missing.card, pluckRes.missing);
   // The window strip at the top never covers the board while you work
   const stripRes = await win.evaluate(() => { const hit = document.elementFromPoint(innerWidth / 2, 30); return { id: hit && hit.id, cls: hit && hit.className && String(hit.className.baseVal !== undefined ? hit.className.baseVal : hit.className) }; });
   expect('the top of the board can be clicked while working', stripRes.id !== 'topbar', stripRes);

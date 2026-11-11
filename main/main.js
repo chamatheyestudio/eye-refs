@@ -118,7 +118,7 @@ async function boot() {
     screen: 'app', me, online, admin: identity.admin, team: identity.team,
     projects, lastProject: last || null, openFile: open, prefs: prefs(), version: app.getVersion(), root: ROOT(),
     seenVersion: settings.seenVersion || null,
-    extrasAsked: !!settings.extrasAsked,
+    extrasAsked: !!settings.extrasAsked || !!process.env.EYEREFS_DATA /* tests skip the first launch offer */,
     usedBefore: !!(settings.lastProject || (settings.boardWin && Object.keys(settings.boardWin).length) || (settings.pins && settings.pins.length)),
   };
 }
