@@ -2,6 +2,14 @@
 // Newest first. Plain words, one line each.
 window.WHATS_NEW = [
   {
+    version: '1.0.36',
+    items: [
+      'Pluck and LibreOffice now set up from inside Eye Refs. One click, and they download and install in the background. Find it in Settings any time.',
+      'On shared boards, files you add keep sending after you close the board, and finish next time you open Eye Refs if you quit first.',
+      'Teammates see who they\'re waiting on, instead of Missing, while a file is still on its way.',
+    ],
+  },
+  {
     version: '1.0.35',
     items: [
       'Copy pieces from one board and paste them into another, with their pictures, videos and documents, even after the first board has closed.',
