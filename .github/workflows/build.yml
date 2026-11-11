@@ -91,8 +91,9 @@ jobs:
         if: needs.prepare.outputs.publish == 'always'
         run: |
           V=${{ needs.prepare.outputs.version }}
-          cp "dist/Eye-Refs-$V-arm64.dmg" dist/Eye-Refs-Mac-Apple-Silicon.dmg
-          cp "dist/Eye-Refs-$V.dmg" dist/Eye-Refs-Mac-Intel.dmg
+          # electron-builder names them "Eye Refs-1.0.0.dmg" (GitHub swaps the space for a dash)
+          cp "$(ls dist/*"$V"-arm64.dmg | head -1)" dist/Eye-Refs-Mac-Apple-Silicon.dmg
+          cp "$(ls dist/*"$V".dmg | grep -v arm64 | head -1)" dist/Eye-Refs-Mac-Intel.dmg
           gh release upload "v$V" dist/Eye-Refs-Mac-Apple-Silicon.dmg dist/Eye-Refs-Mac-Intel.dmg --clobber -R "$GITHUB_REPOSITORY"
       - uses: actions/upload-artifact@v4
         with:
@@ -121,7 +122,7 @@ jobs:
         shell: bash
         run: |
           V=${{ needs.prepare.outputs.version }}
-          cp "dist/Eye-Refs-Setup-$V.exe" dist/Eye-Refs-Windows.exe
+          cp "$(ls dist/*Setup*"$V".exe | head -1)" dist/Eye-Refs-Windows.exe
           gh release upload "v$V" dist/Eye-Refs-Windows.exe --clobber -R "$GITHUB_REPOSITORY"
       - uses: actions/upload-artifact@v4
         with: { name: eye-refs-windows, path: 'dist/*.exe' }
