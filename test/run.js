@@ -353,6 +353,7 @@ async function test(name, fn) {
   });
 
   await require('./boards.test.js')(test);
+  await require('./sync.test.js')(test);
   await require('./server.test.js')(test);
   console.log(`\n${passed} passed`);
 })();

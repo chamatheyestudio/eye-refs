@@ -11,7 +11,7 @@ const office = require('./office');
 const pluck = require('./pluck');
 const { Session } = require('./session');
 const { Cloud } = require('./cloud');
-const { Sync } = require('./sync');
+const { Sync, UNSENT } = require('./sync');
 const { pack, isPacked } = require('./pack');
 const boards = require('./boards');
 const { randCode, initialsFrom, firstNameFrom, cleanFolderName } = require('../shared/names');
@@ -235,7 +235,7 @@ async function retire(rec) {
     await fsp.rm(rec.dir, { recursive: true, force: true });
   });
 }
-const busyBoard = (b) => (session && session.rec.id === b.id) || importing.has(b.id) || mirror.busy(b.id);
+const busyBoard = (b) => (session && session.rec.id === b.id) || importing.has(b.id) || mirror.busy(b.id) || sending.has(b.id);
 const isOpenBoard = (b) => !!(session && session.rec.id === b.id);
 
 // Give a saved board its file in Documents/Eye Refs
@@ -364,6 +364,7 @@ async function allProjects(online = true) {
       tell({ id: null, title: p.name, body: `"${p.name}" is no longer shared with you.` });
     }
   }
+  if (listed) sendLeftovers(local.filter((p) => p.shared)).catch(() => {});
   const fresh = online && remote.length ? news(remote) : null;
   const byShared = new Map(local.filter((p) => p.shared).map((p) => [p.shared.id, p]));
   for (const r of remote) {
@@ -432,7 +433,7 @@ async function closeCurrent(keepId) {
   const s = session, y = sync;
   session = null; sync = null;
   if (s) { try { await s.flush(); } catch (_) {} }
-  if (y) { try { await y.stop(); } catch (_) {} }
+  if (y) { try { await y.stop(); } catch (_) {} sendRest(y); }
   if (s) { try { await s.close(); } catch (_) {} }
   if (s) { try { await mirror.settle(s.rec); } catch (_) {} } // the file gets the very last edit
   // Like PureRef: once it's closed, the board is just its file
@@ -567,6 +568,32 @@ async function openProject(rec) {
   settings.lastProject = rec.id;
   saveSettings();
   return { record: rec, items, status: s.status, readOnly: s.readOnly, mediaBase: pathToFileURL(s.mediaDir).href + '/' };
+}
+
+// Pieces reach teammates the moment they're added; their files follow. When a
+// shared board closes (or Eye Refs quits) before every file has gone up, the
+// rest keeps going in the background, and anything still left goes next launch.
+const sending = new Map(); // board id -> its leftover Sync
+function sendRest(y) {
+  const id = y.rec.id;
+  if (sending.has(id)) return;
+  y.events = { presence() {}, status() {} };
+  sending.set(id, y);
+  y.finish().catch(() => {}).finally(() => { if (sending.get(id) === y) sending.delete(id); });
+}
+let sendingLeftovers = false;
+async function sendLeftovers(local) {
+  if (sendingLeftovers) return;
+  sendingLeftovers = true;
+  try {
+    for (const p of local) {
+      if (!p.shared || !p.dir || isOpenBoard(p) || sending.has(p.id)) continue;
+      if (!(await exists(path.join(p.dir, UNSENT)))) continue;
+      const y = new Sync(cloud, p, me, { presence() {}, status() {} });
+      sending.set(p.id, y);
+      try { await y.sendUnsent(); } catch (_) {} finally { if (sending.get(p.id) === y) sending.delete(p.id); }
+    }
+  } finally { sendingLeftovers = false; }
 }
 
 function startSync(rec, forSession) {

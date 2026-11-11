@@ -305,7 +305,11 @@
     let label = clip.querySelector('.missing-label');
     if (!label) { label = el('div', { class: 'missing-label' }); clip.append(label); }
     const name = it.original || it.src;
-    label.textContent = state === 'downloading' ? `Downloading\n${name}` : state === 'here' ? `Can't show this file\n${name}` : `Missing\n${name}`;
+    // On a shared board, a piece can arrive before its file: the teammate who
+    // added it hasn't sent it yet. It comes in once their Eye Refs sends it.
+    const who = it.addedBy && it.addedBy !== B.me.name ? it.addedBy : null;
+    const waiting = B.project.shared && who;
+    label.textContent = state === 'downloading' ? `Downloading\n${name}` : state === 'here' ? `Can't show this file\n${name}` : waiting ? `Waiting for ${who} to send this\n${name}` : `Missing\n${name}`;
     label.style.whiteSpace = 'pre-line';
   }
 
