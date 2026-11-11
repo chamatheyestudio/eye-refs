@@ -1430,8 +1430,27 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     await sleep(600);
     const back = await win.evaluate(() => ({ id: Board.project.id, items: Board.live().length, x: Board.live()[0] && Board.live()[0].x }));
     expect('it opens again from the file with everything, edits included', back.id === legacy.id && back.items === 1 && back.x === 100, back);
+    // Copy here, paste into another board after this one has closed
+    await win.click('#canvas', { position: { x: 700, y: 120 } }).catch(() => {});
+    await win.keyboard.press('Control+a');
+    await win.keyboard.press('Control+c');
+    await sleep(400);
     await win.click('#tree >> text=Spring Campaign');
     await win.waitForFunction(() => document.querySelector('#tName').textContent === 'Spring Campaign', null, { timeout: 8000 }).catch(() => {});
+    await sleep(800);
+    const nBefore = await win.evaluate(() => Board.live().length);
+    await win.click('#canvas', { position: { x: 700, y: 120 } }).catch(() => {});
+    await win.keyboard.press('Control+v');
+    await win.waitForFunction((n) => Board.live().length > n, nBefore, { timeout: 15000 }).catch(() => {});
+    await sleep(1500);
+    const pasted = await win.evaluate((n) => {
+      const it = Board.live().slice(n).find((i) => i.type === 'image');
+      const el = it && document.querySelector(`[data-id="${it.id}"]`);
+      const img = el && el.querySelector('img');
+      return { added: Board.live().length - n, src: it && it.src, loaded: !!(img && img.naturalWidth > 0), missing: !!(el && /Missing/.test(el.textContent)) };
+    }, nBefore);
+    expect('pieces copied from a board that has closed paste with their pictures', pasted.added >= 1 && pasted.loaded && !pasted.missing, pasted);
+    await win.keyboard.press('Control+z');
   }
   // ---------- deleting boards ----------
   {

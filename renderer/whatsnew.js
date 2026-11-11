@@ -2,6 +2,12 @@
 // Newest first. Plain words, one line each.
 window.WHATS_NEW = [
   {
+    version: '1.0.35',
+    items: [
+      'Copy pieces from one board and paste them into another, with their pictures, videos and documents, even after the first board has closed.',
+    ],
+  },
+  {
     version: '1.0.34',
     items: [
       'Each board is now one .eyerefs file in Documents / Eye Refs, pictures, videos, PDFs and versions all inside. Double click it to open it, send it, back it up.',

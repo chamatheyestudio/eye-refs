@@ -2013,10 +2013,25 @@
   function copySelection(cut) {
     const ids = [...B.sel];
     if (!ids.length) return;
-    B.clip = { from: B.project.id, base: B.mediaBase, items: ids.map((id) => clone(B.items.get(id))) };
+    const items = ids.map((id) => clone(B.items.get(id)));
+    B.clip = { from: B.project.id, base: B.mediaBase, items };
+    // Keep the files aside now: the board they live in may close before the paste
+    const refs = clipRefs(items);
+    B.clip.stash = refs.length ? api.clipStash(B.project.id, refs).catch(() => ({})) : Promise.resolve({});
     B.clipMarker = 'eyerefs:' + uid();
     try { navigator.clipboard.writeText(B.clipMarker); } catch (_) {}
     if (cut) deleteSelection();
+  }
+
+  // Every file a piece points at
+  function clipRefs(items) {
+    const out = new Set();
+    for (const it of items) {
+      if (it.src) out.add(it.src);
+      if (it.preview) out.add(it.preview);
+      if (Array.isArray(it.videos)) for (const v of it.videos) if (v && v.src) out.add(v.src);
+    }
+    return [...out];
   }
 
   async function pasteInternal(at) {
@@ -2027,20 +2042,29 @@
     const bb = (() => { let x0 = Infinity, y0 = Infinity; for (const it of items) { x0 = Math.min(x0, it.x); y0 = Math.min(y0, it.y); } return { x: x0, y: y0 }; })();
     let srcMap = new Map();
     if (B.clip.from !== B.project.id) {
-      // Copy the files into this project's media folder
-      const srcs = [...new Set(items.filter((it) => it.src).map((it) => it.src))];
-      const paths = srcs.map((s) => decodeURIComponent(new URL(B.clip.base + encodeURIComponent(s)).pathname).replace(/^\/([A-Za-z]:)/, '$1'));
+      // Copy the files into this board: pictures, videos, documents, file
+      // previews and the videos inside slides
+      const kept = (await B.clip.stash) || {};
+      if (leftBoard(pid)) return;
+      const srcs = clipRefs(items);
+      const paths = srcs.map((s) => kept[s] || decodeURIComponent(new URL(B.clip.base + encodeURIComponent(s)).pathname).replace(/^\/([A-Za-z]:)/, '$1'));
       const res = await api.importPaths(pid, paths);
       if (leftBoard(pid)) return;
       if (res && res.error) return toast(res.error, true);
       srcs.forEach((s, i) => { if (res[i] && res[i].src) srcMap.set(s, res[i].src); });
+      const lost = srcs.filter((s) => !srcMap.has(s)).length;
+      if (lost) toast(lost === 1 ? "One file couldn't be copied over." : `${lost} files couldn't be copied over.`, true);
     }
     let z = maxZ();
     const changes = items.map((it) => {
       const f = clone(it);
       delete f.id; delete f._t; delete f._dev; delete f.by;
       f.x = p.x + (it.x - bb.x); f.y = p.y + (it.y - bb.y); f.z = ++z; f.deleted = false; f.created = Date.now(); f.addedBy = B.me.name;
-      if (f.src && srcMap.size) f.src = srcMap.get(f.src) || f.src;
+      if (srcMap.size) {
+        if (f.src) f.src = srcMap.get(f.src) || f.src;
+        if (f.preview) f.preview = srcMap.get(f.preview) || f.preview;
+        if (Array.isArray(f.videos)) f.videos = f.videos.map((v) => (v && v.src ? { ...v, src: srcMap.get(v.src) || v.src } : v));
+      }
       return { id: uid(), fields: f };
     });
     commit(changes);

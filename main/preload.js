@@ -57,6 +57,7 @@ contextBridge.exposeInMainWorld('eyerefs', {
   write: call('board:write'),
   flush: call('board:flush'),
   importPaths: call('media:importPaths'),
+  clipStash: call('clip:stash'),
   openMedia: call('media:open'),
   docCan: call('doc:can'),
   docGet: call('doc:get'),

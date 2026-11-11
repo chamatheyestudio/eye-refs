@@ -1075,6 +1075,27 @@ handle('media:importUrl', async (projectId, url) => {
   return tracked(s.rec, () => media.importUrl(s.mediaDir, url, me, knownHashes(), (u) => net.fetch(u)));
 });
 
+// Copying pieces keeps their files aside, so they still paste into another board
+// after the first one closes (a closed board is only its file).
+let clipSeq = 0;
+handle('clip:stash', async (projectId, srcs) => {
+  const s = sessionFor(projectId);
+  const root = path.join(app.getPath('userData'), 'clip');
+  await fsp.rm(root, { recursive: true, force: true }).catch(() => {});
+  const dir = path.join(root, String(++clipSeq));
+  await fsp.mkdir(dir, { recursive: true });
+  const out = {};
+  for (const src of [...new Set(srcs || [])].slice(0, 500)) {
+    let from;
+    try { from = media.inMedia(s.mediaDir, src); } catch (_) { continue; }
+    if (!(await exists(from))) continue;
+    const to = path.join(dir, path.basename(from));
+    try { await fsp.link(from, to); } catch (_) { try { await fsp.copyFile(from, to); } catch (_) { continue; } }
+    out[src] = to;
+  }
+  return out;
+});
+
 // What the system clipboard holds, for pastes the page itself can't see:
 // pictures copied in Keynote, Figma, Photoshop, screenshots, files copied in Finder.
 handle('clipboard:read', async () => {
