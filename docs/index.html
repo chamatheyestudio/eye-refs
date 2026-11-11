@@ -1,0 +1,689 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="icon" href="c/icon.png">
+<meta property="og:title" content="Eye Refs">
+<meta property="og:description" content="References that move. A free reference board for Mac and Windows.">
+<style>body{margin:0}[hidden]{display:none!important}</style>
+<title>Eye Refs</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="Eye Refs is a free reference board for Mac and Windows. Videos play frame by frame, decks and sheets open page by page, and the whole team works on one board.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..800&display=swap">
+<style>
+/* Layout: an Apple style product page. A local bar with one action, the name and a line over a live board,
+   a row of highlights, then one claim per screen, centred, each with its own working piece of the app. */
+:root {
+  --bg: #1C1C1B;
+  --tile: #272725;       /* cards and stages, one step up */
+  --tile-2: #343432;     /* controls inside them */
+  --ink: #EDEBE6;
+  --muted: #B0AEA8;      /* supporting copy, still readable */
+  --accent: #D7F04A;     /* Eye Refs lime: the action, and one column */
+  --accent-ink: #141600;
+  --face: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --s-hero: clamp(64px, 10vw, 144px);
+  --s-head: clamp(40px, 5.6vw, 80px);
+  --s-sub: clamp(21px, 1.9vw, 28px);
+  --s-body: 18px;
+  --s-small: 14px;
+  --gutter: clamp(20px, 3.4vw, 48px);
+  --ease-out: cubic-bezier(.22, 1, .36, 1);
+  --ease-expo: cubic-bezier(.16, 1, .3, 1);
+  --ease-in-out: cubic-bezier(.76, 0, .24, 1);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body { background: var(--bg); color: var(--ink); font-family: var(--face); font-size: var(--s-body); line-height: 1.5; -webkit-font-smoothing: antialiased; overflow-x: clip; }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 20; background: var(--bg); }
+a { color: inherit; }
+img, video { display: block; max-width: 100%; }
+p { margin: 0; }
+h1, h2, h3 { margin: 0; letter-spacing: -0.035em; line-height: 1.02; font-weight: 700; text-wrap: balance; }
+.frame { max-width: 1280px; margin: 0 auto; padding-left: max(var(--gutter), env(safe-area-inset-left, 0px)); padding-right: max(var(--gutter), env(safe-area-inset-right, 0px)); }
+.center { text-align: center; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 6px; }
+.tnum { font-variant-numeric: tabular-nums; }
+
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 9px; min-height: 48px; padding: 0 26px; border-radius: 999px; background: var(--accent); color: var(--accent-ink); font: 600 var(--s-body) var(--face); text-decoration: none; border: 0; cursor: pointer; transition: transform 140ms var(--ease-out), background-color 180ms ease; }
+.btn:hover { background: #E4F870; }
+.btn:active { transform: scale(.96); }
+.btn svg { width: 19px; height: 19px; flex: none; }
+.more { color: var(--accent); text-decoration: none; font-size: var(--s-body); display: inline-flex; align-items: center; gap: 4px; }
+.more:hover { text-decoration: underline; text-underline-offset: 4px; }
+
+/* local bar */
+.bar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg); }
+.bar .frame { height: 56px; display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.mark { display: flex; align-items: center; gap: 10px; font-weight: 650; font-size: var(--s-body); text-decoration: none; letter-spacing: -0.02em; }
+.mark img { width: 26px; height: 26px; }
+.bar nav { display: flex; align-items: center; gap: 26px; font-size: var(--s-small); }
+.bar nav a:not(.btn) { color: var(--muted); text-decoration: none; transition: color 180ms ease; }
+.bar nav a:not(.btn):hover { color: var(--ink); }
+.bar .btn { min-height: 32px; padding: 0 16px; font-size: var(--s-small); }
+@media (max-width: 760px) { .bar nav a:not(.btn) { display: none; } }
+
+/* hero */
+.hero { padding-block: clamp(56px, 7vw, 104px) 0; }
+.hero h1 { font-size: var(--s-hero); line-height: .95; letter-spacing: -0.05em; font-weight: 750; }
+.hero .tag { font-size: clamp(30px, 3.6vw, 52px); letter-spacing: -0.03em; line-height: 1.1; font-weight: 650; margin-top: 10px; color: var(--ink); }
+.hero .lede { font-size: var(--s-body); color: var(--muted); max-width: 52ch; margin: 18px auto 0; line-height: 1.5; }
+.hero .acts { margin-top: 30px; display: flex; flex-direction: column; align-items: center; gap: 14px; }
+.hero .acts small { font-size: var(--s-small); color: var(--muted); }
+.line { display: block; overflow: hidden; padding-bottom: .08em; margin-bottom: -.08em; }
+.line > span { display: block; }
+
+/* ===== live board (the product's own interface, data-ui) ===== */
+.stage { margin-top: clamp(48px, 6vw, 80px); }
+.board { position: relative; aspect-ratio: 16 / 9; border-radius: 22px; overflow: hidden; background-color: #131312; background-image: radial-gradient(#2c2c2a 1.1px, transparent 1.2px); /* taste-skill-ignore: the app canvas dot grid, inside data-ui */ background-size: 22px 22px; font-size: 13px; line-height: 1.35; user-select: none; -webkit-user-select: none; }
+.chrome { position: absolute; left: 14px; right: 14px; top: 14px; display: flex; justify-content: space-between; align-items: center; z-index: 6; }
+.pillui { display: flex; align-items: center; gap: 10px; height: 40px; padding: 0 14px 0 6px; background: #20201f; border: 1px solid #30302e; border-radius: 999px; }
+.pillui img { width: 28px; height: 28px; }
+.pillui b { font-weight: 600; white-space: nowrap; }
+.pillui .ok { color: #9a9a95; display: flex; align-items: center; gap: 5px; white-space: nowrap; }
+.pillui .ok svg { width: 13px; height: 13px; color: var(--accent); }
+.who { display: flex; align-items: center; gap: 10px; }
+.avs { display: flex; }
+.av { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; font-size: 11px; font-weight: 700; border: 2px solid #131312; margin-left: -8px; }
+.av:first-child { margin-left: 0; }
+.share { height: 40px; padding: 0 18px; border-radius: 999px; background: #EDEBE6; color: #121212; font-weight: 600; display: grid; place-items: center; }
+.item { position: absolute; border-radius: 2px; cursor: grab; transition: box-shadow 180ms ease; }
+.item img, .item video { width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
+.item.dragging { cursor: grabbing; z-index: 5; }
+.item:hover:not(.sel) { box-shadow: 0 0 0 1.5px rgba(215,240,74,.5); /* taste-skill-ignore: the app hover outline, inside data-ui */ }
+.sel { box-shadow: 0 0 0 2px var(--accent); /* taste-skill-ignore: the app selection outline, inside data-ui */ }
+.sel .h { position: absolute; width: 10px; height: 10px; border-radius: 50%; background: var(--accent); }
+.h.tl { left: -6px; top: -6px; } .h.tr { right: -6px; top: -6px; } .h.bl { left: -6px; bottom: -6px; } .h.br { right: -6px; bottom: -6px; }
+.vbar { display: flex; align-items: center; gap: 6px; background: #20201f; border: 1px solid #30302e; border-radius: 12px; padding: 6px; cursor: default; }
+.vid .vbar { position: absolute; top: calc(100% + 10px); left: 50%; transform: translateX(-50%); width: max(100%, 300px); }
+.vbar button { height: 30px; min-width: 30px; padding: 0 8px; border-radius: 8px; background: #2a2a28; color: var(--ink); border: 0; display: grid; place-items: center; font: 600 12px var(--face); cursor: pointer; transition: background-color 150ms ease, transform 140ms var(--ease-out); }
+.vbar button:hover { background: #353533; }
+.vbar button:active { transform: scale(.92); }
+.vbar button svg { width: 14px; height: 14px; }
+.vbar button[aria-pressed="true"] { background: #2f3510; color: var(--accent); }
+.scrub { flex: 1 1 40px; height: 30px; position: relative; cursor: pointer; min-width: 24px; margin: 0 4px; touch-action: none; }
+.scrub .tr { position: absolute; left: 0; right: 0; top: 13px; height: 4px; border-radius: 4px; background: #3a3a37; }
+.scrub .ph { position: absolute; top: 7px; width: 3px; height: 16px; border-radius: 2px; background: var(--accent); transform: translateX(-1px); }
+.fr { font-size: 12px; color: #c9c9c5; flex: none; min-width: 58px; text-align: right; padding: 0 8px 0 4px; white-space: nowrap; }
+.vbar { min-width: 0; overflow: hidden; }
+.vbar button { flex: none; }
+.sec { position: absolute; border-radius: 10px; background: rgba(255,255,255,.035); border: 1px solid #30302e; padding: 30px 10px 10px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; align-content: start; cursor: grab; }
+.sec > span { position: absolute; left: 10px; top: 8px; font-size: 12px; color: #c9c9c5; font-weight: 500; }
+.sec img { width: 100%; height: auto; border-radius: 1px; pointer-events: none; }
+.note { position: absolute; background: #EDEBE6; color: #1a1a1a; padding: 10px 12px; font-size: 12.5px; line-height: 1.35; border-radius: 2px; cursor: grab; }
+.cursor { position: absolute; z-index: 7; pointer-events: none; display: flex; align-items: flex-start; gap: 2px; animation: wander 16s ease-in-out infinite; }
+.cursor svg { width: 18px; height: 18px; color: #EDEBE6; }
+.cursor span { margin-top: 14px; background: #EDEBE6; color: #141413; font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 999px; }
+@keyframes wander { 0% { left: 70%; top: 70%; } 30% { left: 84%; top: 34%; } 55% { left: 66%; top: 26%; } 80% { left: 88%; top: 66%; } 100% { left: 70%; top: 70%; } }
+.hint { display: flex; gap: 8px 22px; align-items: center; justify-content: center; margin-top: 22px; font-size: var(--s-small); color: var(--muted); flex-wrap: wrap; }
+kbd { font: 600 13px var(--face); min-width: 30px; height: 28px; padding: 0 8px; display: inline-grid; place-items: center; border-radius: 7px; background: var(--tile-2); color: var(--ink); }
+@media (max-width: 760px) {
+  .board { aspect-ratio: auto; display: flex; flex-direction: column; gap: 12px; padding: 66px 12px 16px; }
+  .item, .sec, .note { position: relative !important; left: auto !important; top: auto !important; width: auto !important; }
+  .vid { width: 62% !important; margin: 0 auto 54px; }
+  .vid .vbar { width: calc(100vw - 2 * var(--gutter) - 24px); }
+  .vbar [data-act="back"], .vbar [data-act="fwd"] { display: none; }
+  .refs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .refs .item { aspect-ratio: 4 / 5 !important; }
+  .refs .item:nth-child(n+4) { display: none; }
+  .who .av:nth-child(n+3), .pillui .ok, .note, .cursor { display: none; }
+}
+@media (min-width: 761px) { .refs { display: contents; } }
+.hint.touch { display: none; }
+@media (hover: none), (max-width: 760px) { .hint.keys { display: none; } .hint.touch { display: flex; } .bar .btn { min-height: 40px; padding: 0 18px; } }
+
+/* sections */
+section { scroll-margin-top: 64px; }
+.block { padding-block: clamp(120px, 15vw, 210px) 0; }
+.head h2 { font-size: var(--s-head); }
+.head p { font-size: var(--s-sub); line-height: 1.35; color: var(--muted); margin: 20px auto 0; max-width: 34ch; letter-spacing: -0.01em; text-wrap: balance; }
+.head p b { color: var(--ink); font-weight: 600; }
+
+/* highlights */
+.bento { margin-top: 48px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-auto-rows: minmax(280px, auto); gap: 20px; }
+.hl { background: var(--tile); border-radius: 28px; overflow: hidden; display: flex; flex-direction: column; text-decoration: none; position: relative; transition: transform 300ms var(--ease-out); min-width: 0; }
+.hl:hover { transform: scale(1.01); }
+.hl.tall { grid-row: span 2; }
+.hl.wide { grid-column: span 2; }
+.hl .tx { padding: 30px 30px 0; display: flex; flex-direction: column; gap: 10px; position: relative; z-index: 1; }
+.hl h3 { font-size: var(--s-sub); letter-spacing: -0.025em; line-height: 1.12; }
+.hl p { color: var(--muted); font-size: var(--s-body); line-height: 1.45; max-width: 40ch; }
+.hl .md { margin-top: auto; position: relative; overflow: hidden; min-height: 150px; flex: 1; }
+.hl.tall .md { margin-top: 26px; }
+.hl .md > img, .hl .md > video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.hl.wide { flex-direction: row; }
+.hl.wide .tx { flex: 0 0 38%; padding-bottom: 30px; justify-content: flex-end; }
+.hl.wide .md { margin: 24px 24px 24px 0; border-radius: 12px; }
+.slides { position: absolute; inset: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-content: center; }
+.slides img { width: 100%; height: auto; border-radius: 6px; }
+.keysbig { display: flex; gap: 10px; padding: 26px 30px 30px; }
+.keysbig kbd { height: 60px; min-width: 60px; font-size: var(--s-sub); border-radius: 14px; }
+.winstack { position: absolute; inset: 22px 30px 30px; }
+.winstack .ed { position: absolute; inset: 0 26% 18% 0; border-radius: 10px; overflow: hidden; }
+.winstack .ed img { width: 100%; height: 100%; object-fit: cover; filter: grayscale(.5) brightness(.55); }
+.winstack .fl { position: absolute; inset: 26% 0 0 34%; border-radius: 10px; overflow: hidden; opacity: .8; outline: 2px solid var(--accent); }
+.winstack .fl img { width: 100%; height: 100%; object-fit: cover; }
+.people { display: flex; align-items: center; gap: 14px; padding: 26px 30px 30px; }
+.people .av { width: 60px; height: 60px; font-size: 18px; border: 4px solid var(--tile); margin-left: -18px; }
+.people .av:first-child { margin-left: 0; }
+.people small { color: var(--muted); font-size: var(--s-small); display: flex; align-items: center; gap: 8px; }
+.people small i { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+.filechip { display: flex; align-items: center; gap: 14px; padding: 26px 30px 30px; }
+.filechip img { width: 56px; height: 56px; }
+.filechip b { display: block; font-weight: 600; font-size: var(--s-body); }
+.filechip small { color: var(--muted); font-size: var(--s-small); }
+@media (max-width: 900px) { .bento { grid-template-columns: repeat(2, minmax(0, 1fr)); } .hl.wide { grid-column: span 2; } }
+@media (max-width: 600px) { .bento { grid-template-columns: 1fr; } .hl.wide { grid-column: auto; flex-direction: column; } .hl.wide .tx { flex: none; padding-bottom: 0; } .hl.wide .md { margin: 24px; min-height: 200px; } .hl.tall .md { min-height: 420px; } }
+
+/* video: Apple style held stage, the scroll walks the clip frame by frame */
+.pin { position: relative; height: 200vh; }
+.pin-in { position: sticky; top: 56px; height: calc(100svh - 56px); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 24px; }
+.pin-in h2 { font-size: clamp(36px, 4.4vw, 64px) !important; }
+.pin-in h2 { font-size: var(--s-head); text-align: center; }
+.player { background: var(--tile); border-radius: 22px; padding: 12px; display: flex; flex-direction: column; gap: 10px; width: min(360px, 100%, calc((100svh - 470px) * .8)); min-width: 260px; }
+.player video { width: 100%; aspect-ratio: 4 / 5; object-fit: cover; border-radius: 12px; background: #111; }
+.caps { position: relative; height: 3.2em; width: min(620px, 100%); text-align: center; font-size: var(--s-sub); letter-spacing: -0.01em; line-height: 1.35; }
+.caps p { position: absolute; inset: 0; color: var(--muted); opacity: 0; visibility: hidden; transform: translateY(12px); transition: opacity 400ms ease, transform 500ms var(--ease-out), visibility 0s linear 400ms; }
+.caps p.on { opacity: 1; visibility: visible; transform: none; transition-delay: 0s; }
+.caps b { color: var(--ink); font-weight: 600; }
+@media (max-width: 900px), (max-height: 700px) {
+  .pin { height: auto; }
+  .pin-in { position: static; height: auto; }
+  .caps { height: auto; display: flex; flex-direction: column; gap: 14px; }
+  .caps p { position: static; opacity: 1; visibility: visible; transform: none; }
+}
+
+/* files */
+.tabs { display: flex; justify-content: center; margin-top: 40px; }
+.seg { display: inline-flex; gap: 4px; padding: 4px; border-radius: 999px; background: var(--tile); flex-wrap: wrap; justify-content: center; }
+.seg button { min-height: 44px; padding: 0 20px; border-radius: 999px; border: 0; background: transparent; color: var(--muted); font: 600 var(--s-small) var(--face); cursor: pointer; transition: background-color 240ms var(--ease-out), color 180ms ease, transform 140ms var(--ease-out); }
+.seg button:hover { color: var(--ink); }
+.seg button:active { transform: scale(.96); }
+.seg button[aria-selected="true"] { background: var(--ink); color: #1C1C1B; }
+.docboard { margin-top: 36px; border-radius: 22px; padding: clamp(16px, 3vw, 36px); background-color: #131312; background-image: radial-gradient(#2c2c2a 1.1px, transparent 1.2px); /* taste-skill-ignore: the app canvas dot grid, inside data-ui */ background-size: 22px 22px; }
+.docsec { border-radius: 12px; background: rgba(255,255,255,.035); border: 1px solid #30302e; padding: 44px 16px 16px; position: relative; display: grid; gap: 12px; }
+.docsec > span { position: absolute; left: 16px; top: 13px; font-size: 13px; color: #c9c9c5; font-weight: 500; }
+.docsec.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.docsec.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.docsec.doc { grid-template-columns: minmax(0, 420px); justify-content: center; }
+.docsec.one { grid-template-columns: minmax(0, 1fr); max-width: 900px; margin: 0 auto; }
+.page { position: relative; }
+.page img { width: 100%; height: auto; }
+.page video { position: absolute; object-fit: cover; }
+.docnote { margin: 20px auto 0; text-align: center; font-size: var(--s-small); color: var(--muted); max-width: 64ch; }
+.docnote b { color: var(--ink); font-weight: 600; }
+.dealt .page { animation: deal 700ms var(--ease-expo) both; animation-delay: calc(var(--n, 0) * 70ms); }
+@keyframes deal { from { opacity: 0; transform: translateY(18px) scale(.97); } to { opacity: 1; transform: none; } }
+@media (max-width: 640px) { .docsec.two { grid-template-columns: 1fr; } .docsec.three { grid-template-columns: repeat(2, minmax(0, 1fr)); } .seg button { padding: 0 14px; } }
+
+/* together */
+.steps4 { margin-top: 56px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px; }
+.step { border-radius: 28px; padding: 28px 22px; display: flex; flex-direction: column; gap: 26px; min-height: 480px; justify-content: space-between; }
+.step:nth-child(1) { background: #242423; } .step:nth-child(2) { background: #2d2d2b; } .step:nth-child(3) { background: #383836; } .step:nth-child(4) { background: var(--accent); color: var(--accent-ink); }
+.step p { font-size: var(--s-sub); line-height: 1.2; letter-spacing: -0.02em; font-weight: 600; }
+.card { background: #1f1f1e; color: var(--ink); border: 1px solid #30302e; border-radius: 14px; overflow: hidden; font-size: 13px; transition: transform 240ms var(--ease-out); }
+.step:hover .card { transform: translateY(-6px); }
+.card .thumb { aspect-ratio: 16 / 10; display: grid; grid-template-columns: 2fr 1fr; grid-template-rows: 1fr 1fr; gap: 3px; background: #151514; padding: 8px; }
+.card .thumb img { width: 100%; height: 100%; object-fit: cover; }
+.card .thumb img:first-child { grid-row: span 2; }
+.card .body { padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 8px; }
+.card .t { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.card b { font-weight: 600; font-size: 14px; }
+.card .meta { color: #9a9a95; font-size: 12px; }
+.card .tag { font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 999px; background: #2c2c2a; color: #c9c9c5; white-space: nowrap; }
+.card .tag.live { background: #2f3510; color: var(--accent); }
+.card .ppl { display: flex; }
+.card .ppl .av { width: 24px; height: 24px; font-size: 10px; border-color: #1f1f1e; }
+.card .msg { background: #2a2a28; border-radius: 10px; padding: 8px 10px; font-size: 12px; }
+@media (max-width: 1000px) { .steps4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .steps4 { grid-template-columns: 1fr; } .step { min-height: 0; } }
+
+/* compare */
+.versus { margin-top: 56px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; max-width: 980px; margin-left: auto; margin-right: auto; }
+.vs { border-radius: 28px; padding: 36px 32px; background: var(--tile); display: flex; flex-direction: column; gap: 22px; }
+.vs.ours { background: var(--accent); color: var(--accent-ink); }
+.vs h3 { font-size: var(--s-sub); }
+.vs ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
+.vs li { display: grid; grid-template-columns: 22px 1fr; gap: 12px; font-size: var(--s-body); line-height: 1.35; }
+.vs li svg { width: 20px; height: 20px; margin-top: 1px; }
+.vs:not(.ours) li.no { color: var(--muted); }
+.vs .price { margin-top: auto; font-size: var(--s-sub); font-weight: 650; letter-spacing: -0.02em; }
+@media (max-width: 720px) { .versus { grid-template-columns: 1fr; } }
+
+/* shortcuts */
+.keys8 { margin: 56px auto 0; max-width: 980px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 20px; }
+.keys8 > div { display: flex; justify-content: space-between; align-items: center; gap: 16px; background: var(--tile); border-radius: 18px; padding: 16px 20px; min-width: 0; }
+.keys8 .kk { display: flex; gap: 6px; flex: none; }
+.keys8 kbd { height: 36px; min-width: 36px; font-size: var(--s-small); border-radius: 9px; }
+@media (max-width: 720px) { .keys8 { grid-template-columns: 1fr; } }
+
+/* download */
+.dl .icon { width: 108px; height: 108px; margin: 0 auto 30px; }
+.plats { margin: 56px auto 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; max-width: 980px; }
+.plat { border-radius: 28px; padding: 34px 30px; background: var(--tile); display: flex; flex-direction: column; gap: 18px; transition: transform 300ms var(--ease-out); }
+.plat.mine { background: #30331c; }
+.plat .top { display: flex; align-items: center; gap: 12px; }
+.plat .top svg { width: 30px; height: 30px; }
+.plat h3 { font-size: var(--s-sub); }
+.plat .you { margin-left: auto; font-size: var(--s-small); font-weight: 600; color: var(--accent); }
+.plat .req { font-size: var(--s-small); color: var(--muted); }
+.plat .row { display: flex; gap: 10px; flex-wrap: wrap; }
+.plat .btn.alt { background: var(--tile-2); color: var(--ink); }
+.plat .btn.alt:hover { background: #444447; }
+.plat ol { margin: 4px 0 0; padding-left: 20px; display: flex; flex-direction: column; gap: 8px; font-size: var(--s-small); color: var(--muted); line-height: 1.5; }
+.plat ol b { color: var(--ink); font-weight: 600; }
+@media (max-width: 720px) { .plats { grid-template-columns: 1fr; } }
+
+footer { padding-block: 22svh 34px; }
+footer .frame { display: grid; grid-template-columns: 1fr auto 1fr; gap: 14px; font-size: var(--s-small); color: var(--muted); }
+footer nav { display: flex; gap: 22px; }
+footer nav a { color: var(--ink); text-decoration: none; }
+footer nav a:hover { color: var(--accent); }
+footer .r { text-align: right; }
+@media (max-width: 700px) { footer .frame { grid-template-columns: 1fr; } footer .r { text-align: left; } footer nav { flex-wrap: wrap; } }
+
+/* motion: visible without script; script opts in. Each section arrives in its own way. */
+.js .hero .line > span { transform: translateY(105%); transition: transform 1000ms var(--ease-expo); }
+.js .hero.ready .line > span { transform: none; }
+.js .hero.ready .line.l2 > span { transition-delay: 110ms; }
+.js .hero .tag, .js .hero .lede, .js .hero .acts { opacity: 0; transform: translateY(16px); transition: opacity 700ms var(--ease-out) 380ms, transform 700ms var(--ease-out) 380ms; }
+.js .hero.ready .tag, .js .hero.ready .lede, .js .hero.ready .acts { opacity: 1; transform: none; }
+.js .hero.ready .lede { transition-delay: 440ms; } .js .hero.ready .acts { transition-delay: 520ms; }
+.js .board .piece { opacity: 0; transform: scale(.94); transition: opacity 600ms var(--ease-out), transform 700ms var(--ease-expo); transition-delay: calc(700ms + var(--n, 0) * 90ms); }
+.js .board.in .piece { opacity: 1; transform: none; }
+.js .rise { opacity: 0; transform: translateY(28px); transition: opacity 800ms var(--ease-out), transform 900ms var(--ease-expo); transition-delay: calc(var(--n, 0) * 80ms); }
+.js .rise.in { opacity: 1; transform: none; }
+.js .slide-in { opacity: 0; transform: translateX(80px); transition: opacity 700ms var(--ease-out), transform 1000ms var(--ease-expo); transition-delay: calc(var(--n, 0) * 90ms); }
+.js .slide-in.in { opacity: 1; transform: none; }
+.js .grow { opacity: 0; transform: scale(.94); transition: opacity 700ms var(--ease-out), transform 1000ms var(--ease-expo); transition-delay: calc(var(--n, 0) * 120ms); }
+.js .grow.in { opacity: 1; transform: none; }
+.js .wipe { clip-path: inset(100% 0 0 0 round 28px); transition: clip-path 1100ms var(--ease-in-out); transition-delay: calc(var(--n, 0) * 110ms); }
+.js .wipe.in { clip-path: inset(0 0 0 0 round 28px); }
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .js .hero .line > span, .js .hero .tag, .js .hero .lede, .js .hero .acts, .js .board .piece, .js .rise, .js .slide-in, .js .grow, .js .wipe { opacity: 1 !important; transform: none !important; clip-path: none !important; transition: none !important; }
+  .cursor { animation: none; left: 80%; top: 40%; }
+  .dealt .page { animation: none; }
+}
+</style>
+
+</head>
+<body>
+<header class="bar">
+  <div class="frame">
+    <a class="mark" href="#top"><img src="c/icon.png" alt="" width="26" height="26">Eye Refs</a>
+    <nav aria-label="Eye Refs">
+      <a href="#video">Video</a>
+      <a href="#files">Files</a>
+      <a href="#together">Together</a>
+      <a href="#shortcuts">Shortcuts</a>
+      <a class="btn" href="#get">Download</a>
+    </nav>
+  </div>
+</header>
+
+<main id="top">
+  <section class="hero frame center" aria-labelledby="h1">
+    <h1 id="h1"><span class="line l1"><span>Eye Refs</span></span></h1>
+    <p class="tag">References that move.</p>
+    <p class="lede">A free reference board for Mac and Windows. Videos play frame by frame, decks open page by page, and the whole team works on one board.</p>
+    <div class="acts">
+      <a class="btn" id="heroBtn" href="#get"><span id="heroIco"></span><span id="heroLabel">Download Eye Refs</span></a>
+      <small id="heroSub">Free for Mac and Windows</small>
+    </div>
+
+    <div class="stage">
+      <div class="board" id="board" data-ui role="group" aria-label="A working Eye Refs board. Drag the pieces. Select the video and use the arrow keys to step through it.">
+        <div class="chrome piece" style="--n:0">
+          <div class="pillui"><img src="c/icon.png" alt=""><b>Colour Study</b><span class="ok"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="m3 8.5 3 3 7-7"/></svg>Saved</span></div>
+          <div class="who"><div class="avs"><span class="av" style="background:#D7F04A;color:#141600">AT</span><span class="av" style="background:#EDEBE6;color:#141413">NO</span><span class="av" style="background:#5c6a12;color:#EDEBE6">SH</span></div><span class="share">Share</span></div>
+        </div>
+        <div class="refs">
+          <div class="item piece" style="--n:1;left:3%;top:15%;width:20%;aspect-ratio:1"><img src="c/warm.jpg" alt="A lime glow on matte black" width="900" height="1125"></div>
+          <div class="item piece" style="--n:2;left:3%;top:54.5%;width:14%;aspect-ratio:4/5"><img src="c/lime-sphere.jpg" alt="A lime sphere on charcoal" width="720" height="900"></div>
+          <div class="item piece" style="--n:3;left:18.5%;top:54.5%;width:13.5%;aspect-ratio:3/4"><img src="c/palette.jpg" alt="A six colour palette" width="675" height="900"></div>
+          <div class="item piece" style="--n:6;left:60%;top:62%;width:12%;aspect-ratio:3/4"><img src="c/pink-sphere.jpg" alt="A black sphere on lime" width="675" height="900"></div>
+          <div class="item piece" style="--n:7;left:73.5%;top:62%;width:10%;aspect-ratio:2/3"><img src="c/tiles.jpg" alt="Lime, grey and off white tiles" width="600" height="900"></div>
+        </div>
+        <div class="item vid sel piece" id="heroVid" style="--n:4;left:37%;top:15%;width:19%;aspect-ratio:9/16" tabindex="0" aria-label="Pendulum clip, selected">
+          <video src="c/flow.mp4" poster="c/flow.jpg" data-fps="25" muted playsinline loop autoplay preload="auto"></video>
+          <span class="h tl"></span><span class="h tr"></span><span class="h bl"></span><span class="h br"></span>
+          <div class="vbar" data-player>
+            <button type="button" data-act="play" aria-label="Pause"></button>
+            <button type="button" data-act="back" aria-label="Back one frame">←</button>
+            <button type="button" data-act="fwd" aria-label="Forward one frame">→</button>
+            <div class="scrub" data-scrub><div class="tr"></div><div class="ph"></div></div>
+            <span class="fr tnum" data-fr>Frame 1</span>
+          </div>
+        </div>
+        <div class="sec piece" style="--n:5;left:60%;top:15%;width:37%"><span>Colour Study</span>
+          <img src="c/deck-1.jpg" alt="" width="1100" height="618"><img src="c/deck-2.jpg" alt="" width="1100" height="618"><img src="c/deck-3.jpg" alt="" width="1100" height="618"><img src="c/deck-4.jpg" alt="" width="1100" height="618">
+        </div>
+        <div class="note piece" style="--n:8;left:85.5%;top:62%;width:11.5%">Warmer, like the lime one. Keep the grain.</div>
+        <div class="cursor" aria-hidden="true"><svg viewBox="0 0 16 16" fill="currentColor"><path d="M2 1l11 6.2-4.6 1.2L6.2 13z"/></svg><span>Matte Black</span></div>
+      </div>
+      <div class="hint keys"><span><kbd>←</kbd> <kbd>→</kbd> one frame</span><span><kbd>Shift</kbd> one second</span><span>Drag anything</span></div>
+      <div class="hint touch"><span>Tap play, or slide the line to scrub the video</span></div>
+    </div>
+  </section>
+
+  <!-- highlights -->
+  <section class="block frame" aria-labelledby="hlh">
+    <h2 id="hlh" class="rise head" style="font-size:var(--s-head)">Get the highlights.</h2>
+    <div class="bento">
+      <a class="hl tall grow" style="--n:0" href="#video"><div class="tx"><h3>Videos play.<br>Frame by frame.</h3><p>Any clip on the board, stepped with the arrow keys and looped where you need it.</p></div><div class="md"><video src="c/ball.mp4" poster="c/ball.jpg" muted playsinline loop autoplay preload="metadata" aria-label="A bouncing ball colour study"></video></div></a>
+      <a class="hl wide grow" style="--n:1" href="#files"><div class="tx"><h3>PowerPoint, Word, Excel and PDF.</h3><p>Every page lands on the board. Videos inside slides play where they sit.</p></div><div class="md"><div class="slides"><img src="c/deck-2.jpg" alt="Palette slide" width="1100" height="618" loading="lazy"><img src="c/deck-3.jpg" alt="Motion slide" width="1100" height="618" loading="lazy"></div></div></a>
+      <a class="hl grow" style="--n:2" href="#together"><div class="tx"><h3>One board. The whole team.</h3><p>Everyone's changes sync. Nothing gets overwritten.</p></div><div class="people" aria-hidden="true"><span class="avs" style="display:flex"><span class="av" style="background:#D7F04A;color:#141600">AT</span><span class="av" style="background:#EDEBE6;color:#141413">NO</span><span class="av" style="background:#5c6a12;color:#EDEBE6">SH</span></span><small><i></i>Synced</small></div></a>
+      <a class="hl grow" style="--n:3" href="#get"><div class="tx"><h3>Above your edit.</h3><p>Always on top and see through. Clicks can pass to the app underneath.</p></div><div class="md"><div class="winstack" aria-hidden="true"><div class="ed"><img src="c/cool.jpg" alt="" width="720" height="540" loading="lazy"></div><div class="fl"><img src="c/sunset.jpg" alt="" width="710" height="900" loading="lazy"></div></div></div></a>
+      <a class="hl wide grow" style="--n:4" href="#shortcuts"><div class="tx"><h3>PureRef's shortcuts.</h3><p>The same keys, so your hands already know Eye Refs.</p></div><div class="keysbig" aria-hidden="true" style="align-self:flex-end"><kbd class="mod">Ctrl</kbd><kbd>Shift</kbd><kbd>A</kbd></div></a>
+      <a class="hl grow" style="--n:5" href="#get"><div class="tx"><h3>One file per board.</h3><p>Pictures, videos and versions, all in one file.</p></div><div class="filechip" aria-hidden="true"><img src="c/icon.png" alt="" width="56" height="56"><span><b>Colour Study.eyerefs</b><small>Documents / Eye Refs</small></span></div></a>
+    </div>
+  </section>
+
+  <!-- video -->
+  <section id="video" class="block" aria-labelledby="vh">
+    <div class="pin frame" id="pin">
+      <div class="pin-in">
+        <h2 id="vh" class="rise">Every frame.<br>Right on the board.</h2>
+        <div class="player grow" data-ui>
+          <video id="pinVid" src="c/ball.mp4" poster="c/ball.jpg" data-fps="24" muted playsinline loop autoplay preload="auto" aria-label="A bouncing ball colour study"></video>
+          <div class="vbar" data-player>
+            <button type="button" data-act="play" aria-label="Pause"></button>
+            <button type="button" data-act="back" aria-label="Back one frame">←</button>
+            <button type="button" data-act="fwd" aria-label="Forward one frame">→</button>
+            <div class="scrub" data-scrub><div class="tr"></div><div class="ph"></div></div>
+            <span class="fr tnum" data-fr>Frame 1</span>
+          </div>
+        </div>
+        <div class="caps">
+          <p data-step="0" class="on"><b>It plays where it sits,</b> next to your stills.</p>
+          <p data-step="1"><b>Arrow keys step one frame.</b> Shift jumps a second.</p>
+          <p data-step="2"><b>Mark it with I and O,</b> and it loops just that part.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- files -->
+  <section id="files" class="block frame" aria-labelledby="fh">
+    <div class="head center">
+      <h2 id="fh" class="rise">The whole deck.<br>Every page.</h2>
+      <p class="rise" style="--n:1">Drop in <b>PowerPoint, Word, Excel or PDF</b>. Each page lands in a section named after the file.</p>
+    </div>
+    <div class="tabs rise" style="--n:2">
+      <div class="seg" role="tablist" aria-label="File type">
+        <button type="button" role="tab" aria-selected="true" aria-controls="docboard" data-doc="ppt">PowerPoint</button>
+        <button type="button" role="tab" aria-selected="false" aria-controls="docboard" data-doc="doc">Word</button>
+        <button type="button" role="tab" aria-selected="false" aria-controls="docboard" data-doc="xls">Excel</button>
+        <button type="button" role="tab" aria-selected="false" aria-controls="docboard" data-doc="pdf">PDF</button>
+      </div>
+    </div>
+    <div class="docboard rise" style="--n:3" id="docboard" role="tabpanel" data-ui>
+      <div class="docsec two" data-panel="ppt"><span>Colour Study</span>
+        <div class="page" style="--n:0"><img src="c/deck-1.jpg" alt="Title slide: Colour Study" width="1100" height="618" loading="lazy"></div>
+        <div class="page" style="--n:1"><img src="c/deck-2.jpg" alt="Palette slide with three pictures" width="1100" height="618" loading="lazy"></div>
+        <div class="page" style="--n:2"><img src="c/deck-3.jpg" alt="Motion slide, with its video playing on the slide" width="1100" height="618" loading="lazy"><video src="c/ribbons.mp4" poster="c/ribbons.jpg" style="left:5.25%;top:22.67%;width:57%;height:67.6%" muted playsinline loop autoplay preload="none" aria-hidden="true"></video></div>
+        <div class="page" style="--n:3"><img src="c/deck-4.jpg" alt="Shoot dates slide" width="1100" height="618" loading="lazy"></div>
+      </div>
+      <div class="docsec doc" data-panel="doc" hidden><span>Colour Brief</span>
+        <div class="page"><img src="c/brief.jpg" alt="The Colour Study shoot brief, one page" width="850" height="1100" loading="lazy"></div>
+      </div>
+      <div class="docsec one" data-panel="xls" hidden><span>Colour Shots</span>
+        <div class="page"><img src="c/sheet.jpg" alt="Shot list: six shots with colour and length" width="1400" height="599" loading="lazy"></div>
+      </div>
+      <div class="docsec three" data-panel="pdf" hidden><span>Lookbook</span>
+        <div class="page" style="--n:0"><img src="c/pdf-1.jpg" alt="Lookbook page 1" width="640" height="400" loading="lazy"></div>
+        <div class="page" style="--n:1"><img src="c/pdf-2.jpg" alt="Lookbook page 2" width="640" height="400" loading="lazy"></div>
+        <div class="page" style="--n:2"><img src="c/pdf-3.jpg" alt="Lookbook page 3" width="640" height="400" loading="lazy"></div>
+        <div class="page" style="--n:3"><img src="c/pdf-4.jpg" alt="Lookbook page 4" width="640" height="400" loading="lazy"></div>
+        <div class="page" style="--n:4"><img src="c/pdf-5.jpg" alt="Lookbook page 5" width="640" height="400" loading="lazy"></div>
+        <div class="page" style="--n:5"><img src="c/pdf-6.jpg" alt="Lookbook page 6" width="640" height="400" loading="lazy"></div>
+      </div>
+    </div>
+    <p class="docnote">Office files open with Microsoft Office or LibreOffice on your computer. <b>Cmd or Ctrl + E</b> pulls the videos out of a slide.</p>
+  </section>
+
+  <!-- together -->
+  <section id="together" class="block frame" aria-labelledby="th">
+    <div class="head center">
+      <h2 id="th" class="rise">One board.<br>The whole team.</h2>
+      <p class="rise" style="--n:1">Share a board and everyone works on the same one, from their own computer.</p>
+    </div>
+    <div class="steps4">
+      <div class="step wipe" style="--n:0">
+        <div class="card" data-ui><div class="thumb"><img src="c/warm.jpg" alt="" width="900" height="900" loading="lazy"><img src="c/lime-sphere.jpg" alt="" width="720" height="900" loading="lazy"><img src="c/palette.jpg" alt="" width="675" height="900" loading="lazy"></div>
+          <div class="body"><div class="t"><b>Colour Study</b><span class="tag">Only you</span></div><span class="meta">Colour Study.eyerefs · 14 pieces</span></div></div>
+        <p>It starts as one file on your computer.</p>
+      </div>
+      <div class="step wipe" style="--n:1">
+        <div class="card" data-ui><div class="thumb"><img src="c/warm.jpg" alt="" width="900" height="900" loading="lazy"><img src="c/lime-sphere.jpg" alt="" width="720" height="900" loading="lazy"><img src="c/palette.jpg" alt="" width="675" height="900" loading="lazy"></div>
+          <div class="body"><div class="t"><b>Colour Study</b><span class="tag">Shared</span></div><div class="t"><span class="ppl"><span class="av" style="background:#D7F04A;color:#141600">AT</span><span class="av" style="background:#EDEBE6;color:#141413">NO</span><span class="av" style="background:#5c6a12;color:#EDEBE6">SH</span></span><span class="meta">2 invited</span></div></div></div>
+        <p>Invite the team by name.</p>
+      </div>
+      <div class="step wipe" style="--n:2">
+        <div class="card" data-ui><div class="thumb"><img src="c/pink-sphere.jpg" alt="" width="675" height="900" loading="lazy"><img src="c/tiles.jpg" alt="" width="600" height="900" loading="lazy"><img src="c/circles.jpg" alt="" width="668" height="900" loading="lazy"></div>
+          <div class="body"><div class="t"><b>Colour Study</b><span class="tag">3 comments</span></div><div class="msg"><b>Nousaiba</b> Warmer, like the lime one.</div></div></div>
+        <p>Everyone adds, comments and saves versions.</p>
+      </div>
+      <div class="step wipe" style="--n:3">
+        <div class="card" data-ui><div class="thumb"><img src="c/pink-sphere.jpg" alt="" width="675" height="900" loading="lazy"><img src="c/tiles.jpg" alt="" width="600" height="900" loading="lazy"><img src="c/circles.jpg" alt="" width="668" height="900" loading="lazy"></div>
+          <div class="body"><div class="t"><b>Colour Study</b><span class="tag live">Synced just now</span></div><span class="meta">Everyone up to date · 21 pieces</span></div></div>
+        <p>It stays in sync. Nothing gets overwritten.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- compare -->
+  <section id="compare" class="block frame" aria-labelledby="ch">
+    <div class="head center">
+      <h2 id="ch" class="rise">Where PureRef stops.</h2>
+      <p class="rise" style="--n:1">Everything you like about PureRef, plus what it never did.</p>
+    </div>
+    <div class="versus">
+      <div class="vs ours grow" style="--n:0">
+        <h3>Eye Refs</h3>
+        <ul>
+          <li><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path d="m4 10.5 4 4 8-9"/></svg>Pictures and GIFs</li>
+          <li><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path d="m4 10.5 4 4 8-9"/></svg>Videos that play, frame by frame</li>
+          <li><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path d="m4 10.5 4 4 8-9"/></svg>PowerPoint, Word, Excel, PDF and Keynote, every page</li>
+          <li><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path d="m4 10.5 4 4 8-9"/></svg>Shared boards that sync, with comments and versions</li>
+          <li><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path d="m4 10.5 4 4 8-9"/></svg>PureRef's shortcuts</li>
+        </ul>
+      </div>
+      <div class="vs grow" style="--n:1">
+        <h3>PureRef</h3>
+        <ul>
+          <li><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path d="m4 10.5 4 4 8-9"/></svg>Pictures and GIFs</li>
+          <li class="no"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path d="M5 10h10"/></svg>No video</li>
+          <li class="no"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path d="M5 10h10"/></svg>No decks or documents</li>
+          <li class="no"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path d="M5 10h10"/></svg>Send the file around</li>
+          <li><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path d="m4 10.5 4 4 8-9"/></svg>The original shortcuts</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- shortcuts -->
+  <section id="shortcuts" class="block frame" aria-labelledby="sh">
+    <div class="head center">
+      <h2 id="sh" class="rise">Same keys.<br>Nothing to relearn.</h2>
+      <p class="rise" style="--n:1">Eye Refs uses PureRef's shortcuts, so your hands already know it.</p>
+    </div>
+    <div class="keys8">
+      <div class="rise" style="--n:0"><span>Always on top</span><span class="kk"><kbd class="mod">Ctrl</kbd><kbd>Shift</kbd><kbd>A</kbd></span></div>
+      <div class="rise" style="--n:1"><span>Click through</span><span class="kk"><kbd class="mod">Ctrl</kbd><kbd>T</kbd></span></div>
+      <div class="rise" style="--n:2"><span>Step a video frame</span><span class="kk"><kbd>←</kbd><kbd>→</kbd></span></div>
+      <div class="rise" style="--n:3"><span>Loop part of a video</span><span class="kk"><kbd>I</kbd><kbd>O</kbd></span></div>
+      <div class="rise" style="--n:0"><span>Crop</span><span class="kk"><kbd>Hold C</kbd></span></div>
+      <div class="rise" style="--n:1"><span>Arrange</span><span class="kk"><kbd class="mod">Ctrl</kbd><kbd>P</kbd></span></div>
+      <div class="rise" style="--n:2"><span>Pull media out of a slide</span><span class="kk"><kbd class="mod">Ctrl</kbd><kbd>E</kbd></span></div>
+      <div class="rise" style="--n:3"><span>Hide the controls</span><span class="kk"><kbd>Tab</kbd></span></div>
+    </div>
+  </section>
+
+  <!-- download -->
+  <section id="get" class="block frame dl" aria-labelledby="gh">
+    <div class="head center">
+      <img class="icon rise" src="c/icon.png" alt="" width="108" height="108">
+      <h2 id="gh" class="rise" style="--n:1">Get Eye Refs.</h2>
+      <p class="rise" style="--n:2">Free. Sign in with your email and a six digit code. It updates itself from then on.</p>
+    </div>
+    <div class="plats">
+      <div class="plat grow" id="plat-mac" style="--n:0">
+        <div class="top"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16.37 12.6c-.02-2.3 1.88-3.4 1.97-3.46-1.07-1.57-2.74-1.78-3.33-1.8-1.42-.15-2.77.83-3.49.83-.72 0-1.83-.81-3.01-.79-1.55.02-2.98.9-3.78 2.29-1.61 2.8-.41 6.94 1.16 9.21.77 1.11 1.68 2.36 2.88 2.31 1.16-.05 1.59-.75 2.99-.75 1.4 0 1.79.75 3.01.72 1.24-.02 2.03-1.13 2.79-2.25.88-1.29 1.24-2.54 1.26-2.6-.03-.01-2.42-.93-2.45-3.71zM14.07 5.85c.64-.77 1.07-1.85.95-2.92-.92.04-2.03.61-2.69 1.38-.59.68-1.1 1.77-.96 2.82 1.02.08 2.06-.52 2.7-1.28z"/></svg><h3>Mac</h3><span class="you" id="you-mac" hidden>Your computer</span></div>
+        <p class="req">macOS 11 or later</p>
+        <div class="row"><a class="btn" id="dl-arm" href="https://github.com/chamatheyestudio/eye-refs/releases/latest/download/Eye-Refs-Mac-Apple-Silicon.dmg">Apple chip</a><a class="btn alt" id="dl-intel" href="https://github.com/chamatheyestudio/eye-refs/releases/latest/download/Eye-Refs-Mac-Intel.dmg">Intel</a></div>
+        <ol><li>Open the download and drag Eye Refs into Applications.</li><li>The first time, open <b>System Settings</b>, then <b>Privacy &amp; Security</b>, and click <b>Open Anyway</b>.</li></ol>
+      </div>
+      <div class="plat grow" id="plat-win" style="--n:1">
+        <div class="top"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 5.1 10.4 4v7.1H3V5.1zm8.3-1.2L21 2.5v8.6h-9.7V3.9zM3 12.9h7.4V20L3 18.9v-6zm8.3 0H21v8.6l-9.7-1.4v-7.2z"/></svg><h3>Windows</h3><span class="you" id="you-win" hidden>Your computer</span></div>
+        <p class="req">Windows 10 or 11, 64 bit</p>
+        <div class="row"><a class="btn" id="dl-win" href="https://github.com/chamatheyestudio/eye-refs/releases/latest/download/Eye-Refs-Windows.exe">Download for Windows</a></div>
+        <ol><li>Run the installer. Eye Refs opens when it's done.</li><li>If Windows says it protected your PC, click <b>More info</b>, then <b>Run anyway</b>.</li></ol>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="frame">
+    <span>Eye Refs, by Matte Black</span>
+    <nav aria-label="Footer"><a href="#video">Video</a><a href="#files">Files</a><a href="#together">Together</a><a href="#get">Download</a></nav>
+    <span class="r">2026 · For EyeStudio</span>
+  </div>
+</footer>
+
+<script>
+document.documentElement.classList.add('js');
+(function () {
+  var REL = 'https://github.com/chamatheyestudio/eye-refs/releases/latest/download/';
+  var URL = { arm: REL + 'Eye-Refs-Mac-Apple-Silicon.dmg', intel: REL + 'Eye-Refs-Mac-Intel.dmg', win: REL + 'Eye-Refs-Windows.exe' };
+  var APPLE = document.querySelector('#plat-mac svg').outerHTML, WIN = document.querySelector('#plat-win svg').outerHTML;
+  var reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* ---------- which computer ---------- */
+  var ua = navigator.userAgent || '', plat = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || '';
+  var os = 'other';
+  if (/iPhone|iPad|iPod|Android/i.test(ua) || (/Mac/i.test(plat) && navigator.maxTouchPoints > 1)) os = 'mobile';
+  else if (/Win/i.test(plat) || /Windows/i.test(ua)) os = 'win';
+  else if (/Mac/i.test(plat) || /Macintosh/i.test(ua)) os = 'mac';
+  function chipOf() {
+    try { var c = document.createElement('canvas'), gl = c.getContext('webgl'), x = gl && gl.getExtension('WEBGL_debug_renderer_info');
+      if (x && /Intel|AMD|Radeon|NVIDIA/i.test(String(gl.getParameter(x.UNMASKED_RENDERER_WEBGL)))) return 'intel'; } catch (e) {}
+    return 'arm';
+  }
+  var heroBtn = document.getElementById('heroBtn'), heroLabel = document.getElementById('heroLabel'), heroIco = document.getElementById('heroIco'), heroSub = document.getElementById('heroSub');
+  if (os === 'mac') {
+    var chip = chipOf();
+    heroBtn.href = URL[chip]; heroIco.innerHTML = APPLE; heroLabel.textContent = 'Download for Mac';
+    heroSub.innerHTML = (chip === 'arm' ? 'For Macs with an Apple chip. ' : 'For Intel Macs. ') + '<a class="more" href="#get">Other downloads</a>';
+    document.getElementById('plat-mac').classList.add('mine'); document.getElementById('you-mac').hidden = false;
+    if (chip === 'intel') { var a = document.getElementById('dl-arm'), b = document.getElementById('dl-intel'); a.className = 'btn alt'; b.className = 'btn'; b.parentNode.insertBefore(b, a); }
+  } else if (os === 'win') {
+    heroBtn.href = URL.win; heroIco.innerHTML = WIN; heroLabel.textContent = 'Download for Windows';
+    heroSub.innerHTML = 'Windows 10 or 11. <a class="more" href="#get">Other downloads</a>';
+    document.getElementById('plat-win').classList.add('mine'); document.getElementById('you-win').hidden = false;
+  } else if (os === 'mobile') {
+    heroLabel.textContent = 'Get it for your computer'; heroSub.textContent = 'Eye Refs runs on Mac and Windows.';
+  }
+
+  /* ---------- video players: frame stepping, like the app ---------- */
+  var PAUSE = '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><rect x="3" y="2" width="3.4" height="12" rx="1"/><rect x="9.6" y="2" width="3.4" height="12" rx="1"/></svg>';
+  var PLAY = '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M4 2.5v11l9-5.5z"/></svg>';
+  var players = [];
+  document.querySelectorAll('[data-player]').forEach(function (bar) {
+    var host = bar.closest('.vid') || bar.closest('.player'), v = host.querySelector('video');
+    var fps = +v.dataset.fps || 24, ph = bar.querySelector('.ph'), fr = bar.querySelector('[data-fr]'), playB = bar.querySelector('[data-act="play"]'), scrub = bar.querySelector('[data-scrub]');
+    var P = { v: v, host: host, fps: fps };
+    function total() { return Math.max(1, Math.round((v.duration || 8) * fps)); }
+    function frameOf() { return Math.min(total(), Math.floor(v.currentTime * fps + 0.001) + 1); }
+    function paint() {
+      ph.style.left = (Math.min(1, v.currentTime / (v.duration || 8)) * 100) + '%';
+      fr.textContent = frameOf() + ' / ' + total();
+      var want = v.paused ? PLAY : PAUSE; if (playB.dataset.s !== String(v.paused)) { playB.innerHTML = want; playB.dataset.s = String(v.paused); playB.setAttribute('aria-label', v.paused ? 'Play' : 'Pause'); }
+    }
+    (function loop() { paint(); requestAnimationFrame(loop); })();
+    P.step = function (n) { v.pause(); var f = Math.max(0, Math.min(total() - 1, frameOf() - 1 + n)); v.currentTime = (f + 0.5) / fps; };
+    P.toggle = function () { if (v.paused) v.play().catch(function () {}); else v.pause(); };
+    playB.addEventListener('click', P.toggle);
+    bar.querySelector('[data-act="back"]').addEventListener('click', function () { P.step(-1); });
+    bar.querySelector('[data-act="fwd"]').addEventListener('click', function () { P.step(1); });
+    var drag = false;
+    function seek(e) { var r = scrub.getBoundingClientRect(), t = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)); v.pause(); v.currentTime = Math.min((v.duration || 8) - 0.02, t * (v.duration || 8)); }
+    scrub.addEventListener('pointerdown', function (e) { drag = true; scrub.setPointerCapture(e.pointerId); seek(e); });
+    scrub.addEventListener('pointermove', function (e) { if (drag) seek(e); });
+    scrub.addEventListener('pointerup', function () { drag = false; });
+    bar.addEventListener('pointerdown', function (e) { e.stopPropagation(); });
+    if (reduce) { v.removeAttribute('autoplay'); v.pause(); }
+    players.push(P);
+  });
+  if (reduce) document.querySelectorAll('video[autoplay]').forEach(function (v) { v.removeAttribute('autoplay'); v.pause(); });
+  var hero = players[0], pinP = players[1], active = hero;
+  document.addEventListener('keydown', function (e) {
+    if (/INPUT|TEXTAREA/.test((e.target && e.target.tagName) || '')) return;
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    var r = active.host.getBoundingClientRect(); if (r.bottom < 0 || r.top > innerHeight) return;
+    e.preventDefault(); active.step((e.key === 'ArrowRight' ? 1 : -1) * (e.shiftKey ? active.fps : 1));
+  });
+  players.forEach(function (P) { P.host.addEventListener('pointerdown', function () { active = P; }); });
+  if (pinP) new IntersectionObserver(function (es) { es.forEach(function (en) { active = en.isIntersecting ? pinP : hero; }); }, { threshold: 0.4 }).observe(pinP.host);
+
+  /* ---------- drag pieces on the hero board ---------- */
+  var board = document.getElementById('board');
+  board.querySelectorAll('.item, .note, .sec').forEach(function (el) {
+    el.addEventListener('pointerdown', function (e) {
+      if (e.pointerType === 'touch' || innerWidth <= 760 || e.button !== 0) return;
+      var br = board.getBoundingClientRect(), sx = e.clientX, sy = e.clientY, l0 = parseFloat(el.style.left), t0 = parseFloat(el.style.top);
+      el.classList.add('dragging'); el.setPointerCapture(e.pointerId);
+      function mv(ev) { el.style.left = (l0 + (ev.clientX - sx) / br.width * 100) + '%'; el.style.top = (t0 + (ev.clientY - sy) / br.height * 100) + '%'; }
+      function up() { el.classList.remove('dragging'); el.removeEventListener('pointermove', mv); el.removeEventListener('pointerup', up); }
+      el.addEventListener('pointermove', mv); el.addEventListener('pointerup', up);
+    });
+  });
+
+  /* ---------- the held video: the scroll walks it frame by frame ---------- */
+  var pin = document.getElementById('pin'), caps = pin.querySelectorAll('[data-step]'), lastStep = -1;
+  function held() { return innerWidth > 900 && innerHeight > 700; }
+  function onScroll() {
+    if (!held() || !pinP) return;
+    var r = pin.getBoundingClientRect(), span = r.height - (innerHeight - 56);
+    var p = Math.max(0, Math.min(0.999, -r.top / span)), step = Math.floor(p * 3);
+    caps.forEach(function (c, i) { c.classList.toggle('on', i === step); });
+    var v = pinP.v;
+    if (step === 1) { v.pause(); var local = p * 3 - 1, n = Math.round((v.duration || 8) * pinP.fps); v.currentTime = (Math.floor(local * (n - 1)) + 0.5) / pinP.fps; }
+    else if (step !== lastStep && !reduce) v.play().catch(function () {});
+    lastStep = step;
+  }
+  addEventListener('scroll', onScroll, { passive: true }); onScroll();
+
+  /* ---------- files ---------- */
+  var tabs = document.querySelectorAll('[data-doc]');
+  tabs.forEach(function (t) { t.addEventListener('click', function () {
+    tabs.forEach(function (x) { x.setAttribute('aria-selected', String(x === t)); });
+    document.querySelectorAll('[data-panel]').forEach(function (p) {
+      var on = p.dataset.panel === t.dataset.doc; p.hidden = !on;
+      if (on) { p.classList.remove('dealt'); void p.offsetWidth; p.classList.add('dealt'); p.querySelectorAll('video').forEach(function (vv) { if (!reduce) vv.play().catch(function () {}); }); }
+    });
+  }); });
+
+  if (os === 'mac') document.querySelectorAll('kbd.mod').forEach(function (k) { k.textContent = 'Cmd'; });
+
+  /* ---------- arrivals ---------- */
+  var heroEl = document.querySelector('.hero');
+  requestAnimationFrame(function () { requestAnimationFrame(function () { heroEl.classList.add('ready'); board.classList.add('in'); }); });
+  var sel = '.rise, .slide-in, .grow, .wipe';
+  if ('IntersectionObserver' in window && !reduce) {
+    var io = new IntersectionObserver(function (es) { es.forEach(function (en) { if (en.isIntersecting) { en.target.classList.add('in'); io.unobserve(en.target); } }); }, { rootMargin: '0px 0px -10% 0px' });
+    document.querySelectorAll(sel).forEach(function (el) { io.observe(el); });
+  } else document.querySelectorAll(sel).forEach(function (el) { el.classList.add('in'); });
+  setTimeout(function () { document.querySelectorAll(sel).forEach(function (el) { var r = el.getBoundingClientRect(); if (r.top < innerHeight && r.bottom > 0) el.classList.add('in'); }); }, 80);
+  document.querySelector('[data-panel="ppt"]').classList.add('dealt');
+})();
+</script>
+
+</body>
+</html>
