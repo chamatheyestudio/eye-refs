@@ -2,6 +2,13 @@
 // Newest first. Plain words, one line each.
 window.WHATS_NEW = [
   {
+    version: '1.0.38',
+    items: [
+      'Your list only shows boards you made or were added to.',
+      'Leaving a shared board deletes nothing. It stays in Drive for everyone, and the owner can add you back.',
+    ],
+  },
+  {
     version: '1.0.37',
     items: [
       'Pluck and LibreOffice now set up from inside Eye Refs. One click, and they download and install in the background. Find it in Settings any time.',
