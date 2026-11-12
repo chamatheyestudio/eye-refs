@@ -1258,7 +1258,7 @@
       ? `It moves to your computer's ${IS_MAC ? 'Trash' : 'Recycle Bin'}, so you can still get it back from there.`
       : owns
         ? `Everyone it's shared with loses it too. It goes to the trash in ${p.mine ? 'your' : "the owner's"} Google Drive, where it can be brought back for 30 days.`
-        : `You leave the board and it's removed from this computer. Everyone else keeps it, and the owner can share it with you again.`;
+        : `It comes off your list, and that's all. Nothing is deleted: the board and its files stay in Drive for everyone, and the owner can add you back any time.`;
     const go = async (btn, close) => {
       btn.disabled = true; btn.textContent = shared && !owns ? 'Leaving' : 'Deleting';
       const isOpen = S.current && S.current.id === p.id;
@@ -1273,7 +1273,7 @@
       rescan(); renderStart();
     };
     openModal((close) => {
-      const del = el('button', { class: 'btn danger', text: shared && !owns ? 'Leave and remove' : shared ? 'Delete for everyone' : 'Delete' });
+      const del = el('button', { class: 'btn danger', text: shared && !owns ? 'Leave' : shared ? 'Delete for everyone' : 'Delete' });
       del.onclick = () => go(del, close);
       return [
         el('h2', { text: title }),

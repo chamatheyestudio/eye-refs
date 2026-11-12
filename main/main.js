@@ -354,6 +354,14 @@ async function allProjects(online = true) {
   for (const f of await looseNow()) if (!seenIds.has(f.id)) { seenIds.add(f.id); local.push(f); }
   let remote = [], listed = false;
   if (online) { try { remote = await cloud.call('projects.list', {}, 20000); listed = Array.isArray(remote); } catch (_) { remote = []; } }
+  // Only boards you own or were added to. An admin can reach every board on the
+  // server, but those aren't shared with you, so they stay off your list
+  // (a copy already on this computer is hidden, never removed).
+  const notMine = new Set(listed ? remote.filter((r) => r.role === 'admin').map((r) => r.id) : []);
+  if (notMine.size) {
+    remote = remote.filter((r) => !notMine.has(r.id));
+    for (const p of [...local]) if (p.shared && notMine.has(p.shared.id) && !isOpenBoard(p)) local.splice(local.indexOf(p), 1);
+  }
   // A shared board that's gone from the server (the owner stopped sharing it,
   // deleted it, or took you off it) leaves your list. Its copy is kept in the
   // app's Deleted boards folder, never destroyed.
@@ -724,9 +732,13 @@ handle('projects:delete', (id, mode) => serial(async () => {
         if (!p.mine) return { error: 'Only the owner can delete this board for everyone.' };
         await cloud.call('projects.delete', { id: p.shared.id });
       } else if (!p.mine) {
+        // Leaving only takes you off the board. Nothing in Drive is touched, and
+        // the copy on this computer is kept in the Deleted boards folder.
         await cloud.call('projects.remove', { id: p.shared.id, email: me.email });
         settings.left = { ...(settings.left || {}), [p.shared.id]: Date.now() };
         saveSettings();
+        if (p.dir) await retire(p).catch(() => {});
+        return { ok: true };
       } else return { error: 'Choose how to delete a shared board.' };
     } catch (e) {
       return { error: (e && e.message) || "Couldn't reach the server. Check your connection and try again." };
